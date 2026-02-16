@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PrixMalin - Comparateur de prix supermarchés</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <h1>PrixMalin</h1>
+            <p class="subtitle">Comparez les prix des supermarchés français</p>
+        </div>
+    </header>
+
+    <main>
+        <section class="search-section">
+            <form id="search-form" class="search-form">
+                <div class="search-bar">
+                    <input
+                        type="text"
+                        id="search-input"
+                        placeholder="Rechercher un produit (ex: Huile de tournesol, Farine, Eau...)"
+                        autocomplete="off"
+                        required
+                    >
+                    <button type="submit" id="search-btn">Rechercher</button>
+                </div>
+            </form>
+        </section>
+
+        <section id="loading" class="loading hidden">
+            <div class="spinner"></div>
+            <p>Recherche en cours dans les supermarchés...</p>
+        </section>
+
+        <section id="errors" class="errors hidden"></section>
+
+        <section id="results-section" class="results-section hidden">
+            <div class="results-header">
+                <h2>Résultats pour "<span id="query-display"></span>"</h2>
+                <span id="results-count" class="results-count"></span>
+            </div>
+            <div id="results-grid" class="results-grid"></div>
+        </section>
+
+        <section id="no-results" class="no-results hidden">
+            <p>Aucun résultat trouvé. Essayez un autre terme de recherche.</p>
+        </section>
+    </main>
+
+    <footer>
+        <p>PrixMalin &mdash; Comparateur de prix à usage personnel</p>
+    </footer>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

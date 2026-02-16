@@ -1,0 +1,178 @@
+import asyncio
+import logging
+import os
+import re
+from urllib.parse import urlparse
+
+from playwright.async_api import async_playwright
+
+from backend.models import ScrapedProduct
+from backend.scrapers.base import BaseScraper
+
+logger = logging.getLogger(__name__)
+
+SEARCH_URL = "https://www.aldi.fr/recherche.html?query={query}"
+
+
+def _get_proxy_config() -> dict | None:
+    """Build Playwright proxy config from environment variables."""
+    proxy_url = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
+    if not proxy_url:
+        return None
+    parsed = urlparse(proxy_url)
+    config: dict = {"server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port}"}
+    if parsed.username:
+        config["username"] = parsed.username
+    if parsed.password:
+        config["password"] = parsed.password
+    return config
+
+
+class AldiScraper(BaseScraper):
+    store_name = "Aldi"
+
+    async def search(self, query: str) -> list[ScrapedProduct]:
+        url = SEARCH_URL.format(query=query)
+        products: list[ScrapedProduct] = []
+
+        proxy = _get_proxy_config()
+
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-dev-shm-usage"],
+                proxy=proxy,
+            )
+            page = await browser.new_page(
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                ),
+                locale="fr-FR",
+                ignore_https_errors=True,
+            )
+
+            try:
+                await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+
+                # Accept cookies if banner appears
+                try:
+                    btn = page.locator("#onetrust-accept-btn-handler")
+                    await btn.click(timeout=4000)
+                    await asyncio.sleep(0.5)
+                except Exception:
+                    pass
+
+                # Wait for product tiles (loaded via Algolia client-side)
+                try:
+                    await page.wait_for_selector(".product-tile", timeout=12000)
+                except Exception:
+                    logger.warning("Aldi: no product tiles for '%s'", query)
+                    await browser.close()
+                    return products
+
+                await asyncio.sleep(1)
+
+                tiles = await page.query_selector_all(".product-tile")
+
+                for tile in tiles:
+                    try:
+                        product = await self._parse_tile(tile)
+                        if product:
+                            products.append(product)
+                    except Exception as e:
+                        logger.debug("Aldi: tile parse error: %s", e)
+
+            except Exception as e:
+                logger.error("Aldi scraper error: %s", e)
+            finally:
+                await browser.close()
+
+        return products
+
+    async def _parse_tile(self, tile) -> ScrapedProduct | None:
+        # Product name
+        name_el = await tile.query_selector(
+            ".product-tile__content__upper__product-name"
+        )
+        if not name_el:
+            return None
+        name = (await name_el.inner_text()).strip()
+        if not name:
+            return None
+
+        # Brand
+        brand_el = await tile.query_selector(
+            ".product-tile__content__upper__brand-name"
+        )
+        if brand_el:
+            brand = (await brand_el.inner_text()).strip()
+            if brand:
+                name = f"{name} - {brand}"
+
+        # Price
+        price = None
+        price_el = await tile.query_selector("[data-testid$='tag-current-price-amount']")
+        if not price_el:
+            price_el = await tile.query_selector(".tag__label--price")
+        if price_el:
+            price_text = (await price_el.inner_text()).strip()
+            price = self._parse_price(price_text)
+
+        # Price per unit (e.g. "KG = 0.69")
+        price_per_unit = None
+        unit_el = await tile.query_selector(".tag__marker--base-price")
+        if unit_el:
+            price_per_unit = (await unit_el.inner_text()).strip()
+
+        # Sales unit (e.g. "1KG")
+        sales_unit_el = await tile.query_selector(".tag__marker--salesunit")
+        if sales_unit_el:
+            sales_unit = (await sales_unit_el.inner_text()).strip()
+            if price_per_unit:
+                price_per_unit = f"{price_per_unit} ({sales_unit})"
+            else:
+                price_per_unit = sales_unit
+
+        # Image
+        image_url = None
+        img = await tile.query_selector(".product-tile__image-section img")
+        if img:
+            image_url = await img.get_attribute("src")
+
+        # Product URL
+        product_url = ""
+        link = await tile.query_selector("a[href]")
+        if link:
+            href = await link.get_attribute("href")
+            if href:
+                product_url = (
+                    href
+                    if href.startswith("http")
+                    else f"https://www.aldi.fr{href}"
+                )
+
+        return ScrapedProduct(
+            name=name,
+            price=price,
+            price_per_unit=price_per_unit,
+            image_url=image_url,
+            product_url=product_url,
+            store_name=self.store_name,
+        )
+
+    @staticmethod
+    def _parse_price(text: str) -> float | None:
+        """Parse a price string like '2,49' or '0.69' into a float."""
+        text = text.replace("\xa0", " ").strip()
+        match = re.search(r"(\d+)[.,](\d{1,2})", text)
+        if match:
+            return float(f"{match.group(1)}.{match.group(2)}")
+        match = re.search(r"(\d+)", text)
+        if match:
+            return float(match.group(1))
+        return None
+
+    async def setup_location(self, postal_code: str) -> bool:
+        return True
