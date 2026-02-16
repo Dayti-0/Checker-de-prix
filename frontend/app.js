@@ -9,6 +9,20 @@ const resultsCount = document.getElementById("results-count");
 const resultsGrid = document.getElementById("results-grid");
 const noResults = document.getElementById("no-results");
 
+// Location modal elements
+const locationBtn = document.getElementById("location-btn");
+const locationLabel = document.getElementById("location-label");
+const locationModal = document.getElementById("location-modal");
+const locationForm = document.getElementById("location-form");
+const postalInput = document.getElementById("postal-input");
+const modalCancel = document.getElementById("modal-cancel");
+const modalBackdrop = locationModal.querySelector(".modal-backdrop");
+
+// Store filter checkboxes
+const storeCheckboxes = document.querySelectorAll(".store-checkbox input");
+
+// --- Search ---
+
 searchForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     const query = searchInput.value.trim();
@@ -16,8 +30,15 @@ searchForm.addEventListener("submit", async (e) => {
     await performSearch(query);
 });
 
+function getSelectedStores() {
+    const selected = [];
+    storeCheckboxes.forEach((cb) => {
+        if (cb.checked) selected.push(cb.value);
+    });
+    return selected;
+}
+
 async function performSearch(query) {
-    // UI state: loading
     loadingEl.classList.remove("hidden");
     errorsEl.classList.add("hidden");
     resultsSection.classList.add("hidden");
@@ -25,11 +46,16 @@ async function performSearch(query) {
     searchBtn.disabled = true;
 
     try {
-        const resp = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+        const stores = getSelectedStores();
+        let url = `/api/search?q=${encodeURIComponent(query)}`;
+        if (stores.length > 0 && stores.length < storeCheckboxes.length) {
+            url += `&stores=${encodeURIComponent(stores.join(","))}`;
+        }
+
+        const resp = await fetch(url);
         if (!resp.ok) throw new Error(`Erreur serveur (${resp.status})`);
         const data = await resp.json();
 
-        // Show errors if any (but still show results)
         if (data.errors && data.errors.length > 0) {
             errorsEl.innerHTML = data.errors
                 .map((e) => `<div class="error-banner">${escapeHtml(e)}</div>`)
@@ -37,7 +63,6 @@ async function performSearch(query) {
             errorsEl.classList.remove("hidden");
         }
 
-        // Display results
         if (data.results && data.results.length > 0) {
             renderResults(data.query, data.results);
         } else {
@@ -56,7 +81,6 @@ function renderResults(query, results) {
     queryDisplay.textContent = query;
     resultsCount.textContent = `${results.length} produit${results.length > 1 ? "s" : ""} trouvé${results.length > 1 ? "s" : ""}`;
 
-    // Find the best (lowest) price
     const prices = results.filter((p) => p.price != null).map((p) => p.price);
     const bestPrice = prices.length > 0 ? Math.min(...prices) : null;
 
@@ -102,6 +126,61 @@ function productCard(product, bestPrice) {
         </div>
     `;
 }
+
+// --- Location modal ---
+
+locationBtn.addEventListener("click", () => {
+    locationModal.classList.remove("hidden");
+    postalInput.focus();
+});
+
+modalCancel.addEventListener("click", closeModal);
+modalBackdrop.addEventListener("click", closeModal);
+
+function closeModal() {
+    locationModal.classList.add("hidden");
+}
+
+locationForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const postalCode = postalInput.value.trim();
+    if (!postalCode || postalCode.length !== 5) return;
+
+    try {
+        const resp = await fetch("/api/config/location", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ postal_code: postalCode }),
+        });
+        if (!resp.ok) throw new Error("Erreur lors de la configuration");
+
+        locationLabel.textContent = postalCode;
+        locationBtn.classList.add("configured");
+        closeModal();
+    } catch (err) {
+        alert(err.message);
+    }
+});
+
+// Load saved config on page load
+async function loadConfig() {
+    try {
+        const resp = await fetch("/api/config/stores");
+        if (!resp.ok) return;
+        const config = await resp.json();
+        if (config.postal_code) {
+            locationLabel.textContent = config.postal_code;
+            locationBtn.classList.add("configured");
+            postalInput.value = config.postal_code;
+        }
+    } catch {
+        // Ignore — config not yet set
+    }
+}
+
+loadConfig();
+
+// --- Utilities ---
 
 function escapeHtml(str) {
     const div = document.createElement("div");

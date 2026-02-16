@@ -10,7 +10,8 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.config import BASE_DIR
 from backend.database import close_db
-from backend.models import SearchResponse
+from backend.models import AppConfig, LocationConfig, SearchResponse
+from backend.services.location import get_app_config, set_postal_code
 from backend.services.search import search_all
 
 # On Windows, ensure the ProactorEventLoop is used so that asyncio subprocess
@@ -46,6 +47,16 @@ async def api_search(
 ):
     store_list = [s.strip() for s in stores.split(",") if s.strip()] if stores else None
     return await search_all(q, store_list)
+
+
+@app.post("/api/config/location", response_model=AppConfig)
+async def api_set_location(body: LocationConfig):
+    return await set_postal_code(body.postal_code)
+
+
+@app.get("/api/config/stores", response_model=AppConfig)
+async def api_get_stores():
+    return await get_app_config()
 
 
 # --- Static files (frontend) ---
