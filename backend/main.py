@@ -1,4 +1,7 @@
+import asyncio
 import logging
+import sys
+from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI, Query
@@ -10,17 +13,27 @@ from backend.database import close_db
 from backend.models import SearchResponse
 from backend.services.search import search_all
 
+# On Windows, ensure the ProactorEventLoop is used so that asyncio subprocess
+# support works (needed if any code path still uses async Playwright).
+if sys.platform == "win32":
+    try:
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    except AttributeError:
+        pass  # Policy class removed in newer Python versions
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 
-app = FastAPI(title="PrixMalin", version="1.0.0")
 
-
-@app.on_event("shutdown")
-async def shutdown():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
     await close_db()
+
+
+app = FastAPI(title="PrixMalin", version="1.0.0", lifespan=lifespan)
 
 
 # --- API routes ---

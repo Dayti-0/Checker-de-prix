@@ -2,9 +2,10 @@ import asyncio
 import logging
 import os
 import re
+import time
 from urllib.parse import urlparse
 
-from playwright.async_api import async_playwright
+from playwright.sync_api import sync_playwright
 
 from backend.models import ScrapedProduct
 from backend.scrapers.base import BaseScraper
@@ -32,18 +33,23 @@ class AldiScraper(BaseScraper):
     store_name = "Aldi"
 
     async def search(self, query: str) -> list[ScrapedProduct]:
+        """Run the synchronous scraper in a thread to avoid asyncio subprocess issues."""
+        return await asyncio.to_thread(self._search_sync, query)
+
+    def _search_sync(self, query: str) -> list[ScrapedProduct]:
+        """Synchronous Playwright scraping (runs in a thread)."""
         url = SEARCH_URL.format(query=query)
         products: list[ScrapedProduct] = []
 
         proxy = _get_proxy_config()
 
-        async with async_playwright() as pw:
-            browser = await pw.chromium.launch(
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(
                 headless=True,
                 args=["--no-sandbox", "--disable-dev-shm-usage"],
                 proxy=proxy,
             )
-            page = await browser.new_page(
+            page = browser.new_page(
                 user_agent=(
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -54,31 +60,31 @@ class AldiScraper(BaseScraper):
             )
 
             try:
-                await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
                 # Accept cookies if banner appears
                 try:
                     btn = page.locator("#onetrust-accept-btn-handler")
-                    await btn.click(timeout=4000)
-                    await asyncio.sleep(0.5)
+                    btn.click(timeout=4000)
+                    time.sleep(0.5)
                 except Exception:
                     pass
 
                 # Wait for product tiles (loaded via Algolia client-side)
                 try:
-                    await page.wait_for_selector(".product-tile", timeout=12000)
+                    page.wait_for_selector(".product-tile", timeout=12000)
                 except Exception:
                     logger.warning("Aldi: no product tiles for '%s'", query)
-                    await browser.close()
+                    browser.close()
                     return products
 
-                await asyncio.sleep(1)
+                time.sleep(1)
 
-                tiles = await page.query_selector_all(".product-tile")
+                tiles = page.query_selector_all(".product-tile")
 
                 for tile in tiles:
                     try:
-                        product = await self._parse_tile(tile)
+                        product = self._parse_tile(tile)
                         if product:
                             products.append(product)
                     except Exception as e:
@@ -87,49 +93,49 @@ class AldiScraper(BaseScraper):
             except Exception as e:
                 logger.error("Aldi scraper error: %s", e)
             finally:
-                await browser.close()
+                browser.close()
 
         return products
 
-    async def _parse_tile(self, tile) -> ScrapedProduct | None:
+    def _parse_tile(self, tile) -> ScrapedProduct | None:
         # Product name
-        name_el = await tile.query_selector(
+        name_el = tile.query_selector(
             ".product-tile__content__upper__product-name"
         )
         if not name_el:
             return None
-        name = (await name_el.inner_text()).strip()
+        name = name_el.inner_text().strip()
         if not name:
             return None
 
         # Brand
-        brand_el = await tile.query_selector(
+        brand_el = tile.query_selector(
             ".product-tile__content__upper__brand-name"
         )
         if brand_el:
-            brand = (await brand_el.inner_text()).strip()
+            brand = brand_el.inner_text().strip()
             if brand:
                 name = f"{name} - {brand}"
 
         # Price
         price = None
-        price_el = await tile.query_selector("[data-testid$='tag-current-price-amount']")
+        price_el = tile.query_selector("[data-testid$='tag-current-price-amount']")
         if not price_el:
-            price_el = await tile.query_selector(".tag__label--price")
+            price_el = tile.query_selector(".tag__label--price")
         if price_el:
-            price_text = (await price_el.inner_text()).strip()
+            price_text = price_el.inner_text().strip()
             price = self._parse_price(price_text)
 
         # Price per unit (e.g. "KG = 0.69")
         price_per_unit = None
-        unit_el = await tile.query_selector(".tag__marker--base-price")
+        unit_el = tile.query_selector(".tag__marker--base-price")
         if unit_el:
-            price_per_unit = (await unit_el.inner_text()).strip()
+            price_per_unit = unit_el.inner_text().strip()
 
         # Sales unit (e.g. "1KG")
-        sales_unit_el = await tile.query_selector(".tag__marker--salesunit")
+        sales_unit_el = tile.query_selector(".tag__marker--salesunit")
         if sales_unit_el:
-            sales_unit = (await sales_unit_el.inner_text()).strip()
+            sales_unit = sales_unit_el.inner_text().strip()
             if price_per_unit:
                 price_per_unit = f"{price_per_unit} ({sales_unit})"
             else:
@@ -137,15 +143,15 @@ class AldiScraper(BaseScraper):
 
         # Image
         image_url = None
-        img = await tile.query_selector(".product-tile__image-section img")
+        img = tile.query_selector(".product-tile__image-section img")
         if img:
-            image_url = await img.get_attribute("src")
+            image_url = img.get_attribute("src")
 
         # Product URL
         product_url = ""
-        link = await tile.query_selector("a[href]")
+        link = tile.query_selector("a[href]")
         if link:
-            href = await link.get_attribute("href")
+            href = link.get_attribute("href")
             if href:
                 product_url = (
                     href
