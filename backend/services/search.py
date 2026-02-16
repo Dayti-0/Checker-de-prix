@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 import unicodedata
 
 from backend.database import get_cached_results, set_cached_results
@@ -27,16 +28,52 @@ def _normalize(text: str) -> str:
     return "".join(c for c in nfkd if not unicodedata.combining(c))
 
 
-def _is_relevant(product: ScrapedProduct, query: str) -> bool:
-    """Return True if the product name matches at least one keyword from the query."""
-    norm_name = _normalize(product.name)
-    keywords = [
-        w for w in _normalize(query).split() if w not in _STOP_WORDS and len(w) > 1
+def _extract_words(text: str) -> list[str]:
+    """Extract significant alphabetic words from *text* (no stop words, len > 1)."""
+    return [
+        w for w in re.findall(r"[a-z]+", _normalize(text))
+        if w not in _STOP_WORDS and len(w) > 1
     ]
+
+
+# Minimum ratio of product-name words that must relate to the query keywords.
+# Filters out products where the query terms are secondary descriptors
+# (e.g. "thon à l'huile de tournesol" when searching "huile de tournesol").
+_MIN_RELEVANCE = 0.5
+
+
+def _is_relevant(product: ScrapedProduct, query: str) -> bool:
+    """Return True if the product name is relevant to the search query.
+
+    Two checks are performed:
+    1. **All** query keywords must appear in the product name (substring match).
+    2. For multi-keyword queries, the query must *cover* a significant share of
+       the product name so that products where the query is just a secondary
+       descriptor are filtered out.
+    """
+    norm_name = _normalize(product.name)
+    keywords = _extract_words(query)
     if not keywords:
         # If the query is only stop words, don't filter anything
         return True
-    return any(kw in norm_name for kw in keywords)
+
+    # All keywords must appear in the product name (whole-word match to avoid
+    # false positives like "eau" matching inside "gateau").
+    if not all(re.search(r"\b" + re.escape(kw) + r"\b", norm_name) for kw in keywords):
+        return False
+
+    # For multi-keyword queries, check relevance coverage
+    if len(keywords) >= 2:
+        product_words = _extract_words(product.name)
+        if product_words:
+            matched = sum(
+                1 for pw in product_words
+                if any(kw in pw or pw in kw for kw in keywords)
+            )
+            if matched / len(product_words) < _MIN_RELEVANCE:
+                return False
+
+    return True
 
 # Registry of available scrapers
 SCRAPERS: dict[str, BaseScraper] = {
