@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import unicodedata
 
 from backend.database import get_cached_results, set_cached_results
 from backend.models import ScrapedProduct, SearchResponse
@@ -7,6 +8,32 @@ from backend.scrapers.aldi import AldiScraper
 from backend.scrapers.base import BaseScraper
 
 logger = logging.getLogger(__name__)
+
+# Short words to ignore when matching relevance (French stop words)
+_STOP_WORDS = frozenset({
+    "de", "du", "des", "le", "la", "les", "un", "une", "au", "aux",
+    "et", "ou", "en", "a", "à",
+})
+
+
+def _normalize(text: str) -> str:
+    """Lowercase and strip accents from *text*."""
+    text = text.lower()
+    # Decompose unicode, drop combining marks (accents), recompose
+    nfkd = unicodedata.normalize("NFKD", text)
+    return "".join(c for c in nfkd if not unicodedata.combining(c))
+
+
+def _is_relevant(product: ScrapedProduct, query: str) -> bool:
+    """Return True if the product name matches at least one keyword from the query."""
+    norm_name = _normalize(product.name)
+    keywords = [
+        w for w in _normalize(query).split() if w not in _STOP_WORDS and len(w) > 1
+    ]
+    if not keywords:
+        # If the query is only stop words, don't filter anything
+        return True
+    return any(kw in norm_name for kw in keywords)
 
 # Registry of available scrapers
 SCRAPERS: dict[str, BaseScraper] = {
@@ -70,6 +97,13 @@ async def search_all(
         all_results.extend(results)
         if error:
             errors.append(error)
+
+    # Filter out products that don't match the search query
+    before = len(all_results)
+    all_results = [p for p in all_results if _is_relevant(p, query)]
+    filtered = before - len(all_results)
+    if filtered:
+        logger.info("Filtered out %d irrelevant products for '%s'", filtered, query)
 
     # Sort by price ascending (products without price go last)
     all_results.sort(key=lambda p: (p.price is None, p.price or 0))
