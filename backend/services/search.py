@@ -5,6 +5,9 @@ import unicodedata
 from backend.database import get_cached_results, set_cached_results
 from backend.models import ScrapedProduct, SearchResponse
 from backend.scrapers.aldi import AldiScraper
+from backend.scrapers.carrefour import CarrefourScraper
+from backend.scrapers.coursesu import CoursesUScraper
+from backend.scrapers.intermarche import IntermarcheScraper
 from backend.scrapers.base import BaseScraper
 
 logger = logging.getLogger(__name__)
@@ -38,6 +41,9 @@ def _is_relevant(product: ScrapedProduct, query: str) -> bool:
 # Registry of available scrapers
 SCRAPERS: dict[str, BaseScraper] = {
     "aldi": AldiScraper(),
+    "carrefour": CarrefourScraper(),
+    "coursesu": CoursesUScraper(),
+    "intermarche": IntermarcheScraper(),
 }
 
 

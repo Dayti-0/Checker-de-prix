@@ -28,7 +28,39 @@
                     <button type="submit" id="search-btn">Rechercher</button>
                 </div>
             </form>
+
+            <div class="search-options">
+                <div class="store-filters">
+                    <span class="filter-label">Enseignes :</span>
+                    <label class="store-checkbox"><input type="checkbox" value="aldi" checked><span class="store-tag aldi">Aldi</span></label>
+                    <label class="store-checkbox"><input type="checkbox" value="carrefour" checked><span class="store-tag carrefour">Carrefour</span></label>
+                    <label class="store-checkbox"><input type="checkbox" value="coursesu" checked><span class="store-tag coursesu">Courses U</span></label>
+                    <label class="store-checkbox"><input type="checkbox" value="intermarche" checked><span class="store-tag intermarche">Intermarch&eacute;</span></label>
+                </div>
+
+                <div class="location-config">
+                    <button type="button" id="location-btn" class="location-btn" title="Configurer votre code postal">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                        <span id="location-label">Code postal</span>
+                    </button>
+                </div>
+            </div>
         </section>
+
+        <div id="location-modal" class="modal hidden">
+            <div class="modal-backdrop"></div>
+            <div class="modal-content">
+                <h3>Configurer votre localisation</h3>
+                <p class="modal-description">Entrez votre code postal pour voir les prix des magasins proches (n&eacute;cessaire pour Courses U et Intermarch&eacute;).</p>
+                <form id="location-form">
+                    <input type="text" id="postal-input" placeholder="Code postal (ex: 34000)" pattern="[0-9]{5}" maxlength="5" required>
+                    <div class="modal-actions">
+                        <button type="button" id="modal-cancel" class="btn-secondary">Annuler</button>
+                        <button type="submit" class="btn-primary">Enregistrer</button>
+                    </div>
+                </form>
+            </div>
+        </div>
 
         <section id="loading" class="loading hidden">
             <div class="spinner"></div>
