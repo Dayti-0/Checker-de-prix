@@ -68,24 +68,41 @@ class CoursesUScraper(BaseScraper):
             def handle_response(response):
                 try:
                     resp_url = response.url
-                    if ("search" in resp_url or "produit" in resp_url or "product" in resp_url) and response.status == 200:
+                    if response.status == 200:
                         content_type = response.headers.get("content-type", "")
                         if "json" in content_type:
-                            data = response.json()
-                            if isinstance(data, (dict, list)):
-                                api_data.append(data if isinstance(data, dict) else {"items": data})
+                            if any(
+                                k in resp_url
+                                for k in [
+                                    "search",
+                                    "produit",
+                                    "product",
+                                    "recherche",
+                                    "catalog",
+                                    "algolia",
+                                    "api",
+                                ]
+                            ):
+                                data = response.json()
+                                if isinstance(data, (dict, list)):
+                                    api_data.append(
+                                        data
+                                        if isinstance(data, dict)
+                                        else {"items": data}
+                                    )
                 except Exception:
                     pass
 
             page.on("response", handle_response)
 
             try:
-                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                page.goto(url, wait_until="commit", timeout=30000)
 
                 # Accept cookies if banner appears
                 try:
                     for sel in [
                         "#onetrust-accept-btn-handler",
+                        "#didomi-notice-agree-button",
                         "[data-testid='accept-cookies']",
                         "button[class*='cookie']",
                         ".cookie-consent button",
@@ -99,22 +116,35 @@ class CoursesUScraper(BaseScraper):
                 except Exception:
                     pass
 
-                # Wait for products
+                # Wait for products with broader selectors
                 try:
                     page.wait_for_selector(
-                        ".product-card, .product-item, .product-tile, [data-product], .search-results .product",
+                        ", ".join(
+                            [
+                                "[class*='product']",
+                                "[class*='Product']",
+                                "[data-testid*='product']",
+                                "[data-product]",
+                                "article",
+                                "[class*='search-result']",
+                                "[class*='SearchResult']",
+                            ]
+                        ),
                         timeout=15000,
                     )
                 except Exception:
                     logger.warning("Courses U: no product cards for '%s'", query)
 
-                time.sleep(1.5)
+                time.sleep(2)
 
-                # Try API data first
-                if api_data:
+                # Strategy 1: Try __NEXT_DATA__ (SSR-rendered data)
+                products = self._parse_next_data(page)
+
+                # Strategy 2: Try intercepted API data
+                if not products and api_data:
                     products = self._parse_api_data(api_data)
 
-                # Fallback to HTML parsing
+                # Strategy 3: Fallback to HTML parsing
                 if not products:
                     products = self._parse_html(page)
 
@@ -125,6 +155,122 @@ class CoursesUScraper(BaseScraper):
 
         return products
 
+    def _parse_next_data(self, page) -> list[ScrapedProduct]:
+        """Try to extract product data from __NEXT_DATA__ script tag."""
+        products: list[ScrapedProduct] = []
+        try:
+            script = page.query_selector("script#__NEXT_DATA__")
+            if not script:
+                return products
+            raw = script.inner_text()
+            data = json.loads(raw)
+            props = data.get("props", {}).get("pageProps", {})
+            items = (
+                props.get("products", [])
+                or props.get("searchResults", {}).get("products", [])
+                or props.get("initialData", {}).get("products", [])
+                or props.get("data", {}).get("products", [])
+                or props.get("results", [])
+            )
+            if not items and "dehydratedState" in props:
+                queries = props["dehydratedState"].get("queries", [])
+                for q in queries:
+                    state_data = q.get("state", {}).get("data", {})
+                    if isinstance(state_data, dict):
+                        items = (
+                            state_data.get("products", [])
+                            or state_data.get("items", [])
+                            or state_data.get("hits", [])
+                        )
+                        if items:
+                            break
+                    elif isinstance(state_data, list):
+                        items = state_data
+                        break
+
+            for item in items:
+                try:
+                    product = self._item_to_product(item)
+                    if product:
+                        products.append(product)
+                except Exception as e:
+                    logger.debug("Courses U __NEXT_DATA__ item parse error: %s", e)
+
+        except Exception as e:
+            logger.debug("Courses U __NEXT_DATA__ parse error: %s", e)
+        return products
+
+    def _item_to_product(self, item: dict) -> ScrapedProduct | None:
+        """Convert a product dict (from API or __NEXT_DATA__) to ScrapedProduct."""
+        name = (
+            item.get("title")
+            or item.get("name")
+            or item.get("label", "")
+        )
+        if not name:
+            return None
+
+        price = None
+        for key in ["price", "currentPrice", "unitPrice", "sellingPrice"]:
+            val = item.get(key)
+            if isinstance(val, (int, float)):
+                price = float(val)
+                break
+            if isinstance(val, dict):
+                price = val.get("value") or val.get("price") or val.get("amount")
+                if price is not None:
+                    price = float(price)
+                    break
+        if price is None:
+            pricing = item.get("pricing", {})
+            if isinstance(pricing, dict):
+                price = pricing.get("price") or pricing.get("currentPrice")
+                if price is not None:
+                    price = float(price)
+
+        price_per_unit = None
+        ppu = item.get("pricePerUnit") or item.get("unitPrice")
+        if isinstance(ppu, str):
+            price_per_unit = ppu
+        elif isinstance(ppu, dict):
+            price_per_unit = ppu.get("label") or ppu.get("formatted")
+
+        image_url = item.get("image") or item.get("imageUrl") or item.get("img")
+        if isinstance(image_url, dict):
+            image_url = image_url.get("url") or image_url.get("src")
+        if isinstance(image_url, list) and image_url:
+            image_url = (
+                image_url[0]
+                if isinstance(image_url[0], str)
+                else image_url[0].get("url")
+            )
+        if not image_url:
+            media = item.get("media", {})
+            if isinstance(media, dict):
+                image_url = media.get("url") or media.get("src")
+            elif isinstance(media, list) and media:
+                image_url = (
+                    media[0] if isinstance(media[0], str) else media[0].get("url")
+                )
+
+        slug = item.get("url") or item.get("slug") or item.get("href", "")
+        product_url = (
+            slug
+            if slug.startswith("http")
+            else f"https://www.coursesu.com{slug}"
+            if slug
+            else ""
+        )
+
+        return ScrapedProduct(
+            name=name,
+            price=price,
+            price_per_unit=price_per_unit,
+            image_url=image_url,
+            product_url=product_url,
+            store_name=self.store_name,
+        )
+
     def _parse_api_data(self, api_responses: list[dict]) -> list[ScrapedProduct]:
         products: list[ScrapedProduct] = []
         for data in api_responses:
@@ -133,47 +279,13 @@ class CoursesUScraper(BaseScraper):
                 or data.get("items", [])
                 or data.get("hits", [])
                 or data.get("data", {}).get("products", [])
+                or data.get("results", [])
             )
             for item in items:
                 try:
-                    name = item.get("title") or item.get("name") or item.get("label", "")
-                    if not name:
-                        continue
-
-                    price = None
-                    for key in ["price", "currentPrice", "unitPrice"]:
-                        val = item.get(key)
-                        if isinstance(val, (int, float)):
-                            price = float(val)
-                            break
-                        if isinstance(val, dict):
-                            price = val.get("value") or val.get("price") or val.get("amount")
-                            if price is not None:
-                                price = float(price)
-                                break
-
-                    price_per_unit = None
-                    ppu = item.get("pricePerUnit") or item.get("unitPrice")
-                    if isinstance(ppu, str):
-                        price_per_unit = ppu
-                    elif isinstance(ppu, dict):
-                        price_per_unit = ppu.get("label") or ppu.get("formatted")
-
-                    image_url = item.get("image") or item.get("imageUrl") or item.get("img")
-                    if isinstance(image_url, dict):
-                        image_url = image_url.get("url") or image_url.get("src")
-
-                    slug = item.get("url") or item.get("slug") or item.get("href", "")
-                    product_url = slug if slug.startswith("http") else f"https://www.coursesu.com{slug}" if slug else ""
-
-                    products.append(ScrapedProduct(
-                        name=name,
-                        price=price,
-                        price_per_unit=price_per_unit,
-                        image_url=image_url,
-                        product_url=product_url,
-                        store_name=self.store_name,
-                    ))
+                    product = self._item_to_product(item)
+                    if product:
+                        products.append(product)
                 except Exception as e:
                     logger.debug("Courses U API parse error: %s", e)
 
@@ -183,17 +295,28 @@ class CoursesUScraper(BaseScraper):
         products: list[ScrapedProduct] = []
 
         selectors = [
+            "[class*='productCard']",
+            "[class*='ProductCard']",
+            "[class*='product-card']",
+            "[data-testid*='product']",
+            "[data-product]",
             ".product-card",
             ".product-item",
             ".product-tile",
-            "[data-product]",
-            ".search-results .product",
+            "article",
+            "[class*='search-result'] > div",
+            "[class*='SearchResult'] > div",
         ]
 
         cards = []
         for sel in selectors:
             cards = page.query_selector_all(sel)
             if cards:
+                logger.debug(
+                    "Courses U: found %d cards with selector '%s'",
+                    len(cards),
+                    sel,
+                )
                 break
 
         for card in cards:
@@ -208,19 +331,35 @@ class CoursesUScraper(BaseScraper):
 
     def _parse_card(self, card) -> ScrapedProduct | None:
         name = None
-        for sel in [".product-card__title", ".product-item__name", "h2", "h3", "a[title]", ".product-name"]:
+        for sel in [
+            "[class*='title']",
+            "[class*='Title']",
+            "[class*='name']",
+            "[class*='Name']",
+            "h2",
+            "h3",
+            "a[title]",
+            ".product-name",
+            "p",
+        ]:
             el = card.query_selector(sel)
             if el:
                 name = el.get_attribute("title") or el.inner_text()
                 name = name.strip()
-                if name:
+                if name and len(name) > 2:
                     break
+                name = None
 
         if not name:
             return None
 
         price = None
-        for sel in [".product-card__price", ".product-price", ".price", ".product-item__price"]:
+        for sel in [
+            "[class*='price']",
+            "[class*='Price']",
+            "[data-testid*='price']",
+            ".price",
+        ]:
             el = card.query_selector(sel)
             if el:
                 price = self._parse_price(el.inner_text())
@@ -228,7 +367,13 @@ class CoursesUScraper(BaseScraper):
                     break
 
         price_per_unit = None
-        for sel in [".product-card__unit-price", ".unit-price", ".price-per-unit"]:
+        for sel in [
+            "[class*='unit-price']",
+            "[class*='unitPrice']",
+            "[class*='UnitPrice']",
+            "[class*='price-per']",
+            "[class*='pricePer']",
+        ]:
             el = card.query_selector(sel)
             if el:
                 price_per_unit = el.inner_text().strip()
@@ -238,14 +383,22 @@ class CoursesUScraper(BaseScraper):
         image_url = None
         img = card.query_selector("img")
         if img:
-            image_url = img.get_attribute("src") or img.get_attribute("data-src")
+            image_url = (
+                img.get_attribute("src")
+                or img.get_attribute("data-src")
+                or img.get_attribute("srcset", "").split(",")[0].split(" ")[0]
+            )
 
         product_url = ""
         link = card.query_selector("a[href]")
         if link:
             href = link.get_attribute("href")
             if href:
-                product_url = href if href.startswith("http") else f"https://www.coursesu.com{href}"
+                product_url = (
+                    href
+                    if href.startswith("http")
+                    else f"https://www.coursesu.com{href}"
+                )
 
         return ScrapedProduct(
             name=name,
@@ -296,12 +449,31 @@ class CoursesUScraper(BaseScraper):
             try:
                 page.goto(HOME_URL, wait_until="domcontentloaded", timeout=30000)
 
+                # Accept cookies
+                try:
+                    for sel in [
+                        "#onetrust-accept-btn-handler",
+                        "#didomi-notice-agree-button",
+                        "#footer_tc_privacy_button_2",
+                    ]:
+                        btn = page.query_selector(sel)
+                        if btn:
+                            btn.click()
+                            time.sleep(0.5)
+                            break
+                except Exception:
+                    pass
+
                 # Try to find and click the store selector
                 for sel in [
                     ".store-selector",
                     "[data-testid='store-selector']",
                     ".header-store",
                     ".choose-store",
+                    "[class*='store-selector']",
+                    "[class*='StoreSelector']",
+                    "button[class*='store']",
+                    "button[class*='magasin']",
                 ]:
                     btn = page.query_selector(sel)
                     if btn:
@@ -313,9 +485,14 @@ class CoursesUScraper(BaseScraper):
                 for sel in [
                     "input[placeholder*='postal']",
                     "input[placeholder*='ville']",
+                    "input[placeholder*='code']",
+                    "input[placeholder*='adresse']",
                     "input[name*='postal']",
                     "input[name*='location']",
+                    "input[name*='search']",
+                    "input[name*='address']",
                     ".store-search input",
+                    "[class*='store'] input",
                 ]:
                     inp = page.query_selector(sel)
                     if inp:
@@ -329,6 +506,9 @@ class CoursesUScraper(BaseScraper):
                             ".store-list .store-item:first-child",
                             ".store-results button:first-child",
                             ".store-result:first-child",
+                            "[class*='store-list'] button:first-child",
+                            "[class*='storeList'] button:first-child",
+                            "[class*='result'] button:first-child",
                         ]:
                             result = page.query_selector(result_sel)
                             if result:

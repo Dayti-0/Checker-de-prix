@@ -11,7 +11,7 @@ Application web permettant de comparer les prix de produits alimentaires courant
 | **Aldi** | `https://www.aldi.fr/recherche.html?query={query}` | Playwright (contenu JS) | Prix nationaux, pas de sélection de magasin nécessaire |
 | **Carrefour** | `https://www.carrefour.fr/s?q={query}` | Playwright (Cloudflare 403) | Peut nécessiter un magasin pour les prix locaux |
 | **Courses U** (Hyper U / Super U) | `https://www.coursesu.com/recherche?q={query}` | Playwright | **Prix visibles uniquement après sélection d'un magasin** — nécessite de configurer un magasin via cookie/session |
-| **Intermarché** | `https://www.intermarche.com/courses-en-ligne/recherche?q={query}` | Playwright | **Prix liés au magasin sélectionné** — même contrainte que Courses U |
+| **Intermarché** | `https://www.intermarche.com/recherche/{query}` | Playwright | **Prix liés au magasin sélectionné** — même contrainte que Courses U |
 
 ## Architecture technique
 
@@ -131,7 +131,7 @@ class BaseScraper(ABC):
 
 ### Intermarché
 
-- URL : `https://www.intermarche.com/courses-en-ligne/recherche?q={query}`
+- URL : `https://www.intermarche.com/recherche/{query}`
 - Même contrainte que Courses U — prix liés au magasin
 - **Stratégie** : Similaire à Courses U, configurer le magasin puis scraper
 
