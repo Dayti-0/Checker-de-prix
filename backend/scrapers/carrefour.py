@@ -61,19 +61,30 @@ class CarrefourScraper(BaseScraper):
             # Intercept API responses for structured data
             def handle_response(response):
                 try:
-                    if "/search" in response.url and response.status == 200:
+                    resp_url = response.url
+                    if response.status == 200:
                         content_type = response.headers.get("content-type", "")
                         if "json" in content_type:
-                            data = response.json()
-                            if isinstance(data, dict):
-                                api_data.append(data)
+                            if any(
+                                k in resp_url
+                                for k in [
+                                    "search",
+                                    "product",
+                                    "catalog",
+                                    "algolia",
+                                    "api",
+                                ]
+                            ):
+                                data = response.json()
+                                if isinstance(data, dict):
+                                    api_data.append(data)
                 except Exception:
                     pass
 
             page.on("response", handle_response)
 
             try:
-                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                page.goto(url, wait_until="commit", timeout=30000)
 
                 # Accept cookies if banner appears
                 try:
@@ -83,22 +94,36 @@ class CarrefourScraper(BaseScraper):
                 except Exception:
                     pass
 
-                # Wait for products to appear
+                # Wait for products to appear with broader selectors
                 try:
                     page.wait_for_selector(
-                        "[data-testid='product-card-container'], .product-card-list__item, .ds-product-card",
+                        ", ".join(
+                            [
+                                "[data-testid='product-card-container']",
+                                ".product-card-list__item",
+                                ".ds-product-card",
+                                "[class*='product']",
+                                "[class*='Product']",
+                                "[data-testid*='product']",
+                                "article",
+                                "li[data-testid]",
+                            ]
+                        ),
                         timeout=15000,
                     )
                 except Exception:
                     logger.warning("Carrefour: no product cards for '%s'", query)
 
-                time.sleep(1.5)
+                time.sleep(2)
 
-                # Try API data first (more reliable)
-                if api_data:
+                # Strategy 1: Try __NEXT_DATA__ (SSR-rendered data)
+                products = self._parse_next_data(page)
+
+                # Strategy 2: Try API data (more reliable)
+                if not products and api_data:
                     products = self._parse_api_data(api_data)
 
-                # Fallback to HTML parsing
+                # Strategy 3: Fallback to HTML parsing
                 if not products:
                     products = self._parse_html(page)
 
@@ -109,52 +134,138 @@ class CarrefourScraper(BaseScraper):
 
         return products
 
+    def _parse_next_data(self, page) -> list[ScrapedProduct]:
+        """Try to extract product data from __NEXT_DATA__ script tag."""
+        products: list[ScrapedProduct] = []
+        try:
+            script = page.query_selector("script#__NEXT_DATA__")
+            if not script:
+                return products
+            raw = script.inner_text()
+            data = json.loads(raw)
+            props = data.get("props", {}).get("pageProps", {})
+            # Try various common structures
+            items = (
+                props.get("products", [])
+                or props.get("searchResults", {}).get("products", [])
+                or props.get("initialData", {}).get("products", [])
+                or props.get("data", {}).get("products", [])
+                or props.get("results", [])
+            )
+            if not items and "dehydratedState" in props:
+                queries = props["dehydratedState"].get("queries", [])
+                for q in queries:
+                    state_data = q.get("state", {}).get("data", {})
+                    if isinstance(state_data, dict):
+                        items = (
+                            state_data.get("products", [])
+                            or state_data.get("items", [])
+                            or state_data.get("hits", [])
+                        )
+                        if items:
+                            break
+
+            for item in items:
+                try:
+                    product = self._item_to_product(item)
+                    if product:
+                        products.append(product)
+                except Exception as e:
+                    logger.debug("Carrefour __NEXT_DATA__ item parse error: %s", e)
+
+        except Exception as e:
+            logger.debug("Carrefour __NEXT_DATA__ parse error: %s", e)
+        return products
+
+    def _item_to_product(self, item: dict) -> ScrapedProduct | None:
+        """Convert a product dict (from API or __NEXT_DATA__) to ScrapedProduct."""
+        name = item.get("title") or item.get("name", "")
+        if not name:
+            return None
+
+        price = None
+        price_data = item.get("price", {})
+        if isinstance(price_data, dict):
+            price = price_data.get("price") or price_data.get("value")
+        elif isinstance(price_data, (int, float)):
+            price = float(price_data)
+        # Try alternative keys
+        if price is None:
+            for key in ["currentPrice", "sellingPrice"]:
+                val = item.get(key)
+                if isinstance(val, (int, float)):
+                    price = float(val)
+                    break
+                if isinstance(val, dict):
+                    price = val.get("value") or val.get("price")
+                    if price is not None:
+                        price = float(price)
+                        break
+
+        price_per_unit = None
+        if isinstance(price_data, dict):
+            unit_price = price_data.get("pricePerUnit") or price_data.get("unitPrice")
+            unit = price_data.get("unit", "")
+            if unit_price:
+                price_per_unit = f"{unit_price} €/{unit}" if unit else f"{unit_price} €"
+        if not price_per_unit:
+            ppu = item.get("pricePerUnit") or item.get("unitPrice")
+            if isinstance(ppu, str):
+                price_per_unit = ppu
+            elif isinstance(ppu, dict):
+                price_per_unit = ppu.get("label") or ppu.get("formatted")
+
+        image_url = item.get("image") or item.get("imageUrl")
+        if isinstance(image_url, dict):
+            image_url = image_url.get("url") or image_url.get("src")
+        if isinstance(image_url, list) and image_url:
+            image_url = (
+                image_url[0]
+                if isinstance(image_url[0], str)
+                else image_url[0].get("url")
+            )
+        # Handle nested media
+        if not image_url:
+            media = item.get("media", {})
+            if isinstance(media, dict):
+                image_url = media.get("url") or media.get("src")
+            elif isinstance(media, list) and media:
+                image_url = (
+                    media[0] if isinstance(media[0], str) else media[0].get("url")
+                )
+
+        product_url = item.get("url") or item.get("href", "")
+        if product_url and not product_url.startswith("http"):
+            product_url = f"https://www.carrefour.fr{product_url}"
+
+        return ScrapedProduct(
+            name=name,
+            price=float(price) if price else None,
+            price_per_unit=price_per_unit,
+            image_url=image_url,
+            product_url=product_url,
+            store_name=self.store_name,
+        )
+
     def _parse_api_data(self, api_responses: list[dict]) -> list[ScrapedProduct]:
         """Parse products from intercepted API JSON responses."""
         products: list[ScrapedProduct] = []
         for data in api_responses:
-            items = data.get("data", {}).get("products", [])
-            if not items:
-                items = data.get("products", [])
-            if not items and "hits" in data:
-                items = data["hits"]
+            # Try multiple data structure patterns
+            items = (
+                data.get("data", {}).get("products", [])
+                or data.get("data", {}).get("data", {}).get("products", [])
+                or data.get("products", [])
+                or data.get("hits", [])
+                or data.get("items", [])
+                or data.get("results", [])
+            )
 
             for item in items:
                 try:
-                    name = item.get("title") or item.get("name", "")
-                    if not name:
-                        continue
-
-                    price = None
-                    price_data = item.get("price", {})
-                    if isinstance(price_data, dict):
-                        price = price_data.get("price") or price_data.get("value")
-                    elif isinstance(price_data, (int, float)):
-                        price = float(price_data)
-
-                    price_per_unit = None
-                    if isinstance(price_data, dict):
-                        unit_price = price_data.get("pricePerUnit") or price_data.get("unitPrice")
-                        unit = price_data.get("unit", "")
-                        if unit_price:
-                            price_per_unit = f"{unit_price} €/{unit}" if unit else f"{unit_price} €"
-
-                    image_url = item.get("image") or item.get("imageUrl")
-                    if isinstance(image_url, dict):
-                        image_url = image_url.get("url")
-
-                    product_url = item.get("url") or item.get("href", "")
-                    if product_url and not product_url.startswith("http"):
-                        product_url = f"https://www.carrefour.fr{product_url}"
-
-                    products.append(ScrapedProduct(
-                        name=name,
-                        price=float(price) if price else None,
-                        price_per_unit=price_per_unit,
-                        image_url=image_url,
-                        product_url=product_url,
-                        store_name=self.store_name,
-                    ))
+                    product = self._item_to_product(item)
+                    if product:
+                        products.append(product)
                 except Exception as e:
                     logger.debug("Carrefour API parse error: %s", e)
 
@@ -168,13 +279,23 @@ class CarrefourScraper(BaseScraper):
             "[data-testid='product-card-container']",
             ".product-card-list__item",
             ".ds-product-card",
+            "[class*='productCard']",
+            "[class*='ProductCard']",
+            "[class*='product-card']",
+            "[data-testid*='product']",
             "li[data-testid]",
+            "article",
         ]
 
         cards = []
         for sel in selectors:
             cards = page.query_selector_all(sel)
             if cards:
+                logger.debug(
+                    "Carrefour: found %d cards with selector '%s'",
+                    len(cards),
+                    sel,
+                )
                 break
 
         for card in cards:
@@ -192,8 +313,10 @@ class CarrefourScraper(BaseScraper):
         name = None
         for sel in [
             "[data-testid='product-card-title']",
-            ".product-card__title",
-            ".ds-product-card__title",
+            "[class*='title']",
+            "[class*='Title']",
+            "[class*='name']",
+            "[class*='Name']",
             "a[title]",
             "h2",
             "h3",
@@ -202,8 +325,9 @@ class CarrefourScraper(BaseScraper):
             if el:
                 name = el.get_attribute("title") or el.inner_text()
                 name = name.strip()
-                if name:
+                if name and len(name) > 2:
                     break
+                name = None
 
         if not name:
             return None
@@ -212,8 +336,8 @@ class CarrefourScraper(BaseScraper):
         price = None
         for sel in [
             "[data-testid='product-card-price']",
-            ".product-card__price",
-            ".ds-product-card__price",
+            "[class*='price']",
+            "[class*='Price']",
             ".product-price__amount",
         ]:
             el = card.query_selector(sel)
@@ -226,8 +350,10 @@ class CarrefourScraper(BaseScraper):
         price_per_unit = None
         for sel in [
             "[data-testid='product-card-unit-price']",
-            ".product-card__unit-price",
-            ".ds-product-card__unit-price",
+            "[class*='unit-price']",
+            "[class*='unitPrice']",
+            "[class*='UnitPrice']",
+            "[class*='price-per']",
             ".product-price__unit",
         ]:
             el = card.query_selector(sel)
@@ -240,7 +366,11 @@ class CarrefourScraper(BaseScraper):
         image_url = None
         img = card.query_selector("img")
         if img:
-            image_url = img.get_attribute("src") or img.get_attribute("data-src")
+            image_url = (
+                img.get_attribute("src")
+                or img.get_attribute("data-src")
+                or img.get_attribute("srcset", "").split(",")[0].split(" ")[0]
+            )
 
         # Product URL
         product_url = ""
