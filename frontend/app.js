@@ -96,9 +96,15 @@ function productCard(product, bestPrice) {
         ? `<img class="card-image" src="${escapeAttr(product.image_url)}" alt="${escapeAttr(product.name)}" loading="lazy">`
         : `<div class="card-image placeholder">Pas d'image</div>`;
 
-    const priceHtml = product.price != null
-        ? `<span class="card-price">${product.price.toFixed(2).replace(".", ",")} &euro;</span>`
-        : `<span class="card-no-price">Prix non disponible</span>`;
+    const needsLocation = ["Courses U", "Intermarché"].includes(product.store_name);
+    let priceHtml;
+    if (product.price != null) {
+        priceHtml = `<span class="card-price">${product.price.toFixed(2).replace(".", ",")} &euro;</span>`;
+    } else if (needsLocation && !locationBtn.classList.contains("configured")) {
+        priceHtml = `<span class="card-no-price">Configurez votre <a href="#" class="location-link">code postal</a> pour voir le prix</span>`;
+    } else {
+        priceHtml = `<span class="card-no-price">Prix non disponible</span>`;
+    }
 
     const unitHtml = product.price_per_unit
         ? `<span class="card-price-unit">${escapeHtml(product.price_per_unit)}</span>`
@@ -179,6 +185,15 @@ async function loadConfig() {
 }
 
 loadConfig();
+
+// Open location modal when clicking "code postal" links in product cards
+document.addEventListener("click", (e) => {
+    if (e.target.classList.contains("location-link")) {
+        e.preventDefault();
+        locationModal.classList.remove("hidden");
+        postalInput.focus();
+    }
+});
 
 // --- Utilities ---
 

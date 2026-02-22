@@ -1,32 +1,14 @@
 import asyncio
 import logging
-import os
 import re
-import time
-from urllib.parse import urlparse
-
-from playwright.sync_api import sync_playwright
 
 from backend.models import ScrapedProduct
 from backend.scrapers.base import BaseScraper
+from backend.scrapers.browser import create_stealth_browser, accept_cookies
 
 logger = logging.getLogger(__name__)
 
 SEARCH_URL = "https://www.aldi.fr/recherche.html?query={query}"
-
-
-def _get_proxy_config() -> dict | None:
-    """Build Playwright proxy config from environment variables."""
-    proxy_url = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
-    if not proxy_url:
-        return None
-    parsed = urlparse(proxy_url)
-    config: dict = {"server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port}"}
-    if parsed.username:
-        config["username"] = parsed.username
-    if parsed.password:
-        config["password"] = parsed.password
-    return config
 
 
 class AldiScraper(BaseScraper):
@@ -41,45 +23,19 @@ class AldiScraper(BaseScraper):
         url = SEARCH_URL.format(query=query)
         products: list[ScrapedProduct] = []
 
-        proxy = _get_proxy_config()
-
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-dev-shm-usage"],
-                proxy=proxy,
-            )
-            page = browser.new_page(
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
-                ),
-                locale="fr-FR",
-                ignore_https_errors=True,
-            )
-
+        with create_stealth_browser() as (browser, context, page):
             try:
                 page.goto(url, wait_until="domcontentloaded", timeout=30000)
-
-                # Accept cookies if banner appears
-                try:
-                    btn = page.locator("#onetrust-accept-btn-handler")
-                    btn.click(timeout=4000)
-                    time.sleep(0.5)
-                except Exception:
-                    pass
+                accept_cookies(page)
 
                 # Wait for product tiles (loaded via Algolia client-side)
                 try:
                     page.wait_for_selector(".product-tile", timeout=12000)
                 except Exception:
                     logger.warning("Aldi: no product tiles for '%s'", query)
-                    browser.close()
                     return products
 
-                time.sleep(1)
-
+                page.wait_for_timeout(1000)
                 tiles = page.query_selector_all(".product-tile")
 
                 for tile in tiles:
@@ -92,8 +48,6 @@ class AldiScraper(BaseScraper):
 
             except Exception as e:
                 logger.error("Aldi scraper error: %s", e)
-            finally:
-                browser.close()
 
         return products
 
