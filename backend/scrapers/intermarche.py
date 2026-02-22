@@ -1,33 +1,17 @@
 import asyncio
 import json
 import logging
-import os
 import re
-import time
-from urllib.parse import quote, urlparse
-
-from playwright.sync_api import sync_playwright
+from urllib.parse import quote
 
 from backend.models import ScrapedProduct
 from backend.scrapers.base import BaseScraper
+from backend.scrapers.browser import create_stealth_browser, accept_cookies
 
 logger = logging.getLogger(__name__)
 
 SEARCH_URL = "https://www.intermarche.com/recherche/{query}"
 HOME_URL = "https://www.intermarche.com"
-
-
-def _get_proxy_config() -> dict | None:
-    proxy_url = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
-    if not proxy_url:
-        return None
-    parsed = urlparse(proxy_url)
-    config: dict = {"server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port}"}
-    if parsed.username:
-        config["username"] = parsed.username
-    if parsed.password:
-        config["password"] = parsed.password
-    return config
 
 
 class IntermarcheScraper(BaseScraper):
@@ -45,25 +29,8 @@ class IntermarcheScraper(BaseScraper):
         url = SEARCH_URL.format(query=quote(query, safe=""))
         products: list[ScrapedProduct] = []
         api_data: list[dict] = []
-        proxy = _get_proxy_config()
 
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-dev-shm-usage"],
-                proxy=proxy,
-            )
-            context = browser.new_context(
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
-                ),
-                locale="fr-FR",
-                ignore_https_errors=True,
-            )
-            page = context.new_page()
-
+        with create_stealth_browser() as (browser, context, page):
             # Intercept API responses
             def handle_response(response):
                 try:
@@ -96,25 +63,8 @@ class IntermarcheScraper(BaseScraper):
             page.on("response", handle_response)
 
             try:
-                page.goto(url, wait_until="commit", timeout=30000)
-
-                # Accept cookies if banner appears
-                try:
-                    for sel in [
-                        "#onetrust-accept-btn-handler",
-                        "#didomi-notice-agree-button",
-                        "[data-testid='accept-cookies']",
-                        "button[class*='cookie']",
-                        ".cookie-consent button",
-                        "#footer_tc_privacy_button_2",
-                    ]:
-                        btn = page.locator(sel).first
-                        if btn.is_visible(timeout=2000):
-                            btn.click(timeout=3000)
-                            time.sleep(0.5)
-                            break
-                except Exception:
-                    pass
+                page.goto(url, wait_until="networkidle", timeout=30000)
+                accept_cookies(page)
 
                 # Wait for products with multiple selector strategies
                 try:
@@ -134,7 +84,7 @@ class IntermarcheScraper(BaseScraper):
                 except Exception:
                     logger.warning("Intermarché: no product cards for '%s'", query)
 
-                time.sleep(2)
+                page.wait_for_timeout(2000)
 
                 # Strategy 1: Try __NEXT_DATA__ (SSR-rendered data)
                 if not products:
@@ -148,10 +98,15 @@ class IntermarcheScraper(BaseScraper):
                 if not products:
                     products = self._parse_html(page)
 
+                if not products:
+                    logger.debug(
+                        "Intermarché: page title='%s', url='%s'",
+                        page.title(),
+                        page.url,
+                    )
+
             except Exception as e:
                 logger.error("Intermarché scraper error: %s", e)
-            finally:
-                browser.close()
 
         return products
 
@@ -396,8 +351,11 @@ class IntermarcheScraper(BaseScraper):
             image_url = (
                 img.get_attribute("src")
                 or img.get_attribute("data-src")
-                or img.get_attribute("srcset", "").split(",")[0].split(" ")[0]
             )
+            if not image_url:
+                srcset = img.get_attribute("srcset")
+                if srcset:
+                    image_url = srcset.split(",")[0].split(" ")[0]
 
         product_url = ""
         link = card.query_selector("a[href]")
@@ -440,38 +398,10 @@ class IntermarcheScraper(BaseScraper):
             return False
 
     def _setup_location_sync(self, postal_code: str) -> bool:
-        proxy = _get_proxy_config()
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-dev-shm-usage"],
-                proxy=proxy,
-            )
-            page = browser.new_page(
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
-                ),
-                locale="fr-FR",
-                ignore_https_errors=True,
-            )
+        with create_stealth_browser() as (browser, context, page):
             try:
                 page.goto(HOME_URL, wait_until="domcontentloaded", timeout=30000)
-
-                # Accept cookies
-                try:
-                    for sel in [
-                        "#onetrust-accept-btn-handler",
-                        "#didomi-notice-agree-button",
-                    ]:
-                        btn = page.query_selector(sel)
-                        if btn:
-                            btn.click()
-                            time.sleep(0.5)
-                            break
-                except Exception:
-                    pass
+                accept_cookies(page)
 
                 # Try to find and click the store selector
                 for sel in [
@@ -488,7 +418,7 @@ class IntermarcheScraper(BaseScraper):
                     btn = page.query_selector(sel)
                     if btn:
                         btn.click()
-                        time.sleep(1)
+                        page.wait_for_timeout(1000)
                         break
 
                 # Enter postal code
@@ -507,9 +437,9 @@ class IntermarcheScraper(BaseScraper):
                     inp = page.query_selector(sel)
                     if inp:
                         inp.fill(postal_code)
-                        time.sleep(1)
+                        page.wait_for_timeout(1000)
                         inp.press("Enter")
-                        time.sleep(2)
+                        page.wait_for_timeout(2000)
 
                         # Click first store result
                         for result_sel in [
@@ -530,7 +460,5 @@ class IntermarcheScraper(BaseScraper):
 
             except Exception as e:
                 logger.error("Intermarché store setup error: %s", e)
-            finally:
-                browser.close()
 
         return False

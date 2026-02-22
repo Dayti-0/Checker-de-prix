@@ -291,6 +291,13 @@ main {
     font-style: italic;
 }
 
+.card-no-price .location-link {
+    color: var(--color-primary);
+    text-decoration: underline;
+    cursor: pointer;
+    font-style: normal;
+}
+
 .card-link {
     display: inline-block;
     margin-top: 0.6rem;

@@ -1,11 +1,9 @@
-import asyncio
 import logging
-import sys
 from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from backend.config import BASE_DIR
@@ -13,14 +11,6 @@ from backend.database import close_db
 from backend.models import AppConfig, LocationConfig, SearchResponse
 from backend.services.location import get_app_config, set_postal_code
 from backend.services.search import search_all
-
-# On Windows, ensure the ProactorEventLoop is used so that asyncio subprocess
-# support works (needed if any code path still uses async Playwright).
-if sys.platform == "win32":
-    try:
-        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-    except AttributeError:
-        pass  # Policy class removed in newer Python versions
 
 logging.basicConfig(
     level=logging.INFO,
@@ -67,6 +57,12 @@ FRONTEND_DIR = BASE_DIR / "frontend"
 @app.get("/")
 async def index():
     return FileResponse(FRONTEND_DIR / "index.html")
+
+
+@app.get("/favicon.ico")
+async def favicon():
+    # Return an empty 204 to suppress browser 404 requests
+    return Response(status_code=204)
 
 
 app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
