@@ -122,17 +122,28 @@ class CoursesUScraper(BaseScraper):
             raw = script.inner_text()
             data = json.loads(raw)
             props = data.get("props", {}).get("pageProps", {})
+            search_results = props.get("searchResults")
+            initial_data = props.get("initialData")
+            prop_data = props.get("data")
             items = (
                 props.get("products", [])
-                or props.get("searchResults", {}).get("products", [])
-                or props.get("initialData", {}).get("products", [])
-                or props.get("data", {}).get("products", [])
+                or (search_results.get("products", []) if isinstance(search_results, dict) else [])
+                or (initial_data.get("products", []) if isinstance(initial_data, dict) else [])
+                or (prop_data.get("products", []) if isinstance(prop_data, dict) else [])
                 or props.get("results", [])
             )
+            # If "data" or "searchResults" was a list, use it directly as items
+            if not items:
+                for candidate in [search_results, initial_data, prop_data]:
+                    if isinstance(candidate, list) and candidate:
+                        items = candidate
+                        break
             if not items and "dehydratedState" in props:
-                queries = props["dehydratedState"].get("queries", [])
+                dehydrated = props["dehydratedState"]
+                queries = dehydrated.get("queries", []) if isinstance(dehydrated, dict) else []
                 for q in queries:
-                    state_data = q.get("state", {}).get("data", {})
+                    state = q.get("state", {}) if isinstance(q, dict) else {}
+                    state_data = state.get("data", {}) if isinstance(state, dict) else {}
                     if isinstance(state_data, dict):
                         items = (
                             state_data.get("products", [])
@@ -231,20 +242,28 @@ class CoursesUScraper(BaseScraper):
     def _parse_api_data(self, api_responses: list[dict]) -> list[ScrapedProduct]:
         products: list[ScrapedProduct] = []
         for data in api_responses:
-            items = (
-                data.get("products", [])
-                or data.get("items", [])
-                or data.get("hits", [])
-                or data.get("data", {}).get("products", [])
-                or data.get("results", [])
-            )
-            for item in items:
-                try:
-                    product = self._item_to_product(item)
-                    if product:
-                        products.append(product)
-                except Exception as e:
-                    logger.debug("Courses U API parse error: %s", e)
+            try:
+                inner_data = data.get("data")
+                items = (
+                    data.get("products", [])
+                    or data.get("items", [])
+                    or data.get("hits", [])
+                    or (inner_data.get("products", []) if isinstance(inner_data, dict) else [])
+                    or data.get("results", [])
+                )
+                # If "data" was a list, use it directly
+                if not items and isinstance(inner_data, list):
+                    items = inner_data
+                for item in items:
+                    try:
+                        if isinstance(item, dict):
+                            product = self._item_to_product(item)
+                            if product:
+                                products.append(product)
+                    except Exception as e:
+                        logger.debug("Courses U API item parse error: %s", e)
+            except Exception as e:
+                logger.debug("Courses U API response parse error: %s", e)
 
         return products
 
