@@ -99,7 +99,14 @@ class CarrefourScraper(BaseScraper):
                 if not products:
                     products = self._parse_html(page)
 
-                if not products:
+                if products:
+                    priced = sum(1 for p in products if p.price is not None)
+                    if priced == 0:
+                        logger.warning(
+                            "Carrefour: found %d products but none have prices",
+                            len(products),
+                        )
+                else:
                     logger.debug(
                         "Carrefour: page title='%s', url='%s'",
                         page.title(),
@@ -122,17 +129,28 @@ class CarrefourScraper(BaseScraper):
             data = json.loads(raw)
             props = data.get("props", {}).get("pageProps", {})
             # Try various common structures
+            search_results = props.get("searchResults")
+            initial_data = props.get("initialData")
+            prop_data = props.get("data")
             items = (
                 props.get("products", [])
-                or props.get("searchResults", {}).get("products", [])
-                or props.get("initialData", {}).get("products", [])
-                or props.get("data", {}).get("products", [])
+                or (search_results.get("products", []) if isinstance(search_results, dict) else [])
+                or (initial_data.get("products", []) if isinstance(initial_data, dict) else [])
+                or (prop_data.get("products", []) if isinstance(prop_data, dict) else [])
                 or props.get("results", [])
             )
+            # If any of these were lists, use them directly as items
+            if not items:
+                for candidate in [search_results, initial_data, prop_data]:
+                    if isinstance(candidate, list) and candidate:
+                        items = candidate
+                        break
             if not items and "dehydratedState" in props:
-                queries = props["dehydratedState"].get("queries", [])
+                dehydrated = props["dehydratedState"]
+                queries = dehydrated.get("queries", []) if isinstance(dehydrated, dict) else []
                 for q in queries:
-                    state_data = q.get("state", {}).get("data", {})
+                    state = q.get("state", {}) if isinstance(q, dict) else {}
+                    state_data = state.get("data", {}) if isinstance(state, dict) else {}
                     if isinstance(state_data, dict):
                         items = (
                             state_data.get("products", [])
@@ -141,6 +159,9 @@ class CarrefourScraper(BaseScraper):
                         )
                         if items:
                             break
+                    elif isinstance(state_data, list) and state_data:
+                        items = state_data
+                        break
 
             for item in items:
                 try:
@@ -156,27 +177,49 @@ class CarrefourScraper(BaseScraper):
 
     def _item_to_product(self, item: dict) -> ScrapedProduct | None:
         """Convert a product dict (from API or __NEXT_DATA__) to ScrapedProduct."""
-        name = item.get("title") or item.get("name", "")
+        name = item.get("title") or item.get("name") or item.get("label", "")
         if not name:
             return None
 
         price = None
         price_data = item.get("price", {})
         if isinstance(price_data, dict):
-            price = price_data.get("price") or price_data.get("value")
+            price = price_data.get("price") or price_data.get("value") or price_data.get("amount")
         elif isinstance(price_data, (int, float)):
             price = float(price_data)
-        # Try alternative keys
+        elif isinstance(price_data, str):
+            price = self._parse_price(price_data)
+        # Try alternative top-level keys
         if price is None:
-            for key in ["currentPrice", "sellingPrice"]:
+            for key in ["currentPrice", "sellingPrice", "displayPrice", "formattedPrice"]:
                 val = item.get(key)
                 if isinstance(val, (int, float)):
                     price = float(val)
                     break
+                if isinstance(val, str):
+                    price = self._parse_price(val)
+                    if price is not None:
+                        break
                 if isinstance(val, dict):
-                    price = val.get("value") or val.get("price")
+                    price = val.get("value") or val.get("price") or val.get("amount")
                     if price is not None:
                         price = float(price)
+                        break
+        # Try nested offer/pricing structures
+        if price is None:
+            for container_key in ["offer", "pricing", "prices"]:
+                container = item.get(container_key)
+                if isinstance(container, dict):
+                    for pk in ["price", "currentPrice", "sellingPrice", "value", "amount"]:
+                        val = container.get(pk)
+                        if isinstance(val, (int, float)):
+                            price = float(val)
+                            break
+                        if isinstance(val, str):
+                            price = self._parse_price(val)
+                            if price is not None:
+                                break
+                    if price is not None:
                         break
 
         price_per_unit = None
@@ -192,26 +235,27 @@ class CarrefourScraper(BaseScraper):
             elif isinstance(ppu, dict):
                 price_per_unit = ppu.get("label") or ppu.get("formatted")
 
-        image_url = item.get("image") or item.get("imageUrl")
+        image_url = item.get("image") or item.get("imageUrl") or item.get("thumbnailUrl")
         if isinstance(image_url, dict):
             image_url = image_url.get("url") or image_url.get("src")
         if isinstance(image_url, list) and image_url:
-            image_url = (
-                image_url[0]
-                if isinstance(image_url[0], str)
-                else image_url[0].get("url")
-            )
-        # Handle nested media
+            first = image_url[0]
+            image_url = first if isinstance(first, str) else first.get("url") if isinstance(first, dict) else None
+        # Handle nested media/images
         if not image_url:
-            media = item.get("media", {})
-            if isinstance(media, dict):
-                image_url = media.get("url") or media.get("src")
-            elif isinstance(media, list) and media:
-                image_url = (
-                    media[0] if isinstance(media[0], str) else media[0].get("url")
-                )
+            for media_key in ["media", "medias", "images"]:
+                media = item.get(media_key)
+                if isinstance(media, dict):
+                    image_url = media.get("url") or media.get("src") or media.get("href")
+                    if image_url:
+                        break
+                elif isinstance(media, list) and media:
+                    first = media[0]
+                    image_url = first if isinstance(first, str) else (first.get("url") or first.get("src") if isinstance(first, dict) else None)
+                    if image_url:
+                        break
 
-        product_url = item.get("url") or item.get("href", "")
+        product_url = item.get("url") or item.get("href") or item.get("slug", "")
         if product_url and not product_url.startswith("http"):
             product_url = f"https://www.carrefour.fr{product_url}"
 
@@ -228,23 +272,31 @@ class CarrefourScraper(BaseScraper):
         """Parse products from intercepted API JSON responses."""
         products: list[ScrapedProduct] = []
         for data in api_responses:
-            # Try multiple data structure patterns
-            items = (
-                data.get("data", {}).get("products", [])
-                or data.get("data", {}).get("data", {}).get("products", [])
-                or data.get("products", [])
-                or data.get("hits", [])
-                or data.get("items", [])
-                or data.get("results", [])
-            )
+            try:
+                inner_data = data.get("data")
+                inner_inner = inner_data.get("data") if isinstance(inner_data, dict) else None
+                items = (
+                    (inner_data.get("products", []) if isinstance(inner_data, dict) else [])
+                    or (inner_inner.get("products", []) if isinstance(inner_inner, dict) else [])
+                    or data.get("products", [])
+                    or data.get("hits", [])
+                    or data.get("items", [])
+                    or data.get("results", [])
+                )
+                # If inner "data" was a list, use it directly
+                if not items and isinstance(inner_data, list):
+                    items = inner_data
 
-            for item in items:
-                try:
-                    product = self._item_to_product(item)
-                    if product:
-                        products.append(product)
-                except Exception as e:
-                    logger.debug("Carrefour API parse error: %s", e)
+                for item in items:
+                    try:
+                        if isinstance(item, dict):
+                            product = self._item_to_product(item)
+                            if product:
+                                products.append(product)
+                    except Exception as e:
+                        logger.debug("Carrefour API item parse error: %s", e)
+            except Exception as e:
+                logger.debug("Carrefour API response parse error: %s", e)
 
         return products
 
