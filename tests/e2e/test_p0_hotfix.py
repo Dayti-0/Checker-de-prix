@@ -17,9 +17,11 @@ def calls(page, pattern):
     seen = []
     page.on(
         "request",
-        lambda r: seen.append(f"{r.method} {r.url.split(page.base, 1)[-1]}")
-        if re.search(pattern, f"{r.method} {r.url}")
-        else None,
+        lambda r: (
+            seen.append(f"{r.method} {r.url.split(page.base, 1)[-1]}")
+            if re.search(pattern, f"{r.method} {r.url}")
+            else None
+        ),
     )
     return seen
 
@@ -97,8 +99,10 @@ def test_hostile_texts_are_shown_as_text(desktop):
 def test_unknown_retailer_cannot_be_stored(desktop):
     page = desktop
     page.goto(page.base)
-    payload = {"query": "farine", "product": {"store": "x\"><img src=x onerror=\"document.title='XSS-OK'\">",
-                                              "name": "Farine", "price": 1}}
+    payload = {
+        "query": "farine",
+        "product": {"store": 'x"><img src=x onerror="document.title=\'XSS-OK\'">', "name": "Farine", "price": 1},
+    }
     response = page.request.post(f"{page.base}/api/list", data=payload)
     assert response.status == 422
     assert page.request.get(f"{page.base}/api/list").json() == []

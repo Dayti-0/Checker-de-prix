@@ -55,7 +55,9 @@ async def fake_geocode(postal_code):
 
 
 INTERMARCHE_STORES = [
-    StoreOption(id="06814", name="Intermarché Hyper Lattes", address="Route de Montpellier, 34970 Lattes", distance_km=0.9),
+    StoreOption(
+        id="06814", name="Intermarché Hyper Lattes", address="Route de Montpellier, 34970 Lattes", distance_km=0.9
+    ),
     StoreOption(id="08012", name="Intermarché Super Montpellier", distance_km=2.5),
 ]
 

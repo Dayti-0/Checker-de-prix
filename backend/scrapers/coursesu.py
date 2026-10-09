@@ -27,7 +27,13 @@ def store_name_from_url(url: str) -> str:
     """'https://www.coursesu.com/drive-superu-roujan' -> 'Super U Roujan'."""
     slug = url.rstrip("/").rsplit("/", 1)[-1]
     slug = re.sub(r"^(drive|magasin|livraison)-", "", slug)
-    banners = {"superu": "Super U", "hyperu": "Hyper U", "uexpress": "U Express", "marcheu": "Marché U", "utile": "Utile"}
+    banners = {
+        "superu": "Super U",
+        "hyperu": "Hyper U",
+        "uexpress": "U Express",
+        "marcheu": "Marché U",
+        "utile": "Utile",
+    }
     words = slug.split("-")
     first = banners.get(words[0], words[0].capitalize()) if words else ""
     return " ".join([first] + [w.capitalize() for w in words[1:]]).strip()

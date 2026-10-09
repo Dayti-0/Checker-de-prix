@@ -7,6 +7,5 @@ from backend.scrapers.lidl import LidlScraper
 
 # Display order in the interface
 SCRAPERS: dict[str, BaseScraper] = {
-    s.key: s
-    for s in (AldiScraper(), LidlScraper(), CarrefourScraper(), IntermarcheScraper(), CoursesUScraper())
+    s.key: s for s in (AldiScraper(), LidlScraper(), CarrefourScraper(), IntermarcheScraper(), CoursesUScraper())
 }

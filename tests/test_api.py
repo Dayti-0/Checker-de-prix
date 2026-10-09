@@ -67,7 +67,10 @@ def test_retailers_and_store_selection(client):
     assert bad.status_code == 400
     ok = client.put("/api/retailers/coursesu/store", json={"url": "https://www.coursesu.com/drive-superu-roujan/"})
     assert ok.json()["stores"]["coursesu"] == {
-        "id": None, "name": "Super U Roujan", "url": "https://www.coursesu.com/drive-superu-roujan", "address": None,
+        "id": None,
+        "name": "Super U Roujan",
+        "url": "https://www.coursesu.com/drive-superu-roujan",
+        "address": None,
     }
     assert client.put("/api/retailers/aldi/store", json={"id": "1"}).status_code == 400
     assert client.put("/api/retailers/intermarche/store", json={"id": "06814", "name": "Lattes"}).status_code == 200

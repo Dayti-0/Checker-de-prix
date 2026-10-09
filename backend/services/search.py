@@ -37,9 +37,7 @@ def prepare_products(products: list[Product], query: str) -> list[Product]:
 async def _scrape(scraper: BaseScraper, query: str, store: StoreSelection | None) -> list[Product]:
     for attempt in range(2):
         try:
-            return await browser.run(
-                scraper.key, scraper.search, query, store, timeout=config.SCRAPER_TIMEOUT_SECONDS
-            )
+            return await browser.run(scraper.key, scraper.search, query, store, timeout=config.SCRAPER_TIMEOUT_SECONDS)
         except (ScraperError, asyncio.TimeoutError, BrowserUnavailable):
             raise
         except Exception as e:  # navigation errors, page crashed... retry once
@@ -50,9 +48,7 @@ async def _scrape(scraper: BaseScraper, query: str, store: StoreSelection | None
     return []
 
 
-async def search_store(
-    key: str, query: str, refresh: bool = False, settings: Settings | None = None
-) -> StoreResult:
+async def search_store(key: str, query: str, refresh: bool = False, settings: Settings | None = None) -> StoreResult:
     scraper = SCRAPERS[key]
     settings = settings or await load_settings()
     store = settings.stores.get(key)
@@ -79,7 +75,9 @@ async def search_store(
             network = re.search(r"net::(ERR_[A-Z_]+)", str(e))
             if network:
                 logger.warning("%s unreachable: %s", scraper.label, network.group(1))
-                result.message = f"{scraper.label} est injoignable ({network.group(1)}). Vérifiez votre connexion Internet."
+                result.message = (
+                    f"{scraper.label} est injoignable ({network.group(1)}). Vérifiez votre connexion Internet."
+                )
             else:
                 logger.exception("%s search failed", scraper.label)
                 result.message = f"Erreur pendant la recherche sur {scraper.label} : {str(e).splitlines()[0][:200]}"

@@ -135,7 +135,9 @@ def test_intermarche_api_with_configured_store(manager):
 
         async def api(route, request):
             seen.update(url=request.url, headers=request.headers, body=json.loads(request.post_data))
-            await route.fulfill(status=200, content_type="application/json", body=json.dumps(fixtures.INTERMARCHE_SEARCH))
+            await route.fulfill(
+                status=200, content_type="application/json", body=json.dumps(fixtures.INTERMARCHE_SEARCH)
+            )
 
         await page.route("https://www.intermarche.com/", html(INTERMARCHE_HOME % ""))
         await page.route("https://www.intermarche.com/api/service/produits/**", api)
@@ -160,7 +162,9 @@ def test_intermarche_store_chosen_on_the_site(manager):
             seen["url"] = request.url
             await route.fulfill(status=200, content_type="application/json", body=json.dumps({"produits": []}))
 
-        await page.route("https://www.intermarche.com/", html(INTERMARCHE_HOME % "localStorage.setItem('itm-store', '08012');"))
+        await page.route(
+            "https://www.intermarche.com/", html(INTERMARCHE_HOME % "localStorage.setItem('itm-store', '08012');")
+        )
         await page.route("https://www.intermarche.com/api/service/produits/**", api)
         return await SCRAPERS["intermarche"].search(page, "farine", None)
 
@@ -183,7 +187,9 @@ def test_intermarche_blocked_by_datadome(manager):
     async def scenario(page):
         await offline(page)
         await page.route("https://www.intermarche.com/", html(INTERMARCHE_HOME % ""))
-        await page.route("https://www.intermarche.com/api/**", as_json({"url": "https://geo.captcha-delivery.com/"}, 403))
+        await page.route(
+            "https://www.intermarche.com/api/**", as_json({"url": "https://geo.captcha-delivery.com/"}, 403)
+        )
         return await SCRAPERS["intermarche"].search(page, "farine", StoreSelection(id="06814"))
 
     with pytest.raises(BlockedError):
@@ -232,6 +238,7 @@ def test_coursesu_visits_store_page_then_searches(manager):
             async def handler(route, request):
                 visited.append(request.url)
                 await route.fulfill(status=200, content_type="text/html; charset=utf-8", body=body)
+
             return handler
 
         await page.route("https://www.coursesu.com/drive-superu-roujan", track(fixtures.HOME_PAGE))

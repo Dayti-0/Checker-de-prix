@@ -188,9 +188,7 @@ class BrowserManager:
         try:
             from playwright.async_api import async_playwright
         except ImportError as e:
-            raise BrowserUnavailable(
-                "Playwright n'est pas installé : pip install -r requirements.txt"
-            ) from e
+            raise BrowserUnavailable("Playwright n'est pas installé : pip install -r requirements.txt") from e
 
         if self._pw is None:
             self._pw = await async_playwright().start()

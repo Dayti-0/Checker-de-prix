@@ -19,7 +19,12 @@ from tests.e2e.server import LiveServer, reset_data, use_data_dir  # noqa: E402
 
 VIEWPORTS = {
     "desktop": {"viewport": {"width": 1440, "height": 900}},
-    "mobile": {"viewport": {"width": 390, "height": 844}, "device_scale_factor": 2, "is_mobile": True, "has_touch": True},
+    "mobile": {
+        "viewport": {"width": 390, "height": 844},
+        "device_scale_factor": 2,
+        "is_mobile": True,
+        "has_touch": True,
+    },
 }
 
 # Reports CSP violations as console errors (the fixtures fail on them)

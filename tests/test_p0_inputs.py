@@ -8,7 +8,7 @@ from backend.models import ListItemCreate, Product
 from backend.services import basket
 from tests.conftest import run
 
-XSS_STORE = "x\"><img src=x onerror=\"document.title='XSS-OK'\">"
+XSS_STORE = 'x"><img src=x onerror="document.title=\'XSS-OK\'">'
 
 
 @pytest.fixture
@@ -28,8 +28,15 @@ def test_unknown_retailer_in_a_list_item_is_rejected(client):
 
 
 def test_long_texts_are_cut_not_rejected(client):
-    product = {"store": "aldi", "name": "F" * 2_000_000, "brand": "B" * 400, "price": 1, "promo": "P" * 500,
-               "unit_price_label": "U" * 150, "quantity_label": "Q" * 150}
+    product = {
+        "store": "aldi",
+        "name": "F" * 2_000_000,
+        "brand": "B" * 400,
+        "price": 1,
+        "promo": "P" * 500,
+        "unit_price_label": "U" * 150,
+        "quantity_label": "Q" * 150,
+    }
     response = client.post("/api/list", json={"query": "farine", "product": product})
     assert response.status_code == 200
     saved = client.get("/api/list").json()[0]["picks"]["aldi"]

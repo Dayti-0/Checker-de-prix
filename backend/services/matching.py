@@ -3,10 +3,30 @@
 import re
 import unicodedata
 
-STOP_WORDS = frozenset({
-    "de", "du", "des", "d", "le", "la", "les", "l", "un", "une", "au", "aux",
-    "et", "ou", "en", "a", "pour", "avec", "sans", "sur",
-})
+STOP_WORDS = frozenset(
+    {
+        "de",
+        "du",
+        "des",
+        "d",
+        "le",
+        "la",
+        "les",
+        "l",
+        "un",
+        "une",
+        "au",
+        "aux",
+        "et",
+        "ou",
+        "en",
+        "a",
+        "pour",
+        "avec",
+        "sans",
+        "sur",
+    }
+)
 
 
 def normalize(text: str) -> str:

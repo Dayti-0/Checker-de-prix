@@ -11,14 +11,21 @@ CARREFOUR_SEARCH = {
                 "brand": "CARREFOUR CLASSIC'",
                 "slug": "farine-de-ble-t45-carrefour-classic",
                 "format": "1kg",
-                "images": [{"large": "/media/540x540/Photosite/farine.jpg", "medium": "/media/280x280/Photosite/farine.jpg"}],
+                "images": [
+                    {"large": "/media/540x540/Photosite/farine.jpg", "medium": "/media/280x280/Photosite/farine.jpg"}
+                ],
                 "offers": {
                     "3560070472888": {
                         "0001_1": {
                             "type": "offer",
                             "id": "0001_1",
                             "attributes": {
-                                "price": {"price": 0.85, "perUnit": 0.85, "perUnitLabel": "0,85 € / KG", "unitOfMeasure": "KG"},
+                                "price": {
+                                    "price": 0.85,
+                                    "perUnit": 0.85,
+                                    "perUnitLabel": "0,85 € / KG",
+                                    "unitOfMeasure": "KG",
+                                },
                                 "availability": {"purchasable": True},
                                 "promotion": {"label": "2ème à -50%"},
                             },

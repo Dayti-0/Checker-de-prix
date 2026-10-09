@@ -124,7 +124,9 @@ def parse_search_json(data: object) -> list[Product]:
                 quantity_label=clean_text(item.get("conditionnement")) or None,
                 image_url=image,
                 product_url=f"{BASE_URL}/produit/{_slugify(name)}/{ean}" if ean else BASE_URL,
-                promo=f"Au lieu de {old_price:.2f} €".replace(".", ",") if old_price and price and old_price > price else None,
+                promo=f"Au lieu de {old_price:.2f} €".replace(".", ",")
+                if old_price and price and old_price > price
+                else None,
                 available=item.get("dispoCataloguePdv") is not False and stock != 0,
             )
         )
@@ -146,7 +148,9 @@ def parse_stores(data: object) -> list[StoreOption]:
         addresses = r.get("addresses") or [{}]
         a = addresses[0] if isinstance(addresses[0], dict) else {}
         address = ", ".join(
-            part for part in (clean_text(a.get("address")), f"{a.get('postCode') or ''} {a.get('townLabel') or ''}".strip()) if part
+            part
+            for part in (clean_text(a.get("address")), f"{a.get('postCode') or ''} {a.get('townLabel') or ''}".strip())
+            if part
         )
         distance = r.get("distance")
         stores.append(
@@ -189,11 +193,13 @@ class IntermarcheScraper(BaseScraper):
         if service:
             headers["x-service-name"] = service
         if service == "produits":
-            headers.update({
-                "x-optional-oauth": "true",
-                "x-itm-navigation-personalization-optout": "false",
-                "x-itm-sponsored-page": "true",
-            })
+            headers.update(
+                {
+                    "x-optional-oauth": "true",
+                    "x-itm-navigation-personalization-optout": "false",
+                    "x-itm-sponsored-page": "true",
+                }
+            )
         return headers
 
     def _check(self, result: FetchResult) -> None:

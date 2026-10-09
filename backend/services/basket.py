@@ -67,9 +67,7 @@ def choose_line(item: ListItem, store: str, result: StoreResult) -> BasketLine:
     line = BasketLine(item_id=item.id, query=item.query, quantity=item.quantity)
     pick = item.picks.get(store)
     if pick is not None:
-        fresh = next(
-            (p for p in result.products if p.product_url == pick.product_url and p.price is not None), None
-        )
+        fresh = next((p for p in result.products if p.product_url == pick.product_url and p.price is not None), None)
         line.product = fresh or (pick if pick.price is not None else None)
         line.picked = True
     else:

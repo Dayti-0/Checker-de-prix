@@ -87,4 +87,7 @@ def test_coursesu_store_url_helpers():
     assert not is_store_url("https://www.example.com/drive-superu-roujan")
     assert not is_store_url("https://www.coursesu.com/recherche?q=farine")
     assert store_name_from_url("https://www.coursesu.com/drive-superu-roujan") == "Super U Roujan"
-    assert store_name_from_url("https://www.coursesu.com/drive-hyperu-saint-jean-de-vedas/") == "Hyper U Saint Jean De Vedas"
+    assert (
+        store_name_from_url("https://www.coursesu.com/drive-hyperu-saint-jean-de-vedas/")
+        == "Hyper U Saint Jean De Vedas"
+    )
