@@ -45,6 +45,7 @@ def test_api_routes(client):
         "/api/list": ["delete", "get", "post"],
         "/api/list/{item_id}": ["delete", "patch"],
         "/api/basket/compare": ["post"],
+        "/api/version": ["get"],
         "/": ["get"],
         "/favicon.ico": ["get"],
     }

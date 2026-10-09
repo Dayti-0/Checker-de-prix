@@ -1,8 +1,8 @@
-"""User settings: show the browser window, location."""
+"""User settings: show the browser window, location (area of P4)."""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 
-from backend.browser import BrowserUnavailable, browser
+from backend.browser import browser
 from backend.models import LocationRequest, LocationResponse, Settings, SettingsUpdate
 from backend.services import settings as settings_service
 
@@ -19,10 +19,8 @@ async def api_update_settings(update: SettingsUpdate):
     current = await settings_service.load_settings()
     if update.show_browser is not None:
         current = await settings_service.set_show_browser(update.show_browser)
-        try:
-            await browser.set_show_browser(update.show_browser)
-        except BrowserUnavailable as e:
-            raise HTTPException(502, str(e))
+        # BrowserUnavailable: 502 (backend/api/errors.py)
+        await browser.set_show_browser(update.show_browser)
     return current
 
 
