@@ -1,8 +1,33 @@
 from typing import Literal
+from urllib.parse import urlsplit
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 SearchStatus = Literal["ok", "empty", "store_required", "blocked", "timeout", "error"]
+
+# Longest texts kept in a product: longer ones are cut, never rejected, so that
+# an odd product never makes a whole search fail
+NAME_MAX = 300
+LABEL_MAX = 100
+PROMO_MAX = 200
+
+
+def _cut(value: object, limit: int) -> object:
+    return value[:limit] if isinstance(value, str) and len(value) > limit else value
+
+
+def web_url(value: object) -> str | None:
+    """``value`` when it is an http(s) address, else None (no javascript:, data:...)."""
+    if not isinstance(value, str):
+        return None
+    url = value.strip()
+    if url.startswith("//"):
+        url = "https:" + url
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return None
+    return url if parts.scheme.lower() in ("http", "https") and parts.netloc else None
 
 
 class Product(BaseModel):
@@ -21,6 +46,35 @@ class Product(BaseModel):
     available: bool = True
     # 1.0 = every keyword of the query is in the product name
     relevance: float = 1.0
+
+    @field_validator("name", "brand", mode="before")
+    @classmethod
+    def _cut_name(cls, value: object) -> object:
+        return _cut(value, NAME_MAX)
+
+    @field_validator("unit", "unit_price_label", "quantity_label", mode="before")
+    @classmethod
+    def _cut_label(cls, value: object) -> object:
+        return _cut(value, LABEL_MAX)
+
+    @field_validator("promo", mode="before")
+    @classmethod
+    def _cut_promo(cls, value: object) -> object:
+        return _cut(value, PROMO_MAX)
+
+    @field_validator("product_url", mode="before")
+    @classmethod
+    def _product_url(cls, value: object) -> object:
+        if value is None or isinstance(value, str):
+            return web_url(value) or ""
+        return value
+
+    @field_validator("image_url", mode="before")
+    @classmethod
+    def _image_url(cls, value: object) -> object:
+        if value is None or isinstance(value, str):
+            return web_url(value)
+        return value
 
 
 class StoreResult(BaseModel):
@@ -121,6 +175,15 @@ class ListItemCreate(BaseModel):
     query: str = Field(min_length=1, max_length=120)
     quantity: int = Field(default=1, ge=1, le=99)
     product: Product | None = None
+
+    @field_validator("product")
+    @classmethod
+    def _known_retailer(cls, product: Product | None) -> Product | None:
+        from backend.scrapers import SCRAPERS  # the scrapers import the models
+
+        if product is not None and product.store not in SCRAPERS:
+            raise ValueError("enseigne inconnue")
+        return product
 
 
 class ListItemUpdate(BaseModel):

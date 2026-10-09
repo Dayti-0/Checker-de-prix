@@ -216,7 +216,7 @@ function renderColumn(r, best) {
             const shown = expanded ? relevant : relevant.slice(0, PAGE_SIZE);
             body += `<ul class="products">${shown.map((p) => row(p, best)).join("")}</ul>`;
             if (relevant.length > shown.length) {
-                body += `<button class="more-btn" data-more="${r.key}">Voir ${relevant.length - shown.length} de plus</button>`;
+                body += `<button class="more-btn" type="button" data-more="${r.key}">Voir ${relevant.length - shown.length} de plus</button>`;
             }
         } else {
             body += `<div class="notice">Aucun produit ne contient tous les mots de « ${escapeHtml(state.query)} ».</div>`;
@@ -225,14 +225,14 @@ function renderColumn(r, best) {
             body += `<div class="approx-title">Résultats approchants</div>
                 <ul class="products">${approx.slice(0, expanded ? 50 : PAGE_SIZE).map((p) => row(p, best)).join("")}</ul>`;
         } else if (approx.length && relevant.length <= PAGE_SIZE) {
-            body += `<button class="more-btn" data-more="${r.key}">Voir ${approx.length} résultat${approx.length > 1 ? "s" : ""} approchant${approx.length > 1 ? "s" : ""}</button>`;
+            body += `<button class="more-btn" type="button" data-more="${r.key}">Voir ${approx.length} résultat${approx.length > 1 ? "s" : ""} approchant${approx.length > 1 ? "s" : ""}</button>`;
         }
     } else {
         status = { empty: "0 produit", store_required: "Magasin à choisir", blocked: "Bloqué", timeout: "Délai dépassé" }[result.status] || "Erreur";
         const actions = [];
-        if (result.status === "store_required") actions.push(`<button class="btn-primary small" data-open-settings="${r.key}">Choisir mon magasin</button>`);
-        if (result.status === "blocked") actions.push(`<button class="btn-primary small" data-setup="${r.key}">Ouvrir le site</button>`);
-        if (result.status !== "empty") actions.push(`<button class="btn-ghost small" data-retry="${r.key}">Réessayer</button>`);
+        if (result.status === "store_required") actions.push(`<button class="btn-primary small" type="button" data-open-settings="${r.key}">Choisir mon magasin</button>`);
+        if (result.status === "blocked") actions.push(`<button class="btn-primary small" type="button" data-setup="${r.key}">Ouvrir le site</button>`);
+        if (result.status !== "empty") actions.push(`<button class="btn-ghost small" type="button" data-retry="${r.key}">Réessayer</button>`);
         const warn = result.status === "empty" ? "" : " warn";
         body = `<div class="notice${warn}">${escapeHtml(result.message || "Erreur inconnue")}
             ${actions.length ? `<div class="actions">${actions.join("")}</div>` : ""}</div>`;

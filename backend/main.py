@@ -4,13 +4,14 @@ import os
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI
-from fastapi.responses import FileResponse, Response
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from backend import config, database
 from backend.api import api_router
 from backend.browser import browser
+from backend.errors import AppError
 from backend.scrapers import SCRAPERS
 from backend.services import settings as settings_service
 
@@ -39,6 +40,11 @@ app = FastAPI(title="PrixMalin", version="2.0.0", lifespan=lifespan)
 
 # Every /api route lives in backend/api/ (one router per area)
 app.include_router(api_router)
+
+
+@app.exception_handler(AppError)
+async def app_error_handler(request: Request, error: AppError):
+    return JSONResponse({"detail": error.message, "code": error.code}, status_code=error.status_code)
 
 
 # --- Frontend ---

@@ -4,7 +4,7 @@
 // `addIndex`: value of data-add on the "+" button, for the caller to find the
 // product again when it is clicked.
 
-import { escapeHtml, euros, unitText } from "../util.js";
+import { escapeHtml, euros, safeUrl, unitText } from "../util.js";
 
 export function productRow(p, best = {}, addIndex = null) {
     const isBest = Boolean(best.byPrice) && p === best.byPrice;
@@ -15,22 +15,24 @@ export function productRow(p, best = {}, addIndex = null) {
     if (p.promo) tags.push(`<span class="tag promo">${escapeHtml(p.promo)}</span>`);
     if (!p.available) tags.push(`<span class="tag out">Indisponible</span>`);
     const meta = [p.brand, p.quantity_label].filter(Boolean).map(escapeHtml).join(" · ");
-    const image = p.image_url
-        ? `<img src="${escapeHtml(p.image_url)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">`
+    const imageUrl = safeUrl(p.image_url);
+    const image = imageUrl
+        ? `<img src="${escapeHtml(imageUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">`
         : "🛒";
+    const link = safeUrl(p.product_url);
     const unit = unitText(p);
     return `
         <li class="product${isBest || isBestUnit ? " best" : ""}${p.available ? "" : " unavailable"}">
             <div class="thumb">${image}</div>
             <div class="info">
-                <a class="name" href="${escapeHtml(p.product_url)}" target="_blank" rel="noopener">${escapeHtml(p.name)}</a>
+                <a class="name"${link ? ` href="${escapeHtml(link)}" target="_blank" rel="noopener"` : ""}>${escapeHtml(p.name)}</a>
                 ${meta ? `<div class="meta">${meta}</div>` : ""}
                 ${tags.join("")}
             </div>
             <div class="pricing">
                 ${p.price != null ? `<div class="price">${euros(p.price)}</div>` : `<div class="price none">Prix non affiché</div>`}
                 ${unit ? `<div class="unit">${escapeHtml(unit)}</div>` : ""}
-                ${addIndex != null ? `<button class="add-btn" data-add="${addIndex}" title="Ajouter ce produit à ma liste" aria-label="Ajouter à ma liste">+</button>` : ""}
+                ${addIndex != null ? `<button class="add-btn" type="button" data-add="${addIndex}" title="Ajouter ce produit à ma liste" aria-label="Ajouter à ma liste">+</button>` : ""}
             </div>
         </li>`;
 }

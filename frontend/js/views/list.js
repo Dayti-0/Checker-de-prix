@@ -4,7 +4,7 @@ import { api } from "../api.js";
 import { retailerBadge, retailerDot } from "../components/retailerBadge.js";
 import { mountStoreFilters } from "../components/storeFilters.js";
 import { addToList, loadList, retailer, store, subscribe } from "../store.js";
-import { escapeHtml, euros, toast } from "../util.js";
+import { escapeHtml, euros, safeUrl, toast } from "../util.js";
 
 // Kept while the view is hidden, like the old "Ma liste" tab
 const local = { basketHtml: "", comparing: false };
@@ -49,7 +49,7 @@ function renderList() {
             <span class="pick" title="${escapeHtml(p.name)}">
                 ${retailerDot(key)}
                 <span class="txt">${escapeHtml(retailer(key).label)} : ${escapeHtml(p.name)}${p.price != null ? ` (${euros(p.price)})` : ""}</span>
-                <button data-unpick="${item.id}" data-store="${escapeHtml(key)}" aria-label="Retirer ce choix">✕</button>
+                <button type="button" data-unpick="${item.id}" data-store="${escapeHtml(key)}" aria-label="Retirer ce choix">✕</button>
             </span>`).join("");
         return `
             <li class="list-item">
@@ -58,11 +58,11 @@ function renderList() {
                     ${picks ? `<div class="picks">${picks}</div>` : `<div class="muted small">Le moins cher des produits correspondants sera retenu.</div>`}
                 </div>
                 <div class="qty">
-                    <button data-qty="${item.id}" data-delta="-1" aria-label="Moins">−</button>
+                    <button type="button" data-qty="${item.id}" data-delta="-1" aria-label="Moins">−</button>
                     <span>${item.quantity}</span>
-                    <button data-qty="${item.id}" data-delta="1" aria-label="Plus">+</button>
+                    <button type="button" data-qty="${item.id}" data-delta="1" aria-label="Plus">+</button>
                 </div>
-                <button class="icon-btn" data-delete="${item.id}" aria-label="Supprimer">🗑</button>
+                <button class="icon-btn" type="button" data-delete="${item.id}" aria-label="Supprimer">🗑</button>
             </li>`;
     }).join("");
 }
@@ -89,9 +89,10 @@ function basketHtml(comparison) {
         const cells = stores.map((s) => {
             const line = lineFor(s, item);
             if (!line || line.line_total == null) return `<td class="cell muted">—</td>`;
+            const link = safeUrl(line.product.product_url);
             return `<td class="cell${line.line_total === min ? " cheapest" : ""}">
                 <span class="cell-price">${euros(line.line_total)}</span>${line.quantity > 1 ? ` <span class="muted">(${line.quantity} × ${euros(line.product.price)})</span>` : ""}
-                <a class="cell-name" href="${escapeHtml(line.product.product_url)}" target="_blank" rel="noopener">${line.picked ? "★ " : ""}${escapeHtml(line.product.name)}</a>
+                <a class="cell-name"${link ? ` href="${escapeHtml(link)}" target="_blank" rel="noopener"` : ""}>${line.picked ? "★ " : ""}${escapeHtml(line.product.name)}</a>
             </td>`;
         }).join("");
         return `<tr><th>${escapeHtml(item.query)}${item.quantity > 1 ? ` ×${item.quantity}` : ""}</th>${cells}</tr>`;

@@ -196,8 +196,8 @@ function bind() {
 
     $("#retailer-settings").addEventListener("click", async (e) => {
         const btn = e.target.closest("button");
-        // The submit button of the Courses U form is handled by the "submit" listener
-        if (!btn || btn.type === "submit") return;
+        // The button of the Courses U form is handled by the "submit" listener
+        if (!btn || btn.closest("form[data-coursesu-form]")) return;
         try {
             if (btn.hasAttribute("data-find-stores")) {
                 await findIntermarcheStores();

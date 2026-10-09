@@ -9,6 +9,12 @@ export function escapeHtml(value) {
         .replace(/'/g, "&#39;");
 }
 
+// Only http(s) addresses are used in links and images (no "javascript:")
+export function safeUrl(value) {
+    const url = String(value ?? "").trim();
+    return /^https?:\/\/[^\s]/i.test(url) ? url : "";
+}
+
 export function euros(value) {
     return value == null ? "" : `${value.toFixed(2).replace(".", ",")} €`;
 }

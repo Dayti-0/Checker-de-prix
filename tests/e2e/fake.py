@@ -149,7 +149,7 @@ def matches(name: str, query: str) -> bool:
 
 def products_for(key: str, query: str) -> list[Product]:
     return [
-        Product(store=key, product_url=f"https://example.com/{key}/{_slug(p['name'])}-{index}", **p)
+        Product(**{"store": key, "product_url": f"https://example.com/{key}/{_slug(p['name'])}-{index}", **p})
         for index, p in enumerate(CATALOG.get(key, []))
         if matches(p["name"], query)
     ]
