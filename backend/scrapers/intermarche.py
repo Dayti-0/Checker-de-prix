@@ -214,6 +214,7 @@ class IntermarcheScraper(BaseScraper):
             raise ScraperError(f"Intermarché a répondu HTTP {result.status}")
 
     async def search(self, page, query: str, store: StoreSelection | None) -> list[Product]:
+        self.last_source = None
         await ensure_origin(page, self.home_url, self.label)
         pdv = store.id if store and store.id else store_from_storage(await page.evaluate(_STORAGE_JS))
         if not pdv:
@@ -233,9 +234,9 @@ class IntermarcheScraper(BaseScraper):
         )
         self._check(result)
         data = result.json()
-        products = parse_search_json(data)
+        products = self.found(parse_search_json(data), "api")
         if not products:
-            products = products_from_json(data, self.key, BASE_URL)
+            products = self.found(products_from_json(data, self.key, BASE_URL), "generic")
         return products
 
     async def find_stores(self, page, lat: float, lon: float) -> list[StoreOption]:

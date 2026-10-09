@@ -29,6 +29,7 @@ class AldiScraper(BaseScraper):
     store_hint = "Prix nationaux : rien à configurer."
 
     async def search(self, page, query: str, store: StoreSelection | None) -> list[Product]:
+        self.last_source = None
         algolia_responses = []
 
         def on_response(response) -> None:
@@ -49,7 +50,7 @@ class AldiScraper(BaseScraper):
                 logger.info("Aldi: no product tile for '%s'", query)
             await page.wait_for_timeout(500)
 
-            products = await extract_cards(page, self.key, BASE_URL, **TILE_OPTIONS)
+            products = self.found(await extract_cards(page, self.key, BASE_URL, **TILE_OPTIONS), "html")
             if not products:
                 # Tiles changed: use the search API responses captured meanwhile
                 for response in algolia_responses:
@@ -57,10 +58,12 @@ class AldiScraper(BaseScraper):
                         products += products_from_json(await response.json(), self.key, BASE_URL)
                     except Exception as e:  # noqa: BLE001 (body unavailable or not JSON)
                         logger.debug("Aldi: Algolia response skipped: %s", e)
+                self.found(products, "generic")
             if not products:
-                products = await extract_cards(page, self.key, BASE_URL, linkPattern=r"/(fiches-produits|produits?)/")
+                link = r"/(fiches-produits|produits?)/"
+                products = self.found(await extract_cards(page, self.key, BASE_URL, linkPattern=link), "generic")
             if not products:
-                products = await extract_json_ld(page, self.key, BASE_URL)
+                products = self.found(await extract_json_ld(page, self.key, BASE_URL), "json-ld")
             if not products:
                 await save_debug_snapshot(page, self.key)
             return products

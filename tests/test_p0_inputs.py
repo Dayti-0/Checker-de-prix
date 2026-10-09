@@ -4,8 +4,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend import main
+from backend.errors import AppError
 from backend.models import ListItemCreate, Product
-from backend.services import basket
+from backend.services import shopping_list
 from tests.conftest import run
 
 XSS_STORE = 'x"><img src=x onerror="document.title=\'XSS-OK\'">'
@@ -66,16 +67,16 @@ def test_only_web_addresses_are_kept(url, expected):
 
 
 def test_the_list_is_capped(monkeypatch):
-    monkeypatch.setattr(basket, "MAX_ITEMS", 3)
+    monkeypatch.setattr(shopping_list, "MAX_ITEMS", 3)
 
     async def scenario():
         for name in ("farine", "sucre", "sel"):
-            await basket.add_item(ListItemCreate(query=name))
+            await shopping_list.add_item(ListItemCreate(query=name))
         # The same query is merged into its line, even when the list is full
-        await basket.add_item(ListItemCreate(query="Farine"))
-        with pytest.raises(basket.AppError) as error:
-            await basket.add_item(ListItemCreate(query="lait"))
-        return error.value, await basket.get_list()
+        await shopping_list.add_item(ListItemCreate(query="Farine"))
+        with pytest.raises(AppError) as error:
+            await shopping_list.add_item(ListItemCreate(query="lait"))
+        return error.value, await shopping_list.get_list()
 
     error, items = run(scenario())
     assert error.message == "Votre liste est pleine (3 articles au maximum)."
@@ -83,7 +84,7 @@ def test_the_list_is_capped(monkeypatch):
 
 
 def test_full_list_message_reaches_the_client(client, monkeypatch):
-    monkeypatch.setattr(basket, "MAX_ITEMS", 2)
+    monkeypatch.setattr(shopping_list, "MAX_ITEMS", 2)
     for query in ("farine", "sucre"):
         assert client.post("/api/list", json={"query": query}).status_code == 200
     response = client.post("/api/list", json={"query": "sel"})

@@ -97,6 +97,7 @@ class LidlScraper(BaseScraper):
     )
 
     async def search(self, page, query: str, store: StoreSelection | None) -> list[Product]:
+        self.last_source = None
         await ensure_origin(page, self.home_url, self.label)
         result = await page_fetch(page, SEARCH_API.format(query=quote(query)), headers={"accept": "application/json"})
         if result.ok and result.is_json:
@@ -105,7 +106,9 @@ class LidlScraper(BaseScraper):
             except ValueError:
                 data = None
             if isinstance(data, dict):
-                products = parse_search_json(data) or products_from_json(data, self.key, BASE_URL)
+                products = self.found(parse_search_json(data), "api") or self.found(
+                    products_from_json(data, self.key, BASE_URL), "generic"
+                )
                 if products or data.get("items") == []:
                     return products
         logger.info("Lidl: JSON search unavailable (HTTP %s), reading the page", result.status)
@@ -117,9 +120,9 @@ class LidlScraper(BaseScraper):
             await page.wait_for_selector("a[href*='/p/']", timeout=12000)
         except Exception as e:  # noqa: BLE001 (timeout: the page is read anyway)
             logger.debug("Lidl: no product link yet: %s", e)
-        products = await extract_cards(page, self.key, BASE_URL, linkPattern="/p/")
+        products = self.found(await extract_cards(page, self.key, BASE_URL, linkPattern="/p/"), "generic")
         if not products:
-            products = await extract_json_ld(page, self.key, BASE_URL)
+            products = self.found(await extract_json_ld(page, self.key, BASE_URL), "json-ld")
         if not products:
             await save_debug_snapshot(page, self.key)
         return products

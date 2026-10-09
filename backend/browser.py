@@ -35,6 +35,17 @@ LAUNCH_ARGS = [
 
 USE_STEALTH = os.environ.get("PRIXMALIN_STEALTH", "1") != "0"
 
+# Browsers tried in turn when PRIXMALIN_BROWSER is not set: the installed Chrome,
+# then Edge, then the Chromium downloaded by Playwright
+CHANNEL_ORDER = ("chrome", "msedge", "chromium")
+
+# python <args> downloads the Chromium of Playwright
+PLAYWRIGHT_INSTALL_ARGS = ("-m", "playwright", "install", "chromium")
+
+# Priorities of browser.run: a search typed by the user, a basket comparison,
+# background work (refresh, alerts). Accepted but not used yet.
+PRIORITIES = ("interactive", "basket", "background")
+
 
 class BrowserUnavailable(Exception):
     """The browser could not be started (not installed, no display...)."""
@@ -47,6 +58,9 @@ class BrowserManager:
         self.show_browser = False
         self.setup_mode = False
         self.error: str | None = None
+        # Incremented each time a new browser context is started (tabs, cookies
+        # in memory and page state are then new)
+        self.context_generation = 0
 
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
@@ -70,11 +84,15 @@ class BrowserManager:
         fn: Callable[..., Awaitable[Any]],
         *args: Any,
         timeout: float | None = None,
+        priority: str = "interactive",
     ) -> Any:
         """Run ``fn(page, *args)`` on the browser loop with the tab of ``key``.
 
-        Calls for the same retailer are serialised and spaced out.
+        Calls for the same retailer are serialised and spaced out. ``priority``
+        is one of PRIORITIES (not used yet: calls run in arrival order).
         """
+        if priority not in PRIORITIES:
+            raise ValueError(f"unknown priority {priority!r}")
         return await self._call(self._run_on_page, key, fn, args, timeout=timeout)
 
     async def open_setup(self, key: str | None, url: str) -> None:
@@ -183,6 +201,7 @@ class BrowserManager:
             except BrowserUnavailable as e:
                 self.error = str(e)
                 raise
+            self.context_generation += 1
             self._headless = want_headless
             self.error = None
             return self._context
@@ -197,7 +216,7 @@ class BrowserManager:
             self._pw = await async_playwright().start()
         self.profile_dir.mkdir(parents=True, exist_ok=True)
 
-        channels = [self.preferred_channel] if self.preferred_channel else ["chrome", "msedge", "chromium"]
+        channels = [self.preferred_channel] if self.preferred_channel else list(CHANNEL_ORDER)
         if self._channel in channels:  # keep the channel that already worked
             channels.remove(self._channel)
             channels.insert(0, self._channel)

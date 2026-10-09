@@ -4,6 +4,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlparse
 
 from backend import config
@@ -141,12 +142,23 @@ async def page_fetch(
     return FetchResult(result["status"], result["contentType"], result["text"], result["url"])
 
 
-async def save_debug_snapshot(page, key: str) -> None:
+def snapshot_path(key: str, status: str = "empty") -> Path:
+    """Where the page of retailer ``key`` is saved (``.html``; ``.png`` next to it).
+
+    ``status`` is the search status that led to the snapshot: data/debug/aldi.html
+    for a search without products, data/debug/aldi-blocked.html for "blocked"...
+    """
+    name = key if status == "empty" else f"{key}-{status}"
+    return config.DEBUG_DIR / f"{name}.html"
+
+
+async def save_debug_snapshot(page, key: str, status: str = "empty") -> None:
     """Keep the last page that gave no product, to help fixing a broken scraper."""
     try:
-        config.DEBUG_DIR.mkdir(parents=True, exist_ok=True)
-        (config.DEBUG_DIR / f"{key}.html").write_text(await page.content(), encoding="utf-8")
-        await page.screenshot(path=str(config.DEBUG_DIR / f"{key}.png"), full_page=False)
-        logger.info("%s: no product found, page saved in %s", key, config.DEBUG_DIR)
+        path = snapshot_path(key, status)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(await page.content(), encoding="utf-8")
+        await page.screenshot(path=str(path.with_suffix(".png")), full_page=False)
+        logger.info("%s: no product found, page saved in %s", key, path.parent)
     except Exception as e:  # noqa: BLE001 (debugging aid only)
         logger.debug("save_debug_snapshot: %s", e)

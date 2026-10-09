@@ -1,11 +1,12 @@
-"""User settings: location and the store chosen for each retailer."""
+"""User settings: location and the store chosen for each retailer (area of P4)."""
 
 import logging
 
 import httpx
 
-from backend import database
 from backend.models import Location, LocationRequest, LocationResponse, Settings, StoreSelection
+from backend.repos import settings_store
+from backend.services import hooks
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +14,7 @@ SETTINGS_KEY = "settings"
 
 
 async def load_settings() -> Settings:
-    raw = await database.get_setting(SETTINGS_KEY)
+    raw = await settings_store.get_setting(SETTINGS_KEY)
     if raw:
         try:
             return Settings.model_validate_json(raw)
@@ -23,7 +24,7 @@ async def load_settings() -> Settings:
 
 
 async def save_settings(settings: Settings) -> Settings:
-    await database.set_setting(SETTINGS_KEY, settings.model_dump_json())
+    await settings_store.set_setting(SETTINGS_KEY, settings.model_dump_json())
     return settings
 
 
@@ -96,3 +97,22 @@ async def set_show_browser(show: bool) -> Settings:
     settings = await load_settings()
     settings.show_browser = show
     return await save_settings(settings)
+
+
+# --- Backup provider: every row of the settings table (preferences included) ---
+
+
+async def export_backup() -> dict[str, str]:
+    return await settings_store.all_settings()
+
+
+async def restore_backup(data: dict[str, str]) -> None:
+    """Replace every setting with those of a backup."""
+    for key in await settings_store.all_settings():
+        if key not in data:
+            await settings_store.delete_setting(key)
+    for key, value in data.items():
+        await settings_store.set_setting(str(key), str(value))
+
+
+hooks.register_backup("settings", export_backup, restore_backup)

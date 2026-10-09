@@ -66,3 +66,12 @@ def relevance(product_text: str, query: str) -> float:
 def query_key(query: str) -> str:
     """Canonical form of a query, used for caching and merging list items."""
     return " ".join(tokenize(query))
+
+
+def match_score(name: str, query: str) -> float:
+    """How well a product name matches a query, from 0 to 1 (1 = every keyword).
+
+    Contract between the lots (P2 improves it): the search, the basket and the
+    alerts all rank products with it.
+    """
+    return relevance(name, query)

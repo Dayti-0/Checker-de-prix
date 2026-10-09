@@ -61,6 +61,7 @@ class CoursesUScraper(BaseScraper):
         self._visited_store_url: str | None = None
 
     async def search(self, page, query: str, store: StoreSelection | None) -> list[Product]:
+        self.last_source = None
         if store and store.url and self._visited_store_url != store.url:
             await page.goto(store.url, wait_until="domcontentloaded", timeout=30000)
             await wait_for_clearance(page, self.label)
@@ -79,11 +80,12 @@ class CoursesUScraper(BaseScraper):
             logger.info("Courses U: no product tile for '%s'", query)
         await page.wait_for_timeout(500)
 
-        products = await extract_cards(page, self.key, BASE_URL, **TILE_OPTIONS)
+        products = self.found(await extract_cards(page, self.key, BASE_URL, **TILE_OPTIONS), "html")
         if not products:
-            products = await extract_cards(page, self.key, BASE_URL, linkPattern=r"/p/|\.html")
+            cards = await extract_cards(page, self.key, BASE_URL, linkPattern=r"/p/|\.html")
+            products = self.found(cards, "generic")
         if not products:
-            products = await extract_json_ld(page, self.key, BASE_URL)
+            products = self.found(await extract_json_ld(page, self.key, BASE_URL), "json-ld")
         if not products:
             await save_debug_snapshot(page, self.key)
         return products

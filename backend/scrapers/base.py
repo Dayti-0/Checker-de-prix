@@ -19,6 +19,10 @@ class StoreRequiredError(ScraperError):
     status = "store_required"
 
 
+# How a scraper read the products of its last search (BaseScraper.last_source)
+SOURCES = ("api", "html", "generic", "json-ld")
+
+
 class BaseScraper(ABC):
     key: str
     label: str
@@ -27,6 +31,15 @@ class BaseScraper(ABC):
     needs_store: bool = False
     # Shown in the settings panel
     store_hint: str = ""
+    # Set by each search: "api" (JSON of the site read by the scraper), "html"
+    # (selectors of the scraper), "generic" (backend/scrapers/extract.py) or
+    # "json-ld"; None when nothing was found
+    last_source: str | None = None
+
+    def found(self, products: list[Product], source: str) -> list[Product]:
+        """Record how ``products`` were read (``last_source``) and return them."""
+        self.last_source = source if products else None
+        return products
 
     def store_label(self, store: StoreSelection | None) -> str | None:
         return store.name if store and store.name else None
