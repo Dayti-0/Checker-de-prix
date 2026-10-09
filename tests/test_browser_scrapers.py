@@ -17,6 +17,7 @@ from backend.models import StoreSelection
 from backend.scrapers import SCRAPERS, common
 from backend.scrapers.base import BlockedError, StoreRequiredError
 from tests import fixtures
+from tests.conftest import browser_missing
 
 
 @pytest.fixture(scope="module")
@@ -29,7 +30,7 @@ def manager(tmp_path_factory):
     try:
         asyncio.run(m.run("probe", probe, timeout=60))
     except BrowserUnavailable as e:
-        pytest.skip(f"Chromium unavailable: {e}")
+        browser_missing(f"Chromium unavailable: {e}")
     yield m
     asyncio.run(m.shutdown())
 

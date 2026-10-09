@@ -21,6 +21,7 @@ from playwright.sync_api import Error as PlaywrightError, expect, sync_playwrigh
 from backend import config, database, main  # noqa: E402
 from backend.models import Location, Product, StoreOption  # noqa: E402
 from backend.services import search, settings  # noqa: E402
+from tests.conftest import browser_missing  # noqa: E402
 
 CATALOG = {
     "aldi": [("Farine de blé T55 1kg", 0.79, 0.79), ("Farine de sarrasin 500g", 1.49, 2.98)],
@@ -125,7 +126,7 @@ def chromium():
         try:
             browser = p.chromium.launch(timeout=60000)
         except PlaywrightError as e:
-            pytest.skip(f"Chromium unavailable: {e}")
+            browser_missing(f"Chromium unavailable: {e}")
         yield browser
         browser.close()
 
