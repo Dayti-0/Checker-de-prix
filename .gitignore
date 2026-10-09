@@ -3,3 +3,8 @@ __pycache__/
 *.pyo
 *.db
 .env
+.pytest_cache/
+venv/
+.venv/
+# Database, browser profile and debug snapshots
+data/

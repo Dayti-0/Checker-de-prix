@@ -2,90 +2,116 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PrixMalin - Comparateur de prix supermarchés</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#15803d">
+    <title>PrixMalin</title>
+    <link rel="stylesheet" href="/static/style.css?v=2">
 </head>
 <body>
-    <header>
-        <div class="header-content">
-            <h1>PrixMalin</h1>
-            <p class="subtitle">Comparez les prix des supermarchés français</p>
+    <header class="topbar">
+        <a class="brand" href="/">Prix<span>Malin</span></a>
+        <div class="topbar-actions">
+            <button id="location-chip" class="chip" type="button" title="Code postal et magasins">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                <span id="location-label">Code postal</span>
+            </button>
+            <button id="settings-btn" class="icon-btn" type="button" aria-label="Réglages" title="Réglages">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg>
+            </button>
         </div>
     </header>
 
+    <div id="setup-banner" class="setup-banner" hidden>
+        <span>Le navigateur PrixMalin est ouvert : faites vos réglages sur le site, puis</span>
+        <button id="setup-banner-done" class="btn-primary small" type="button">J'ai terminé</button>
+    </div>
+
     <main>
-        <section class="search-section">
-            <form id="search-form" class="search-form">
-                <div class="search-bar">
-                    <input
-                        type="text"
-                        id="search-input"
-                        placeholder="Rechercher un produit (ex: Huile de tournesol, Farine, Eau...)"
-                        autocomplete="off"
-                        required
-                    >
-                    <button type="submit" id="search-btn">Rechercher</button>
+        <form id="search-form" class="search" role="search">
+            <input id="q" type="search" placeholder="Farine, huile de tournesol, eau…" autocomplete="off" enterkeyhint="search" aria-label="Produit à rechercher" required>
+            <button type="submit" class="btn-primary">Comparer</button>
+        </form>
+        <div id="store-filters" class="store-filters" aria-label="Enseignes"></div>
+
+        <nav class="tabs" role="tablist">
+            <button class="tab active" type="button" data-tab="results" role="tab">Résultats</button>
+            <button class="tab" type="button" data-tab="list" role="tab">Ma liste <span id="list-count" class="count">0</span></button>
+        </nav>
+
+        <section id="tab-results" class="tab-panel">
+            <div id="welcome" class="welcome">
+                <p>Tapez un produit pour comparer ses prix chez <strong>Aldi</strong>, <strong>Lidl</strong>, <strong>Carrefour</strong>, <strong>Intermarché</strong> et <strong>Courses U</strong>.</p>
+                <div class="suggestions">
+                    <button type="button" class="suggestion">Farine</button>
+                    <button type="button" class="suggestion">Huile de tournesol</button>
+                    <button type="button" class="suggestion">Eau minérale</button>
+                    <button type="button" class="suggestion">Vinaigre</button>
+                    <button type="button" class="suggestion">Lait demi-écrémé</button>
+                    <button type="button" class="suggestion">Sucre</button>
                 </div>
+                <p id="welcome-setup" class="muted small" hidden>Astuce : indiquez votre code postal et vos magasins (⚙️) pour voir les prix Intermarché et Courses U.</p>
+            </div>
+
+            <div id="results" hidden>
+                <div id="summary" class="summary"></div>
+                <div class="toolbar">
+                    <label class="sort">Trier par
+                        <select id="sort">
+                            <option value="price">prix</option>
+                            <option value="unit">prix au kg / L</option>
+                        </select>
+                    </label>
+                    <button id="add-query-btn" class="btn-ghost" type="button"></button>
+                    <button id="refresh-btn" class="btn-ghost" type="button" title="Ignorer le cache et relancer la recherche">↻ Actualiser</button>
+                </div>
+                <div id="columns" class="columns"></div>
+            </div>
+        </section>
+
+        <section id="tab-list" class="tab-panel" hidden>
+            <form id="list-form" class="list-form">
+                <input id="list-input" placeholder="Ajouter un article (ex : lait demi-écrémé)" maxlength="120" aria-label="Article" required>
+                <input id="list-qty" type="number" min="1" max="99" value="1" aria-label="Quantité">
+                <button class="btn-primary" type="submit">Ajouter</button>
             </form>
-
-            <div class="search-options">
-                <div class="store-filters">
-                    <span class="filter-label">Enseignes :</span>
-                    <label class="store-checkbox"><input type="checkbox" value="aldi" checked><span class="store-tag aldi">Aldi</span></label>
-                    <label class="store-checkbox"><input type="checkbox" value="carrefour" checked><span class="store-tag carrefour">Carrefour</span></label>
-                    <label class="store-checkbox"><input type="checkbox" value="coursesu" checked><span class="store-tag coursesu">Courses U</span></label>
-                    <label class="store-checkbox"><input type="checkbox" value="intermarche" checked><span class="store-tag intermarche">Intermarch&eacute;</span></label>
-                </div>
-
-                <div class="location-config">
-                    <button type="button" id="location-btn" class="location-btn" title="Configurer votre code postal">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                        <span id="location-label">Code postal</span>
-                    </button>
-                </div>
+            <p class="muted small">Ajoutez des articles ici, ou avec le bouton <strong>+</strong> d'un produit dans les résultats pour choisir un produit précis.</p>
+            <ul id="list-items" class="list-items"></ul>
+            <div id="list-actions" class="list-actions" hidden>
+                <button id="compare-btn" class="btn-primary" type="button">Comparer mon panier</button>
+                <button id="clear-list-btn" class="btn-ghost danger" type="button">Vider la liste</button>
             </div>
-        </section>
-
-        <div id="location-modal" class="modal hidden">
-            <div class="modal-backdrop"></div>
-            <div class="modal-content">
-                <h3>Configurer votre localisation</h3>
-                <p class="modal-description">Entrez votre code postal pour voir les prix des magasins proches (n&eacute;cessaire pour Courses U et Intermarch&eacute;).</p>
-                <form id="location-form">
-                    <input type="text" id="postal-input" placeholder="Code postal (ex: 34000)" pattern="[0-9]{5}" maxlength="5" required>
-                    <div class="modal-actions">
-                        <button type="button" id="modal-cancel" class="btn-secondary">Annuler</button>
-                        <button type="submit" class="btn-primary">Enregistrer</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-
-        <section id="loading" class="loading hidden">
-            <div class="spinner"></div>
-            <p>Recherche en cours dans les supermarchés...</p>
-        </section>
-
-        <section id="errors" class="errors hidden"></section>
-
-        <section id="results-section" class="results-section hidden">
-            <div class="results-header">
-                <h2>Résultats pour "<span id="query-display"></span>"</h2>
-                <span id="results-count" class="results-count"></span>
-            </div>
-            <div id="results-grid" class="results-grid"></div>
-        </section>
-
-        <section id="no-results" class="no-results hidden">
-            <p>Aucun résultat trouvé. Essayez un autre terme de recherche.</p>
+            <div id="basket"></div>
         </section>
     </main>
 
-    <footer>
-        <p>PrixMalin &mdash; Comparateur de prix à usage personnel</p>
-    </footer>
+    <dialog id="settings-dialog" class="sheet">
+        <div class="sheet-head">
+            <h2>Réglages</h2>
+            <button id="settings-close" class="icon-btn" type="button" aria-label="Fermer">✕</button>
+        </div>
+        <section class="sheet-section">
+            <h3>Localisation</h3>
+            <form id="location-form" class="row">
+                <input id="postal-input" inputmode="numeric" pattern="[0-9]{5}" maxlength="5" placeholder="Code postal (ex : 34000)" aria-label="Code postal" required>
+                <button class="btn-primary" type="submit">Valider</button>
+            </form>
+            <div id="commune-choice"></div>
+            <p id="location-info" class="muted small"></p>
+        </section>
+        <section id="retailer-settings" class="sheet-section"></section>
+        <section class="sheet-section">
+            <h3>Navigateur</h3>
+            <label class="switch">
+                <input type="checkbox" id="show-browser">
+                <span>Afficher la fenêtre du navigateur pendant les recherches</span>
+            </label>
+            <p class="muted small">PrixMalin consulte les sites avec son propre navigateur. Ses cookies et vos choix de magasins sont conservés d'une fois sur l'autre. En cas de vérification anti-robot, ouvrez le site concerné et validez-la à la main une fois.</p>
+            <p id="browser-status" class="muted small"></p>
+        </section>
+    </dialog>
 
-    <script src="/static/app.js"></script>
+    <div id="toast" class="toast" role="status" hidden></div>
+
+    <script src="/static/app.js?v=2"></script>
 </body>
 </html>

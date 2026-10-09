@@ -2,243 +2,99 @@
 
 ## Objectif
 
-Application web permettant de comparer les prix de produits alimentaires courants entre différents supermarchés français. L'utilisateur entre simplement un nom de produit (ex: "Huile de tournesol", "Farine", "Eau", "Vinaigre") et l'app affiche les prix trouvés chez chaque enseigne, triés du moins cher au plus cher.
+Application web personnelle qui compare les prix de produits alimentaires courants entre supermarchés français. L'utilisateur tape un nom de produit (ex : "Huile de tournesol", "Farine", "Eau", "Vinaigre") et l'app affiche les prix trouvés chez chaque enseigne, du moins cher au plus cher. Une liste de courses permet de comparer le total d'un panier entre enseignes.
 
-## Enseignes cibles
+## Enseignes
 
-| Enseigne | URL de recherche | Méthode | Notes |
-|----------|-----------------|---------|-------|
-| **Aldi** | `https://www.aldi.fr/recherche.html?query={query}` | Playwright (contenu JS) | Prix nationaux, pas de sélection de magasin nécessaire |
-| **Carrefour** | `https://www.carrefour.fr/s?q={query}` | Playwright (Cloudflare 403) | Peut nécessiter un magasin pour les prix locaux |
-| **Courses U** (Hyper U / Super U) | `https://www.coursesu.com/recherche?q={query}` | Playwright | **Prix visibles uniquement après sélection d'un magasin** — nécessite de configurer un magasin via cookie/session |
-| **Intermarché** | `https://www.intermarche.com/recherche/{query}` | Playwright | **Prix liés au magasin sélectionné** — même contrainte que Courses U |
+| Enseigne | Clé | Méthode | Magasin |
+|----------|-----|---------|---------|
+| **Aldi** | `aldi` | Page `https://www.aldi.fr/recherche.html?query=` (tuiles `.product-tile`), secours : réponses Algolia interceptées, extracteur générique, JSON-LD | Prix nationaux |
+| **Lidl** | `lidl` | API `GET /q/api/search?q=&assortment=FR&locale=fr_FR&version=v2.0.0` (items → `gridbox.data` : `fullTitle`, `price.price`, `price.basePrice.text`), secours : page `/q/search?q=` | Prix nationaux |
+| **Carrefour** | `carrefour` | `GET /s?q=&page=1` avec en-têtes `accept: application/json` + `x-requested-with: XMLHttpRequest` → JSON (`data[].attributes` : `title`, `brand`, `ean`, `slug`, `offers[ean][offerId].attributes.price.{price,perUnitLabel}`), URL produit `/p/{slug}-{ean}`. Secours : page `/s?q=&noRedirect=1` | Prix en ligne par défaut, magasin choisissable à la main sur le site |
+| **Intermarché** | `intermarche` | API `POST /api/service/produits/v4/pdvs/{pdvRef}/products/byKeywordAndCategory` (réponse `produits[]` : `libelle`, `marque`, `prix`, `prixKg`, `unitePrixVente`, `images`). Magasins : `GET /api/service/pdvs/v4/pdvs/zone?lat=&lon=&min=10&r=` (`resultats[]` : `storeCode`, `entityLabel`...). En-têtes `x-itm-*`, `x-red-*` copiés du site | **Obligatoire** : `pdvRef` choisi dans les réglages, ou lu dans le `localStorage` (`itm-store`) si choisi sur le site |
+| **Courses U** | `coursesu` | Page `https://www.coursesu.com/recherche?q=` (tuiles SFCC `[data-pid]`), extracteur générique en secours | **Obligatoire** : l'utilisateur donne l'URL de son magasin (ex : `https://www.coursesu.com/drive-superu-roujan`), visitée avant la recherche pour poser le contexte magasin |
 
-## Architecture technique
+Ces sites changent sans prévenir : les structures ci-dessus datent de 2026. Carrefour (Cloudflare) et Intermarché (DataDome) refusent tout client qui n'est pas un vrai navigateur : les appels API se font donc **depuis une page du site** (`fetch()` dans la page, voir `page_fetch`).
 
-### Stack recommandé
+## Architecture
 
-- **Backend** : Python 3.11+
-- **Scraping** : Playwright (async) — tous les sites utilisent du rendu JS ou du Cloudflare
-- **API** : FastAPI
-- **Frontend** : Interface web simple (HTML/CSS/JS ou React)
-- **Base de données** : SQLite (stockage produits, prix historiques, magasins)
-- **Cache** : Cache fichier ou Redis pour éviter de re-scraper trop souvent (TTL ~6h)
+- **Backend** : Python 3.11+, FastAPI, Playwright (async), SQLite (aiosqlite)
+- **Frontend** : HTML/CSS/JS sans build (`frontend/`), mobile-first
+- **Navigateur** (`backend/browser.py`) : un seul navigateur persistant pour toute l'app
+  - tourne sur **son propre thread et sa propre boucle asyncio** (boucle Proactor sous Windows, indépendante d'uvicorn) ; on l'appelle avec `await browser.run(key, fn, *args, timeout=)` qui exécute `fn(page, *args)` dans l'onglet de l'enseigne `key`
+  - profil persistant `data/browser-profile` : cookies, passage anti-bot et magasins choisis sur les sites survivent aux redémarrages
+  - canal auto : Chrome installé, puis Edge, puis Chromium de Playwright (`PRIXMALIN_BROWSER` pour forcer)
+  - headless « nouveau » avec user-agent sans `HeadlessChrome` + `playwright-stealth` ; mode visible à la demande (« Ouvrir le site ») pour que l'utilisateur valide un captcha ou choisisse son magasin
+  - un onglet par enseigne, appels sérialisés par enseigne et espacés d'au moins 1 s
+- **Recherche** (`backend/services/search.py`) : cache SQLite 6 h (clé = enseigne + magasin + requête normalisée), une relance en cas d'erreur de navigation, statuts `ok | empty | store_required | blocked | timeout | error` avec message en français, pertinence (`services/matching.py` : part des mots de la requête présents dans le nom, accents/pluriels ignorés), prix au kg/L normalisé (`scrapers/parsing.py`)
+- **Extraction générique** (`backend/scrapers/extract.py`) : cartes produit repérées par lien produit + prix en €, JSON-LD, recherche de produits dans n'importe quel JSON. Sert de secours quand les sélecteurs spécifiques cassent
+- **Débogage** : quand un scraper ne trouve rien, la page est sauvée dans `data/debug/{enseigne}.html|png`
 
-### Structure du projet
-
-```
-prixmalin/
-├── CLAUDE.md
-├── requirements.txt
-├── backend/
-│   ├── main.py              # FastAPI app
-│   ├── config.py             # Configuration (code postal, magasins préférés)
-│   ├── database.py           # SQLite models et helpers
-│   ├── scrapers/
-│   │   ├── base.py           # Classe abstraite BaseScraper
-│   │   ├── aldi.py           # Scraper Aldi
-│   │   ├── carrefour.py      # Scraper Carrefour
-│   │   ├── coursesu.py        # Scraper Courses U
-│   │   └── intermarche.py    # Scraper Intermarché
-│   ├── models.py             # Pydantic models (Product, Price, Store)
-│   └── services/
-│       ├── search.py         # Orchestration de la recherche multi-enseigne
-│       └── location.py       # Géolocalisation / sélection magasins
-├── frontend/
-│   ├── index.html
-│   ├── style.css
-│   └── app.js
-└── tests/
-    └── test_scrapers.py
-```
-
-## Fonctionnalités
-
-### V1 - MVP
-
-1. **Recherche simple** : L'utilisateur tape un nom de produit → les scrapers cherchent en parallèle sur chaque enseigne
-2. **Affichage comparatif** : Tableau/cartes montrant pour chaque enseigne les résultats trouvés avec :
-   - Nom du produit
-   - Prix (€)
-   - Prix au kg/L si disponible
-   - Image du produit si disponible
-   - Lien direct vers la page produit
-3. **Tri** : Par prix croissant par défaut
-4. **Liste de courses** : Pouvoir ajouter plusieurs produits et voir le total par enseigne
-5. **Configuration lieu** : Entrer un code postal pour paramétrer les magasins de proximité (surtout pour Courses U et Intermarché)
-
-### V2 - Améliorations
-
-- Historique des prix (graphique d'évolution)
-- Notifications si un prix baisse
-- Suggestions de produits similaires moins chers
-- Mode panier : calculer où faire ses courses pour le panier le moins cher globalement
-
-## Détails d'implémentation des scrapers
-
-### Pattern commun (BaseScraper)
-
-```python
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
-
-@dataclass
-class ScrapedProduct:
-    name: str
-    price: float | None          # Prix en euros
-    price_per_unit: str | None   # Ex: "2,50 €/kg"
-    image_url: str | None
-    product_url: str
-    store_name: str
-
-class BaseScraper(ABC):
-    @abstractmethod
-    async def search(self, query: str) -> list[ScrapedProduct]:
-        """Recherche un produit et retourne la liste des résultats."""
-        pass
-    
-    @abstractmethod
-    async def setup_location(self, postal_code: str) -> bool:
-        """Configure le magasin le plus proche pour cette enseigne."""
-        pass
-```
-
-### Aldi (le plus simple)
-
-- URL : `https://www.aldi.fr/recherche.html?query={query}`
-- Les prix sont **nationaux** (pas de variation par magasin)
-- Le contenu est rendu en JavaScript → attendre le sélecteur des résultats
-- Sélecteurs à identifier : conteneur produit, nom, prix
-- **Stratégie** : `page.goto()` → `page.wait_for_selector()` → parser les éléments
-
-### Carrefour
-
-- URL : `https://www.carrefour.fr/s?q={query}`
-- Renvoie 403 sans headers/cookies appropriés
-- **Stratégie** : Playwright en mode headed ou avec `stealth` plugin pour contourner Cloudflare
-- Alternative : intercepter les requêtes API internes (XHR) qui renvoient du JSON structuré — plus fiable si on identifie l'endpoint
-
-### Courses U
-
-- URL : `https://www.coursesu.com/recherche?q={query}`
-- **Les prix ne s'affichent qu'après sélection d'un magasin**
-- Nécessite de persister un cookie/session de magasin
-- **Stratégie** : 
-  1. Naviguer vers la page d'accueil
-  2. Sélectionner un magasin via le sélecteur de magasin (code postal)
-  3. Sauvegarder le contexte navigateur (cookies)
-  4. Réutiliser ce contexte pour les recherches suivantes
-
-### Intermarché
-
-- URL : `https://www.intermarche.com/recherche/{query}`
-- Même contrainte que Courses U — prix liés au magasin
-- **Stratégie** : Similaire à Courses U, configurer le magasin puis scraper
-
-## Gestion de la géolocalisation
-
-```python
-# L'utilisateur entre son code postal au premier lancement
-# Le système identifie les magasins les plus proches pour chaque enseigne
-
-# Pour Aldi : pas nécessaire (prix nationaux)
-# Pour Carrefour : optionnel mais recommandé  
-# Pour Courses U : OBLIGATOIRE pour voir les prix
-# Pour Intermarché : OBLIGATOIRE pour voir les prix
-
-# Stocker la config dans SQLite ou un fichier JSON local
-{
-    "postal_code": "34000",
-    "stores": {
-        "coursesu": {"store_id": "xxx", "store_name": "Super U Montpellier"},
-        "intermarche": {"store_id": "yyy", "store_name": "Intermarché Montpellier"},
-        "carrefour": {"store_id": "zzz", "store_name": "Carrefour Montpellier"}
-    }
-}
-```
-
-## Robustesse et bonnes pratiques
-
-### Anti-détection
-
-- Utiliser `playwright-stealth` pour éviter la détection bot
-- Varier les user-agents
-- Ajouter des délais aléatoires entre les requêtes (1-3s)
-- Ne pas scraper plus d'une fois par produit par 6h (cache)
-- Réutiliser les contextes navigateur (cookies persistants)
-
-### Gestion d'erreurs
-
-- Si un scraper échoue, afficher les résultats des autres (dégradation gracieuse)
-- Retry avec backoff exponentiel (max 2 retries)
-- Logger les erreurs pour debug
-- Timeout par scraper : 15 secondes max
-
-### Performance
-
-- Lancer les scrapers en **parallèle** (asyncio.gather)
-- Cache des résultats (SQLite ou fichier) avec TTL de 6h
-- Possibilité de rafraîchir manuellement
-
-## API Endpoints
+### Structure
 
 ```
-GET  /api/search?q={query}                    → Recherche un produit sur toutes les enseignes
-GET  /api/search?q={query}&stores=aldi,carrefour → Filtrer par enseigne
-POST /api/config/location                      → Configurer le code postal
-GET  /api/config/stores                        → Voir les magasins configurés
-GET  /api/products                             → Liste des produits suivis
-POST /api/products                             → Ajouter un produit à suivre
-GET  /api/products/{id}/prices                 → Historique des prix d'un produit
+backend/
+  main.py              # FastAPI : routes API + fichiers statiques ; python -m backend.main
+  config.py            # chemins (data/), port, timeouts, variables PRIXMALIN_*
+  browser.py           # BrowserManager (thread dédié, profil persistant, mode visible)
+  database.py          # SQLite : cache, réglages, liste de courses
+  models.py            # modèles Pydantic
+  scrapers/
+    base.py            # BaseScraper, ScraperError / BlockedError / StoreRequiredError
+    common.py          # helpers de page : cookies, détection anti-bot, fetch dans la page
+    extract.py         # extracteurs génériques (cartes HTML, JSON-LD, JSON)
+    parsing.py         # prix, contenances, prix au kg/L
+    aldi.py lidl.py carrefour.py intermarche.py coursesu.py
+    __init__.py        # registre SCRAPERS (ordre d'affichage)
+  services/
+    search.py          # orchestration, cache, statuts, tri
+    matching.py        # pertinence
+    settings.py        # réglages, géocodage du code postal (geo.api.gouv.fr)
+    basket.py          # liste de courses et comparaison de panier
+frontend/              # index.html, style.css, app.js
+tests/                 # pytest (dont scénarios Chromium avec sites simulés)
+lancer.bat             # lanceur Windows
 ```
 
-## Interface utilisateur
+## API
 
-### Page principale
+```
+GET    /api/search?q=&stores=aldi,lidl&refresh=true   → toutes les enseignes (SearchResponse)
+GET    /api/search/{enseigne}?q=&refresh=true         → une enseigne (StoreResult) ; le front appelle
+                                                        celle-ci pour afficher chaque enseigne dès qu'elle répond
+GET    /api/retailers                                 → enseignes + magasin choisi
+GET    /api/retailers/intermarche/stores              → magasins proches (code postal requis)
+PUT    /api/retailers/{intermarche|coursesu}/store    → choisir un magasin ({id,name,address} ou {url})
+DELETE /api/retailers/{enseigne}/store
+GET    /api/settings | PATCH /api/settings {show_browser}
+POST   /api/settings/location {postal_code, city?}
+GET    /api/browser | POST /api/browser/setup {store} | POST /api/browser/setup/done
+GET    /api/list | POST /api/list {query, quantity, product?} | PATCH /api/list/{id} | DELETE /api/list[/{id}]
+POST   /api/basket/compare {stores?, refresh?}
+```
 
-- Barre de recherche en haut (grande, centrée)
-- Bouton "Configurer ma localisation" (code postal)
-- Résultats en cartes côte à côte par enseigne
-- Badge couleur par enseigne (Aldi=bleu, Carrefour=bleu foncé, U=rouge, Intermarché=jaune)
-- Indication du meilleur prix en vert
-
-### Design
-
-- Clean, moderne, responsive
-- Couleurs : fond clair, accents par enseigne
-- Mobile-first (beaucoup d'usage mobile pour les courses)
-
-## Installation et lancement
+## Lancement et tests
 
 ```bash
-# Installer les dépendances
 pip install -r requirements.txt
-playwright install chromium
+python -m playwright install chromium
+python -m backend.main          # http://localhost:8000 (pas d'auto-reload : il casserait Playwright sous Windows)
 
-# Configurer le code postal (première fois)
-# Se fait via l'interface web
-
-# Lancer
-python -m backend.main
-# → http://localhost:8000
+pip install pytest
+python -m pytest                # les tests navigateur sont ignorés si Chromium est absent
 ```
 
-## Dépendances (requirements.txt)
+Variables utiles : `PRIXMALIN_PORT`, `PRIXMALIN_HOST`, `PRIXMALIN_DATA_DIR`, `PRIXMALIN_BROWSER` (chrome|msedge|chromium), `PRIXMALIN_TIMEOUT` (s, défaut 40), `PRIXMALIN_WARMUP=0` (pas d'ouverture des sites au démarrage), `PRIXMALIN_STEALTH=0`.
 
-```
-fastapi>=0.100.0
-uvicorn>=0.23.0
-playwright>=1.40.0
-playwright-stealth>=1.0.0
-beautifulsoup4>=4.12.0
-pydantic>=2.0.0
-aiosqlite>=0.19.0
-httpx>=0.25.0
-```
+## Bonnes pratiques
 
-## Notes importantes
+- Préférer les API JSON internes des sites (plus stables que le HTML), appelées depuis la page du site.
+- Tout ce qui est analyse de texte/JSON doit être une fonction pure testée (`parse_search_json`, `card_to_product`...) ; le JS injecté se contente de collecter.
+- Quand un site change : regarder `data/debug/{enseigne}.html`, mettre à jour le scraper et les fixtures de `tests/fixtures.py`.
+- Ne pas contourner les captchas : en cas de blocage, l'utilisateur ouvre le site dans le navigateur PrixMalin et valide lui-même.
 
-- **Légalité** : Ce projet est à usage personnel uniquement. Le scraping de ces sites peut violer leurs CGU. Ne pas distribuer ni commercialiser.
-- **Fragilité** : Les sélecteurs CSS/XPath peuvent casser si les sites changent leur HTML. Prévoir un système de monitoring qui alerte si un scraper ne retourne plus de résultats.
-- **Commencer petit** : Implémenter Aldi en premier (le plus simple), puis ajouter les autres un par un.
-- **Alternative API** : Avant de scraper, vérifier si les sites ont des API internes (requêtes XHR dans l'onglet Network du navigateur). Les API retournent du JSON structuré et sont plus stables que le HTML.
+## Notes
+
+- **Légalité** : usage personnel uniquement. Le scraping peut violer les CGU des sites. Ne pas distribuer ni commercialiser.
+- **Lidl** ne publie en ligne qu'une partie de son assortiment alimentaire.
+- Idées V2 : historique des prix, alertes de baisse, suggestions de produits équivalents moins chers.

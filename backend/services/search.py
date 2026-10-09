@@ -1,117 +1,106 @@
+"""Search orchestration: cache, error handling, relevance and sorting."""
+
 import asyncio
 import logging
-import unicodedata
+import re
+import time
 
-from backend.database import get_cached_results, set_cached_results
-from backend.models import ScrapedProduct, SearchResponse
-from backend.scrapers.aldi import AldiScraper
-from backend.scrapers.carrefour import CarrefourScraper
-from backend.scrapers.coursesu import CoursesUScraper
-from backend.scrapers.intermarche import IntermarcheScraper
-from backend.scrapers.base import BaseScraper
+from backend import config, database
+from backend.browser import BrowserUnavailable, browser
+from backend.models import Product, SearchResponse, Settings, StoreResult, StoreSelection
+from backend.scrapers import SCRAPERS
+from backend.scrapers.base import BaseScraper, ScraperError
+from backend.scrapers.parsing import finalize_product
+from backend.services.matching import query_key, relevance
+from backend.services.settings import load_settings
 
 logger = logging.getLogger(__name__)
 
-# Short words to ignore when matching relevance (French stop words)
-_STOP_WORDS = frozenset({
-    "de", "du", "des", "le", "la", "les", "un", "une", "au", "aux",
-    "et", "ou", "en", "a", "à",
-})
+
+def cache_key(scraper: BaseScraper, store: StoreSelection | None, query: str) -> str:
+    return f"{scraper.key}|{scraper.context_key(store)}|{query_key(query)}"
 
 
-def _normalize(text: str) -> str:
-    """Lowercase and strip accents from *text*."""
-    text = text.lower()
-    # Decompose unicode, drop combining marks (accents), recompose
-    nfkd = unicodedata.normalize("NFKD", text)
-    return "".join(c for c in nfkd if not unicodedata.combining(c))
+def prepare_products(products: list[Product], query: str) -> list[Product]:
+    """Normalise unit prices, drop duplicates, score and sort by price."""
+    unique: dict[tuple[str, str], Product] = {}
+    for product in products:
+        finalize_product(product)
+        product.relevance = relevance(f"{product.name} {product.brand or ''}", query)
+        unique.setdefault((product.product_url, product.name.lower()), product)
+    return sorted(
+        unique.values(),
+        key=lambda p: (p.relevance < 1, -p.relevance, p.price is None, p.price or 0),
+    )
 
 
-def _is_relevant(product: ScrapedProduct, query: str) -> bool:
-    """Return True if the product name matches at least one keyword from the query."""
-    norm_name = _normalize(product.name)
-    keywords = [
-        w for w in _normalize(query).split() if w not in _STOP_WORDS and len(w) > 1
-    ]
-    if not keywords:
-        # If the query is only stop words, don't filter anything
-        return True
-    return any(kw in norm_name for kw in keywords)
-
-# Registry of available scrapers
-SCRAPERS: dict[str, BaseScraper] = {
-    "aldi": AldiScraper(),
-    "carrefour": CarrefourScraper(),
-    "coursesu": CoursesUScraper(),
-    "intermarche": IntermarcheScraper(),
-}
+async def _scrape(scraper: BaseScraper, query: str, store: StoreSelection | None) -> list[Product]:
+    for attempt in range(2):
+        try:
+            return await browser.run(
+                scraper.key, scraper.search, query, store, timeout=config.SCRAPER_TIMEOUT_SECONDS
+            )
+        except (ScraperError, asyncio.TimeoutError, BrowserUnavailable):
+            raise
+        except Exception as e:  # navigation errors, page crashed... retry once
+            if attempt:
+                raise
+            logger.warning("%s: %s, retrying", scraper.label, str(e).splitlines()[0])
+            await asyncio.sleep(1.5)
+    return []
 
 
-async def _run_scraper(
-    scraper: BaseScraper, query: str
-) -> tuple[list[ScrapedProduct], str | None]:
-    """Run a single scraper with caching and error handling."""
-    store_key = scraper.store_name.lower()
+async def search_store(
+    key: str, query: str, refresh: bool = False, settings: Settings | None = None
+) -> StoreResult:
+    scraper = SCRAPERS[key]
+    settings = settings or await load_settings()
+    store = settings.stores.get(key)
+    result = StoreResult(store=key, label=scraper.label, status="ok", store_label=scraper.store_label(store))
+    start = time.monotonic()
+    ckey = cache_key(scraper, store, query)
 
-    # Check cache first
-    cached = await get_cached_results(query, store_key)
+    cached = None if refresh else await database.get_cached(ckey)
     if cached is not None:
-        logger.info("Cache hit for %s / %s", store_key, query)
-        return [ScrapedProduct(**p) for p in cached], None
-
-    try:
-        results = await asyncio.wait_for(
-            scraper.search(query), timeout=45
-        )
-        # Store in cache
-        await set_cached_results(
-            query, store_key, [p.model_dump() for p in results]
-        )
-        return results, None
-    except asyncio.TimeoutError:
-        msg = f"{scraper.store_name}: timeout"
-        logger.warning(msg)
-        return [], msg
-    except Exception as e:
-        msg = f"{scraper.store_name}: {e}"
-        logger.error(msg)
-        return [], msg
-
-
-async def search_all(
-    query: str, stores: list[str] | None = None
-) -> SearchResponse:
-    """Search across all (or selected) stores in parallel."""
-    scrapers_to_run: dict[str, BaseScraper] = {}
-    if stores:
-        for s in stores:
-            key = s.lower()
-            if key in SCRAPERS:
-                scrapers_to_run[key] = SCRAPERS[key]
+        result.products = prepare_products([Product(**p) for p in cached], query)
+        result.cached = True
     else:
-        scrapers_to_run = SCRAPERS
+        try:
+            products = await _scrape(scraper, query, store)
+        except ScraperError as e:
+            result.status, result.message = e.status, str(e)
+        except asyncio.TimeoutError:
+            result.status = "timeout"
+            result.message = f"{scraper.label} n'a pas répondu à temps. Réessayez dans un instant."
+        except BrowserUnavailable as e:
+            result.status, result.message = "error", str(e)
+        except Exception as e:
+            result.status = "error"
+            network = re.search(r"net::(ERR_[A-Z_]+)", str(e))
+            if network:
+                logger.warning("%s unreachable: %s", scraper.label, network.group(1))
+                result.message = f"{scraper.label} est injoignable ({network.group(1)}). Vérifiez votre connexion Internet."
+            else:
+                logger.exception("%s search failed", scraper.label)
+                result.message = f"Erreur pendant la recherche sur {scraper.label} : {str(e).splitlines()[0][:200]}"
+        else:
+            result.products = prepare_products(products, query)
+            if result.products:
+                await database.set_cached(ckey, [p.model_dump() for p in result.products])
 
-    if not scrapers_to_run:
-        return SearchResponse(query=query, results=[], errors=["No valid stores selected"])
+    if result.status == "ok":
+        if not result.products:
+            result.status = "empty"
+            result.message = f"Aucun produit trouvé chez {scraper.label}."
+        elif scraper.needs_store and store is None and all(p.price is None for p in result.products):
+            result.status = "store_required"
+            result.message = f"{scraper.label} n'affiche les prix qu'après le choix d'un magasin."
+    result.elapsed_ms = int((time.monotonic() - start) * 1000)
+    return result
 
-    tasks = [_run_scraper(scraper, query) for scraper in scrapers_to_run.values()]
-    outcomes = await asyncio.gather(*tasks)
 
-    all_results: list[ScrapedProduct] = []
-    errors: list[str] = []
-    for results, error in outcomes:
-        all_results.extend(results)
-        if error:
-            errors.append(error)
-
-    # Filter out products that don't match the search query
-    before = len(all_results)
-    all_results = [p for p in all_results if _is_relevant(p, query)]
-    filtered = before - len(all_results)
-    if filtered:
-        logger.info("Filtered out %d irrelevant products for '%s'", filtered, query)
-
-    # Sort by price ascending (products without price go last)
-    all_results.sort(key=lambda p: (p.price is None, p.price or 0))
-
-    return SearchResponse(query=query, results=all_results, errors=errors)
+async def search_all(query: str, stores: list[str] | None = None, refresh: bool = False) -> SearchResponse:
+    keys = [k for k in (stores or SCRAPERS) if k in SCRAPERS]
+    settings = await load_settings()
+    results = await asyncio.gather(*(search_store(k, query, refresh, settings) for k in keys))
+    return SearchResponse(query=query, results=list(results))
