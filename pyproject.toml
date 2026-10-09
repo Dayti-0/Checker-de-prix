@@ -1,0 +1,39 @@
+[project]
+name = "prixmalin"
+description = "Comparateur de prix des supermarchés français (usage personnel)"
+readme = "README.md"
+requires-python = ">=3.11"
+dynamic = ["version", "dependencies"]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.dynamic]
+version = { attr = "backend.__version__" }
+dependencies = { file = ["requirements.in"] }
+
+[tool.setuptools.packages.find]
+include = ["backend*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["tests/e2e/vendor"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "ASYNC", "BLE", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["backend", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+filterwarnings = [
+    # Starlette's TestClient on recent anyio versions
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
+]
