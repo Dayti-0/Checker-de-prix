@@ -19,7 +19,7 @@ Ces sites changent sans prévenir : les structures ci-dessus datent de 2026. Car
 ## Architecture
 
 - **Backend** : Python 3.11+, FastAPI, Playwright (async), SQLite (aiosqlite)
-- **Frontend** : HTML/CSS/JS sans build (`frontend/`), mobile-first
+- **Frontend** : HTML/CSS/JS sans build (`frontend/`), mobile-first, modules ES natifs + routeur par hash (`#/recherche?q=farine`, `#/liste`, `#/reglages`) ; les anciens liens `/?q=farine` sont redirigés vers `#/recherche?q=farine`
 - **Navigateur** (`backend/browser.py`) : un seul navigateur persistant pour toute l'app
   - tourne sur **son propre thread et sa propre boucle asyncio** (boucle Proactor sous Windows, indépendante d'uvicorn) ; on l'appelle avec `await browser.run(key, fn, *args, timeout=)` qui exécute `fn(page, *args)` dans l'onglet de l'enseigne `key`
   - profil persistant `data/browser-profile` : cookies, passage anti-bot et magasins choisis sur les sites survivent aux redémarrages
@@ -34,11 +34,19 @@ Ces sites changent sans prévenir : les structures ci-dessus datent de 2026. Car
 
 ```
 backend/
-  main.py              # FastAPI : routes API + fichiers statiques ; python -m backend.main
+  main.py              # FastAPI : lifespan, app.include_router(api_router), index, fichiers statiques ; python -m backend.main
   config.py            # chemins (data/), port, timeouts, variables PRIXMALIN_*
   browser.py           # BrowserManager (thread dédié, profil persistant, mode visible)
   database.py          # SQLite : cache, réglages, liste de courses
   models.py            # modèles Pydantic
+  api/                 # routes HTTP, un APIRouter par domaine, toutes sous /api
+    __init__.py        # api_router = APIRouter(prefix="/api") + liste ROUTERS
+    common.py          # get_scraper(key) (404 si enseigne inconnue), logger
+    search.py          # /search, /search/{enseigne}
+    retailers.py       # /retailers, magasins Intermarché, choix du magasin
+    settings.py        # /settings, /settings/location
+    browser_routes.py  # /browser, /browser/setup[/done] (≠ backend/browser.py)
+    shopping_list.py   # /list, /basket/compare
   scrapers/
     base.py            # BaseScraper, ScraperError / BlockedError / StoreRequiredError
     common.py          # helpers de page : cookies, détection anti-bot, fetch dans la page
@@ -51,10 +59,55 @@ backend/
     matching.py        # pertinence
     settings.py        # réglages, géocodage du code postal (geo.api.gouv.fr)
     basket.py          # liste de courses et comparaison de panier
-frontend/              # index.html, style.css, app.js
-tests/                 # pytest (dont scénarios Chromium avec sites simulés)
+frontend/              # servi sous /static (Cache-Control: no-cache), index.html sous /
+  index.html           # coquille : barre du haut (A−/A+, code postal, réglages), bandeau « J'ai terminé »,
+                       #   nav principale (générée par le routeur), <main id="view">, toast
+  css/
+    base.css           # variables, reset, boutons, chips, badges/couleurs d'enseigne, filtres, toast, utilitaires
+    layout.css         # barre du haut, bandeau, nav, main, responsive
+    search.css list.css settings.css   # une feuille par vue (search.css contient aussi les lignes produit)
+  js/
+    main.js            # démarrage : taille du texte, chargements, registerView(...), start(), bandeau
+    router.js          # registerView, start, navigate, currentRoute, refreshNav, hrefFor
+    api.js             # api(path, {method, body}) → JSON, Error(message du serveur) sinon
+    util.js            # escapeHtml, euros, unitText, toast, debounce
+    store.js           # état partagé (retailers, settings, browser, list, enabled), subscribe/notify,
+                       #   loadSettings, loadList, actions partagées (addToList, openSetup, endSetup)
+    textsize.js        # boutons A− / A+ (localStorage prixmalin.textScale)
+    components/        # morceaux réutilisés par plusieurs vues
+      productRow.js retailerBadge.js storeFilters.js
+    views/             # une vue = un fichier = une route
+      search.js        # #/recherche?q=  (formulaire, filtres, résumé, colonnes, +, tri, actualiser)
+      list.js          # #/liste         (liste de courses, comparaison du panier)
+      settings.js      # #/reglages?enseigne=  (localisation, magasins, navigateur, « Ouvrir le site »)
+tests/                 # pytest (dont scénarios Chromium avec sites simulés et test_frontend_e2e.py)
 lancer.bat             # lanceur Windows
 ```
+
+### Ajouter une vue (frontend)
+
+1. Créer `frontend/js/views/<nom>.js` qui exporte par défaut un objet :
+   ```js
+   export default {
+       name: "historique",                 // identifiant unique
+       path: "/historique",                // route : #/historique?x=...
+       title: "Historique",                // ou (params) => "..." ; document.title = « … · PrixMalin »
+       nav: { label: "Historique", order: 30 },  // facultatif ; badge: () => nombre ; keepParams: true
+       render(container, params) { ... },  // construit la vue DANS container (neuf à chaque affichage)
+       update(params) { ... },             // facultatif : même vue, autres paramètres
+       destroy() { ... },                  // facultatif : se désabonner (subscribe renvoie la fonction)
+   };
+   ```
+2. Ajouter dans `frontend/js/main.js` : `import historyView from "./views/historique.js";` et `registerView(historyView);`.
+3. Styles dans `frontend/css/<nom>.css` + une ligne `<link>` dans `index.html`.
+
+Règles : une vue ne touche que le DOM de son `container` (`container.querySelector`, jamais `document.getElementById` pour ses propres éléments) ; la coquille (puce code postal, bandeau, badge de la nav) se met à jour via `store.js` (`notify("list")`, `setSettings()`...). L'état à garder d'une visite à l'autre vit dans le module de la vue (variables du module), les données partagées dans `store`. Naviguer : `navigate("/liste")` ou un lien `href="#/liste"`. Inutile de changer `?v=4` dans `index.html` : tout `/static` est servi en `Cache-Control: no-cache` (revalidé à chaque chargement).
+
+### Ajouter une route (backend)
+
+- Dans un domaine existant : ajouter la fonction au routeur du fichier `backend/api/<domaine>.py` (`@router.get("/chemin")`, le préfixe `/api` est ajouté par `api_router`).
+- Nouveau domaine : créer `backend/api/<domaine>.py` avec `router = APIRouter()`, puis l'importer et l'ajouter à `ROUTERS` dans `backend/api/__init__.py`.
+- La logique va dans `backend/services/`, les modèles dans `backend/models.py` (`response_model=`), et un test dans `tests/test_api.py` (le test `test_api_routes` liste toutes les URL : le compléter).
 
 ## API
 
@@ -81,7 +134,7 @@ python -m playwright install chromium
 python -m backend.main          # http://localhost:8000 (pas d'auto-reload : il casserait Playwright sous Windows)
 
 pip install pytest
-python -m pytest                # les tests navigateur sont ignorés si Chromium est absent
+python -m pytest                # les tests navigateur (scrapers, interface) sont ignorés si Chromium est absent
 ```
 
 Variables utiles : `PRIXMALIN_PORT`, `PRIXMALIN_HOST`, `PRIXMALIN_DATA_DIR`, `PRIXMALIN_BROWSER` (chrome|msedge|chromium), `PRIXMALIN_TIMEOUT` (s, défaut 40), `PRIXMALIN_WARMUP=0` (pas d'ouverture des sites au démarrage), `PRIXMALIN_STEALTH=0`.

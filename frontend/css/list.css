@@ -1,0 +1,54 @@
+/* List view (js/views/list.js): shopping list and basket comparison */
+
+.list-form { display: flex; gap: .55rem; max-width: 54rem; }
+.list-form input { padding: .7rem .85rem; border: 1px solid var(--border); border-radius: .7rem; background: var(--surface); min-width: 0; }
+.list-form input:first-child { flex: 1; }
+.list-form input[type=number] { width: 5rem; }
+
+.list-items { list-style: none; padding: 0; margin: 1rem 0; max-width: 54rem; }
+.list-item {
+    display: flex;
+    gap: .85rem;
+    align-items: center;
+    padding: .9rem 1rem;
+    margin-bottom: .55rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+.list-main { flex: 1; min-width: 0; }
+.list-main strong { font-size: 1.1rem; }
+.picks { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .4rem; }
+.pick {
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+    max-width: 100%;
+    padding: .2rem .3rem .2rem .6rem;
+    border-radius: 999px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    font-size: .875rem;
+}
+.pick span.txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pick button { border: 0; background: none; color: var(--muted); padding: 0 .3rem; }
+.qty { display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: .7rem; overflow: hidden; }
+.qty button { border: 0; background: var(--surface-2); width: 2.4rem; height: 2.4rem; font-size: 1.15rem; }
+.qty span { min-width: 2.2rem; text-align: center; font-weight: 700; }
+.list-actions { display: flex; flex-wrap: wrap; gap: .55rem; margin-bottom: 1.1rem; }
+
+/* --- Basket comparison --- */
+
+.basket-cards { display: grid; gap: .7rem; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); margin-bottom: .9rem; }
+.basket-card { padding: .9rem 1.1rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.basket-card.best { border: 2px solid var(--best); background: var(--best-bg); }
+.basket-card .total { font-size: 1.8rem; font-weight: 800; margin: .4rem 0 .15rem; }
+.basket-split { margin: 0 0 .9rem; font-size: 1rem; }
+.table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.basket-table { border-collapse: collapse; width: 100%; font-size: .95rem; }
+.basket-table th, .basket-table td { padding: .6rem .8rem; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+.basket-table td.cell { min-width: 10rem; }
+.basket-table .cell-price { font-weight: 700; }
+.basket-table .cell-name { color: var(--muted); font-size: .85rem; display: block; max-width: 16rem; }
+.basket-table td.cheapest .cell-price { color: var(--best); }
+.basket-table tfoot td { font-weight: 800; font-size: 1.05rem; }

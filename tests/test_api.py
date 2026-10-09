@@ -17,8 +17,37 @@ def client(monkeypatch):
 
 
 def test_index_and_static(client):
-    assert "PrixMalin" in client.get("/").text
-    assert client.get("/static/app.js").status_code == 200
+    index = client.get("/").text
+    assert "PrixMalin" in index
+    assert '<script type="module" src="/static/js/main.js' in index
+    for path in ("/static/js/main.js", "/static/js/router.js", "/static/js/views/search.js", "/static/css/base.css"):
+        response = client.get(path)
+        assert response.status_code == 200, path
+        # ES modules import each other without a version: always revalidate them
+        assert response.headers["cache-control"] == "no-cache"
+    assert client.get("/static/js/inconnu.js").status_code == 404
+
+
+def test_api_routes(client):
+    """The split of the API into routers (backend/api/) keeps every URL."""
+    paths = {path: sorted(methods) for path, methods in main.app.openapi()["paths"].items()}
+    assert paths == {
+        "/api/search": ["get"],
+        "/api/search/{store}": ["get"],
+        "/api/retailers": ["get"],
+        "/api/retailers/intermarche/stores": ["get"],
+        "/api/retailers/{key}/store": ["delete", "put"],
+        "/api/settings": ["get", "patch"],
+        "/api/settings/location": ["post"],
+        "/api/browser": ["get"],
+        "/api/browser/setup": ["post"],
+        "/api/browser/setup/done": ["post"],
+        "/api/list": ["delete", "get", "post"],
+        "/api/list/{item_id}": ["delete", "patch"],
+        "/api/basket/compare": ["post"],
+        "/": ["get"],
+        "/favicon.ico": ["get"],
+    }
 
 
 def test_search_endpoints(client):
