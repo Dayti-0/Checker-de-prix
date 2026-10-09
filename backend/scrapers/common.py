@@ -74,7 +74,7 @@ async def accept_cookies(page) -> None:
         clicked = await page.evaluate(_ACCEPT_COOKIES_JS)
         if clicked:
             await page.wait_for_timeout(400)
-    except Exception as e:  # page navigated meanwhile, etc.
+    except Exception as e:  # noqa: BLE001 (page navigated meanwhile, etc.)
         logger.debug("accept_cookies: %s", e)
 
 
@@ -89,7 +89,7 @@ async def detect_block(page) -> str | None:
             return "cloudflare"
         if _CHALLENGE_TITLE.search(await page.title()):
             return "cloudflare"
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 (page navigated meanwhile, etc.)
         logger.debug("detect_block: %s", e)
     return None
 
@@ -148,5 +148,5 @@ async def save_debug_snapshot(page, key: str) -> None:
         (config.DEBUG_DIR / f"{key}.html").write_text(await page.content(), encoding="utf-8")
         await page.screenshot(path=str(config.DEBUG_DIR / f"{key}.png"), full_page=False)
         logger.info("%s: no product found, page saved in %s", key, config.DEBUG_DIR)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 (debugging aid only)
         logger.debug("save_debug_snapshot: %s", e)

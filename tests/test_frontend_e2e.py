@@ -16,7 +16,8 @@ import pytest
 pytest.importorskip("playwright")
 
 import uvicorn  # noqa: E402
-from playwright.sync_api import Error as PlaywrightError, expect, sync_playwright  # noqa: E402
+from playwright.sync_api import Error as PlaywrightError  # noqa: E402
+from playwright.sync_api import expect, sync_playwright
 
 from backend import config, database, main  # noqa: E402
 from backend.models import Location, Product, StoreOption  # noqa: E402

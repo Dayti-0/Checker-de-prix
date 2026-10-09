@@ -16,7 +16,9 @@ TILE_OPTIONS = {
     "cardSelector": "[data-pid], .product-tile, .product-item",
     "nameSelector": ".product-tile__name, .product-name, .pdp-link a, .tile-body a, [itemprop='name']",
     "priceSelector": ".sales .value, [itemprop='price'], .product-price, .price-sales, [class*='price__value' i]",
-    "unitSelector": "[class*='unit-price' i], [class*='price-per' i], [class*='unitPrice' i], [class*='pricePerUnit' i]",
+    "unitSelector": (
+        "[class*='unit-price' i], [class*='price-per' i], [class*='unitPrice' i], [class*='pricePerUnit' i]"
+    ),
     "brandSelector": ".product-brand, [class*='brand' i]",
 }
 
@@ -73,7 +75,7 @@ class CoursesUScraper(BaseScraper):
                 "[data-pid], .product-tile, .product-item, [class*='no-result' i], [class*='noresult' i]",
                 timeout=12000,
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 (timeout: the page is read anyway)
             logger.info("Courses U: no product tile for '%s'", query)
         await page.wait_for_timeout(500)
 

@@ -1,7 +1,5 @@
 """Retailers and the store chosen for each of them."""
 
-import asyncio
-
 from fastapi import APIRouter, HTTPException
 
 from backend.api.common import get_scraper, logger
@@ -42,7 +40,7 @@ async def api_intermarche_stores():
         return await browser.run(scraper.key, scraper.find_stores, location.lat, location.lon, timeout=45)
     except (ScraperError, BrowserUnavailable) as e:
         raise HTTPException(502, str(e))
-    except asyncio.TimeoutError:
+    except TimeoutError:
         raise HTTPException(504, "Intermarché n'a pas répondu à temps.")
     except Exception as e:
         logger.exception("Intermarché store search failed")

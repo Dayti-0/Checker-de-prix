@@ -7,6 +7,7 @@ import time
 
 from backend import config, database
 from backend.browser import BrowserUnavailable, browser
+from backend.errors import short_error
 from backend.models import Product, SearchResponse, Settings, StoreResult, StoreSelection
 from backend.scrapers import SCRAPERS
 from backend.scrapers.base import BaseScraper, ScraperError
@@ -38,12 +39,12 @@ async def _scrape(scraper: BaseScraper, query: str, store: StoreSelection | None
     for attempt in range(2):
         try:
             return await browser.run(scraper.key, scraper.search, query, store, timeout=config.SCRAPER_TIMEOUT_SECONDS)
-        except (ScraperError, asyncio.TimeoutError, BrowserUnavailable):
+        except (TimeoutError, ScraperError, BrowserUnavailable):
             raise
         except Exception as e:  # navigation errors, page crashed... retry once
             if attempt:
                 raise
-            logger.warning("%s: %s, retrying", scraper.label, str(e).splitlines()[0])
+            logger.warning("%s: %s, retrying", scraper.label, short_error(e))
             await asyncio.sleep(1.5)
     return []
 
@@ -65,7 +66,7 @@ async def search_store(key: str, query: str, refresh: bool = False, settings: Se
             products = await _scrape(scraper, query, store)
         except ScraperError as e:
             result.status, result.message = e.status, str(e)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             result.status = "timeout"
             result.message = f"{scraper.label} n'a pas répondu à temps. Réessayez dans un instant."
         except BrowserUnavailable as e:
@@ -80,7 +81,7 @@ async def search_store(key: str, query: str, refresh: bool = False, settings: Se
                 )
             else:
                 logger.exception("%s search failed", scraper.label)
-                result.message = f"Erreur pendant la recherche sur {scraper.label} : {str(e).splitlines()[0][:200]}"
+                result.message = f"Erreur pendant la recherche sur {scraper.label} : {short_error(e)}"
         else:
             result.products = prepare_products(products, query)
             if result.products:

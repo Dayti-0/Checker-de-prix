@@ -10,7 +10,8 @@ DB_PATH = DATA_DIR / "prixmalin.db"
 BROWSER_PROFILE_DIR = DATA_DIR / "browser-profile"
 DEBUG_DIR = DATA_DIR / "debug"
 
-HOST = os.environ.get("PRIXMALIN_HOST", "0.0.0.0")
+# 0.0.0.0: the phone on the same Wi-Fi reaches PrixMalin with the address of the PC
+HOST = os.environ.get("PRIXMALIN_HOST", "0.0.0.0")  # noqa: S104
 PORT = int(os.environ.get("PRIXMALIN_PORT", "8000"))
 
 # Browser channel: "chrome", "msedge", "chromium" (bundled with Playwright),

@@ -7,7 +7,8 @@ euros) so that a scraper keeps working when its specific selectors break.
 
 import json
 import re
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 from urllib.parse import urljoin
 
 from backend.models import Product
@@ -64,15 +65,18 @@ CARDS_JS = r"""
     const push = (v) => { v = clean(v); if (v && !names.includes(v)) names.push(v); };
     if (opts.nameSelector) push(textOf(card, opts.nameSelector));
     for (const l of links) { push(l.getAttribute('title')); push(l.getAttribute('aria-label')); }
-    for (const el of card.querySelectorAll('h2, h3, h4, [itemprop="name"], [class*="title" i], [class*="name" i]')) push(el.textContent);
+    const titles = 'h2, h3, h4, [itemprop="name"], [class*="title" i], [class*="name" i]';
+    for (const el of card.querySelectorAll(titles)) push(el.textContent);
     for (const l of links) push(l.textContent);
     const img = card.querySelector('img');
     if (img) push(img.getAttribute('alt'));
 
     let image = null;
     if (img) {
-      const srcset = (img.getAttribute('srcset') || img.getAttribute('data-srcset') || '').split(',').pop().trim().split(' ')[0];
-      const candidates = [img.currentSrc, img.getAttribute('src'), img.getAttribute('data-src'), img.getAttribute('data-lazy-src'), srcset];
+      const srcset = (img.getAttribute('srcset') || img.getAttribute('data-srcset') || '')
+        .split(',').pop().trim().split(' ')[0];
+      const candidates = [img.currentSrc, img.getAttribute('src'), img.getAttribute('data-src'),
+        img.getAttribute('data-lazy-src'), srcset];
       const found = candidates.find((u) => u && !u.startsWith('data:'));
       if (found) { try { image = new URL(found, location.href).href; } catch (e) { image = found; } }
     }

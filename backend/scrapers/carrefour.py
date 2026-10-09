@@ -127,8 +127,8 @@ class CarrefourScraper(BaseScraper):
         await accept_cookies(page)
         try:
             await page.wait_for_selector("a[href*='/p/']", timeout=10000)
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001 (timeout: the page is read anyway)
+            logger.debug("Carrefour: no product link yet: %s", e)
         products = await extract_cards(page, self.key, BASE_URL, cardSelector="article", linkPattern="/p/")
         if not products:
             products = await extract_cards(page, self.key, BASE_URL, linkPattern="/p/")

@@ -137,7 +137,9 @@ LIDL_SEARCH = {
 
 ALDI_PAGE = """<!DOCTYPE html>
 <html><head><title>Recherche | ALDI France</title></head><body>
-<div id="onetrust-banner-sdk"><button id="onetrust-accept-btn-handler" onclick="this.parentNode.remove()">Tout accepter</button></div>
+<div id="onetrust-banner-sdk">
+  <button id="onetrust-accept-btn-handler" onclick="this.parentNode.remove()">Tout accepter</button>
+</div>
 <div class="search-results">
   <div class="product-tile">
     <a href="/produits/epicerie/farine-de-ble-t55.html">
@@ -170,7 +172,8 @@ COURSESU_PAGE = """<!DOCTYPE html>
 <div class="search-result-items">
   <div class="product-tile" data-pid="123">
     <div class="image-container"><a href="/p/farine-de-ble-t45-u/123.html">
-      <img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" data-src="/images/farine-u.jpg" alt="Farine de blé T45 U"></a></div>
+      <img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" data-src="/images/farine-u.jpg"
+           alt="Farine de blé T45 U"></a></div>
     <div class="tile-body">
       <div class="pdp-link"><a href="/p/farine-de-ble-t45-u/123.html">Farine de blé T45 U, 1kg</a></div>
       <div class="price">
@@ -195,7 +198,8 @@ CARREFOUR_PAGE = """<!DOCTYPE html>
 <html><head><title>farine - Carrefour</title></head><body>
 <ul>
   <li><article class="x1">
-    <a href="/p/farine-de-ble-t45-carrefour-classic-3560070472888"><img src="/media/farine.jpg" alt="Farine T45"><h3>Farine de blé T45 CARREFOUR CLASSIC'</h3></a>
+    <a href="/p/farine-de-ble-t45-carrefour-classic-3560070472888"><img src="/media/farine.jpg" alt="Farine T45">
+      <h3>Farine de blé T45 CARREFOUR CLASSIC'</h3></a>
     <div class="x2"><span>0</span><span>,85 €</span></div><div class="x3">0,85 € / KG</div>
     <button aria-label="Ajouter le produit au panier">+</button>
   </article></li>

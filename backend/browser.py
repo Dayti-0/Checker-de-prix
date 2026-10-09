@@ -16,10 +16,12 @@ import random
 import sys
 import threading
 import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from backend import config
+from backend.errors import short_error
 from backend.models import BrowserStatus
 
 logger = logging.getLogger(__name__)
@@ -92,7 +94,7 @@ class BrowserManager:
         for key, url in targets.items():
             try:
                 await self.run(key, _goto_if_blank, url, timeout=45)
-            except Exception as e:  # warm-up is best effort
+            except Exception as e:  # noqa: BLE001 (warm-up is best effort)
                 logger.info("Warm-up %s failed: %s", key, e)
 
     def status(self) -> BrowserStatus:
@@ -109,7 +111,7 @@ class BrowserManager:
             return
         try:
             await self._call(self._shutdown, timeout=15)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 (stopping anyway)
             logger.debug("Browser shutdown: %s", e)
         self._loop.call_soon_threadsafe(self._loop.stop)
         if self._thread:
@@ -157,7 +159,8 @@ class BrowserManager:
             page = await self._get_page(key)
             last = self._last_request.get(key)
             if last is not None:
-                wait = config.MIN_REQUEST_INTERVAL_SECONDS + random.uniform(0, 0.5) - (time.monotonic() - last)
+                jitter = random.uniform(0, 0.5)  # noqa: S311 (not cryptographic)
+                wait = config.MIN_REQUEST_INTERVAL_SECONDS + jitter - (time.monotonic() - last)
                 if wait > 0:
                     await asyncio.sleep(wait)
             try:
@@ -210,7 +213,7 @@ class BrowserManager:
                     raise BrowserUnavailable(
                         "Impossible d'afficher la fenêtre du navigateur sur cette machine (pas d'écran)."
                     ) from e
-                logger.info("Browser channel %s unavailable: %s", channel, message.splitlines()[0])
+                logger.info("Browser channel %s unavailable: %s", channel, short_error(e))
                 continue
             self._channel = channel
             logger.info("Browser started (%s, %s)", channel, "headless" if headless else "visible")
@@ -218,7 +221,7 @@ class BrowserManager:
 
         raise BrowserUnavailable(
             "Aucun navigateur utilisable. Installez Chromium avec : python -m playwright install chromium"
-            + (f" ({str(last_error).splitlines()[0]})" if last_error else "")
+            + (f" ({short_error(last_error)})" if last_error else "")
         )
 
     async def _launch_channel(self, channel: str, headless: bool):
@@ -258,7 +261,7 @@ class BrowserManager:
                     # The platform patch claims Windows: only true on Windows
                     options.update(navigator_platform=False, navigator_platform_override=None)
                 await Stealth(**options).apply_stealth_async(context)
-            except Exception as e:  # optional dependency
+            except Exception as e:  # noqa: BLE001 (optional dependency)
                 logger.debug("Stealth not applied: %s", e)
 
         context.set_default_timeout(20000)
@@ -309,7 +312,7 @@ class BrowserManager:
         if context is not None:
             try:
                 await context.close()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 (already closed by the user)
                 logger.debug("Context close: %s", e)
 
     async def _shutdown(self) -> None:

@@ -1,5 +1,4 @@
-from backend.scrapers import SCRAPERS
-from backend.scrapers import carrefour, intermarche, lidl
+from backend.scrapers import SCRAPERS, carrefour, intermarche, lidl
 from backend.scrapers.coursesu import is_store_url, store_name_from_url
 from backend.scrapers.parsing import finalize_product
 from tests import fixtures

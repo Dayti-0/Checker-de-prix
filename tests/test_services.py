@@ -1,5 +1,3 @@
-import asyncio
-
 from backend.models import ListItemCreate, ListItemUpdate, Product, StoreSelection
 from backend.scrapers.base import BlockedError, StoreRequiredError
 from backend.services import basket, search, settings
@@ -78,7 +76,7 @@ def test_search_error_statuses(monkeypatch):
 
 def test_search_timeout(monkeypatch):
     async def slow(scraper, query, store):
-        raise asyncio.TimeoutError
+        raise TimeoutError
 
     monkeypatch.setattr(search, "_scrape", slow)
     assert run(search.search_store("aldi", "farine")).status == "timeout"

@@ -45,7 +45,7 @@ class AldiScraper(BaseScraper):
                     ".product-tile, [class*='no-result' i], [class*='noresult' i], [class*='empty-result' i]",
                     timeout=12000,
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001 (timeout: the page is read anyway)
                 logger.info("Aldi: no product tile for '%s'", query)
             await page.wait_for_timeout(500)
 
@@ -55,8 +55,8 @@ class AldiScraper(BaseScraper):
                 for response in algolia_responses:
                     try:
                         products += products_from_json(await response.json(), self.key, BASE_URL)
-                    except Exception:
-                        continue
+                    except Exception as e:  # noqa: BLE001 (body unavailable or not JSON)
+                        logger.debug("Aldi: Algolia response skipped: %s", e)
             if not products:
                 products = await extract_cards(page, self.key, BASE_URL, linkPattern=r"/(fiches-produits|produits?)/")
             if not products:
