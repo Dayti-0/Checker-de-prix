@@ -116,10 +116,11 @@ def test_purge_at_startup():
     run(scenario())
     from backend import main
 
-    with TestClient(main.app):
+    with TestClient(main.app) as client:
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
-            if run(cache.get_entry(key("lidl"))) is None:
+            # In the loop of the app: the database connection belongs to it
+            if client.portal.call(cache.get_entry, key("lidl")) is None:
                 break
             time.sleep(0.05)
     assert run(cache.get_entry(key("lidl"))) is None

@@ -532,3 +532,42 @@ def test_shared_browser_does_not_open_intermarche(tmp_path, monkeypatch):
 
     assert "intermarche" not in warmup.WARMED_UP
     assert re.search("intermarche", " ".join(warmup.WARMED_UP)) is None
+
+
+def test_window_started_for_a_search_goes_to_the_taskbar(tmp_path, monkeypatch):
+    """Chrome has no --start-minimized switch: PrixMalin minimizes the window itself."""
+    from backend.real_chrome import RealChrome
+    from tests.p3_chrome import chrome_path, display
+
+    path = chrome_path()
+    if path is None:
+        browser_missing("Chromium introuvable pour la fenêtre Intermarché")
+    states = []
+    original = RealChrome._set_window_state
+
+    async def spy(self, page, state, only_from=None):
+        states.append(state)
+        await original(self, page, state, only_from)
+
+    monkeypatch.setattr(RealChrome, "_set_window_state", spy)
+    monkeypatch.setattr(config, "CHROME_PATH", path)
+    monkeypatch.setattr(config, "CHROME_EXTRA_ARGS", sandbox_args())
+    monkeypatch.setattr(config, "REAL_CHROME_STORES", ("intermarche",))
+    with display() as available:
+        if not available:
+            browser_missing("pas d'écran pour la fenêtre Intermarché (installez Xvfb)")
+        manager = BrowserManager(tmp_path / "profile", real_chrome_dir=tmp_path)
+        try:
+            asyncio.run(manager.run("intermarche", _blank, timeout=60))
+            assert states == ["minimized"]  # started for a search: never left in front
+            asyncio.run(manager.open_setup("intermarche", "about:blank"))
+            assert states == ["minimized", "normal"]  # « Ouvrir le site »: shown again
+        finally:
+            asyncio.run(manager.shutdown())
+        states.clear()
+        visible = BrowserManager(tmp_path / "profile2", real_chrome_dir=tmp_path / "other")
+        try:
+            asyncio.run(visible.open_setup("intermarche", "about:blank"))
+            assert "minimized" not in states  # started by « Ouvrir le site »: a normal window
+        finally:
+            asyncio.run(visible.shutdown())

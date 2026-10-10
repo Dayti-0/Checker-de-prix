@@ -10,8 +10,10 @@ retailers of ``config.REAL_CHROME_STORES`` get their own window instead:
       --remote-debugging-address=127.0.0.1 --remote-debugging-port=<free port>
       --user-data-dir=data/chrome-<key> --no-first-run --no-default-browser-check
 
-  (plus ``--start-minimized`` when PrixMalin starts it for a search): never
-  headless, no stealth script, no user agent, language or window size change;
+  (plus ``--start-minimized`` when PrixMalin starts it for a search, a switch
+  Chrome ignores: the window is minimized through CDP right after start):
+  never headless, no stealth script, no user agent, language or window size
+  change;
 - the port is a free port chosen by PrixMalin, remembered in
   ``<profile>/PrixMalinDebugPort``. Not ``--remote-debugging-port=0``: Chrome
   then sets ``navigator.webdriver`` to true (measured on Chromium 141), the
@@ -325,6 +327,7 @@ class RealChrome:
     async def _connect(self, minimized: bool) -> None:
         profile = self.profile_dir
         endpoint = await self._running_endpoint(profile)
+        spawned = endpoint is None
         if endpoint is None:
             found = find_chrome(config.CHROME_PATH)
             if found is None:
@@ -351,6 +354,10 @@ class RealChrome:
         self._context = browser.contexts[0]  # the profile's own context: never new_context()
         self._context.set_default_timeout(20000)
         browser.on("disconnected", lambda *_: self._disconnected(browser))
+        if spawned and minimized and self._context.pages:
+            # Chrome has no real --start-minimized switch: the window is put in
+            # the taskbar as soon as it exists, it never stays in front
+            await self._set_window_state(self._context.pages[0], "minimized")
 
     async def _playwright(self):
         if self._pw is None:
