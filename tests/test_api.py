@@ -47,6 +47,7 @@ def test_api_routes(client):
         "/api/browser": ["get"],
         "/api/browser/setup": ["post"],
         "/api/browser/setup/done": ["post"],
+        "/api/browser/blocks/{store}": ["delete"],  # P3: « Réessayer maintenant » after a hard block
         "/api/list": ["delete", "get", "post"],
         "/api/list/{item_id}": ["delete", "patch"],
         "/api/basket/compare": ["post"],

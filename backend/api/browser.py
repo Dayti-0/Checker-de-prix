@@ -22,7 +22,17 @@ def status_for(http_request: Request) -> BrowserStatus:
 
 @router.get("/browser", response_model=BrowserStatus)
 async def api_browser_status(http_request: Request):
+    await browser.flush()  # window closed by the user: saved now
     await browser.hard_blocks.load()
+    return status_for(http_request)
+
+
+@router.delete("/browser/blocks/{store}", response_model=BrowserStatus)
+async def api_browser_unblock(store: str, http_request: Request):
+    """« Réessayer maintenant »: end the pause after a hard block (the user changed connection)."""
+    scraper = get_scraper(store)
+    await browser.hard_blocks.lift(scraper.key)
+    search.reset_circuit(scraper.key)
     return status_for(http_request)
 
 

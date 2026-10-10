@@ -108,8 +108,17 @@ class HardBlocks:
         await self._save(key, record)
 
     async def clear(self, key: str) -> None:
+        """Forget everything about ``key`` (tests, a fresh start)."""
         await self.load()
         await self._save(key, None)
+
+    async def lift(self, key: str) -> None:
+        """End the pause of ``key`` now (« Réessayer maintenant »); a new block still doubles it."""
+        await self.load()
+        record = self.record(key).model_copy()
+        if record.until:
+            record.until = 0.0
+            await self._save(key, record)
 
     async def _save(self, key: str, record: BlockRecord | None) -> BlockRecord | None:
         if record is None:
