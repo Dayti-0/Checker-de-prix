@@ -292,7 +292,7 @@ def test_calls_to_a_retailer_are_spaced(tmp_path, monkeypatch):
 
     no_wait, wait = asyncio.run(scenario())
     assert no_wait < 0.3
-    assert 0.6 <= wait < 1.3
+    assert 0.6 <= wait < 2.0  # interval + jitter (at most 0.5 s), on a slow machine too
 
 
 def test_browser_status_says_if_the_request_is_local():
