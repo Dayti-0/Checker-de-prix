@@ -1,47 +1,34 @@
-// Bootstrap: shell (top bar, nav, setup banner), shared data, views, router.
+// Start of the app: shell (top bar, navigation, search form), features, router.
 //
-// Add a view: create js/views/<name>.js (see router.js for the view object)
-// and register it below with one line.
+// Where to add code: a view in js/views/<name>/ (route of js/routes.js), a
+// home card in js/views/home/cards/, a settings section in
+// js/views/settings/sections/, a banner or a header button in js/features/,
+// a badge or an action on products in js/ext/. Not here.
 
-import { registerView, refreshNav, start } from "./router.js";
-import { endSetup, loadEnabled, loadList, loadSettings, store, subscribe } from "./store.js";
-import { initTextSize } from "./textsize.js";
-import { toast } from "./util.js";
-import listView from "./views/list.js";
-import searchView from "./views/search.js";
-import settingsView from "./views/settings.js";
+import { defineRoutes, start } from "./core/router.js";
+import { loadEnabled, loadList, loadSettings } from "./core/store.js";
+import { notify } from "./core/ui.js";
+import { initFeatures } from "./features/index.js";
+import { DEFAULT_PATH, ROUTES } from "./routes.js";
+import { initHeader } from "./shell/header.js";
+import { initNav } from "./shell/nav.js";
+import { initSearchBar } from "./shell/search-bar.js";
+import { initTextSize } from "./shell/text-size.js";
 
-registerView(searchView);
-registerView(listView);
-registerView(settingsView);
-
-// ---------------------------------------------------------------- shell
-
-function renderLocationChip() {
-    const loc = store.settings && store.settings.location;
-    document.getElementById("location-label").textContent = loc ? (loc.city ? `${loc.postal_code} ${loc.city}` : loc.postal_code) : "Code postal";
-    document.getElementById("location-chip").classList.toggle("configured", Boolean(loc));
-}
-
-function renderSetupBanner() {
-    document.getElementById("setup-banner").hidden = !(store.browser && store.browser.setup_mode);
-}
-
+defineRoutes(ROUTES);
 initTextSize();
-subscribe("settings", renderLocationChip);
-subscribe("browser", renderSetupBanner);
-subscribe("*", refreshNav); // badges of the nav (e.g. number of items in the list)
-document.getElementById("setup-banner-done").addEventListener("click", endSetup);
-
-// ---------------------------------------------------------------- start
+initHeader();
+initNav("#primary-nav");
+initFeatures();
 
 (async function init() {
     try {
         await loadSettings();
     } catch (err) {
-        toast(`Serveur injoignable : ${err.message}`, true);
+        notify(err.message, { type: "error" });
     }
     loadEnabled();
     await loadList();
-    start({ outlet: "#view", nav: "#primary-nav", defaultPath: "/recherche" });
+    initSearchBar();
+    start({ outlet: "#view", defaultPath: DEFAULT_PATH });
 })();

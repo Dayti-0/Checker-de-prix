@@ -164,7 +164,7 @@ def search_farine(page):
 
 def test_home_renders(page):
     page.goto(page.base)
-    expect(page).to_have_url(f"{page.base}/#/recherche")
+    expect(page).to_have_url(f"{page.base}/#/")
     expect(page).to_have_title("Rechercher · PrixMalin")
     expect(page.locator("#q")).to_be_visible()
     expect(page.locator(".welcome")).to_contain_text("Tapez un produit")
@@ -315,7 +315,7 @@ def test_settings_page(page):
 
     # The settings button and the location chip lead here
     page.click(".brand")
-    expect(page).to_have_url(f"{page.base}/#/recherche")
+    expect(page).to_have_url(f"{page.base}/#/")
     page.click("#settings-btn")
     expect(page.locator(".settings-page")).to_be_visible()
 
@@ -344,5 +344,5 @@ def test_old_search_links_redirect(page):
 
 def test_unknown_route_goes_to_search(page):
     page.goto(f"{page.base}/#/inconnu")
-    expect(page).to_have_url(f"{page.base}/#/recherche")
+    expect(page).to_have_url(f"{page.base}/#/")
     expect(page.locator("#q")).to_be_visible()

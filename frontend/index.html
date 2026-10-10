@@ -5,16 +5,33 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#15803d">
     <title>PrixMalin</title>
-    <link rel="stylesheet" href="/static/css/base.css?v=4">
-    <link rel="stylesheet" href="/static/css/layout.css?v=4">
-    <link rel="stylesheet" href="/static/css/search.css?v=4">
-    <link rel="stylesheet" href="/static/css/list.css?v=4">
-    <link rel="stylesheet" href="/static/css/settings.css?v=4">
+    <!-- Text size and theme of this device, before the first render -->
+    <script src="/static/js/boot.js?v=__VERSION__"></script>
+    <link rel="stylesheet" href="/static/css/tokens.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/base.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/shell.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/components.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/home.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/search.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/results.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/list.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/basket.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/shopping.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/print.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/settings.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/stores.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/status.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/onboarding.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/tracking.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/product.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/system.css?v=__VERSION__">
 </head>
 <body>
     <header class="topbar">
-        <a class="brand" href="#/recherche">Prix<span>Malin</span></a>
+        <a class="brand" href="#/">Prix<span>Malin</span></a>
         <div class="topbar-actions">
+            <!-- Buttons added by the features (js/features/), e.g. the alerts bell -->
+            <div id="header-extras" class="header-extras"></div>
             <div class="text-size" role="group" aria-label="Taille du texte">
                 <button id="text-smaller" type="button" title="Texte plus petit" aria-label="Texte plus petit">A−</button>
                 <button id="text-bigger" type="button" title="Texte plus grand" aria-label="Texte plus grand">A+</button>
@@ -34,15 +51,27 @@
         <button id="setup-banner-done" class="btn-primary small" type="button">J'ai terminé</button>
     </div>
 
-    <!-- Links generated from the views registered in js/main.js -->
+    <!-- Links of the views that have a `nav` entry (js/shell/nav.js) -->
     <nav class="primary-nav" aria-label="Navigation principale">
         <div id="primary-nav" class="nav-links"></div>
     </nav>
 
-    <main id="view"></main>
+    <main id="main">
+        <!-- Shown by the views that ask for them (`shell` of the view module) -->
+        <form id="search-form" class="search" role="search" hidden>
+            <input id="q" type="search" placeholder="Farine, huile de tournesol, eau…" autocomplete="off" enterkeyhint="search" aria-label="Produit à rechercher" required>
+            <button type="submit" class="btn-primary">Comparer</button>
+        </form>
+        <div id="store-filters" class="store-filters" aria-label="Enseignes" hidden></div>
+        <!-- The view of the route (js/routes.js) -->
+        <div id="view"></div>
+    </main>
 
-    <div id="toast" class="toast" role="status" hidden></div>
+    <div id="toast-region">
+        <div id="toast" class="toast" role="status" hidden></div>
+    </div>
+    <div id="live-region" class="visually-hidden" aria-live="polite"></div>
 
-    <script type="module" src="/static/js/main.js?v=4"></script>
+    <script type="module" src="/static/js/main.js?v=__VERSION__"></script>
 </body>
 </html>

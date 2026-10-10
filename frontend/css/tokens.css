@@ -1,0 +1,121 @@
+/* Design tokens. Every other stylesheet uses them: no raw colour, font size
+   or radius elsewhere. Values of PrixMalin 2.1 (the redesign changes them here). */
+
+:root {
+    /* Colours */
+    --bg: #f4f6f8;
+    --surface: #ffffff;
+    --surface-2: #f8fafb;
+    --text: #1c2430;
+    --muted: #667085;
+    --border: #e3e7ec;
+    --primary: #15803d;
+    --primary-strong: #116a33;
+    --best: #16a34a;
+    --accent-best: #16a34a;
+    --best-bg: #ecfdf3;
+    --danger: #c62828;
+    --warn: #8a5a00;
+    --warn-bg: #fff6e0;
+    --promo: #b00020;
+    --promo-bg: #fde7e9;
+    --on-accent: #ffffff;
+    --toast-bg: #1c2430;
+    --thumb-bg: #ffffff;
+    --shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 1px 3px rgba(16, 24, 40, .08);
+    --shadow-toast: 0 8px 24px rgba(0, 0, 0, .25);
+
+    --aldi: #0a3d91;
+    --aldi-text: #ffffff;
+    --lidl: #0050aa;
+    --lidl-text: #fff000;
+    --carrefour: #1b3a8c;
+    --carrefour-text: #ffffff;
+    --intermarche: #f2c500;
+    --intermarche-text: #3a2a00;
+    --coursesu: #e2001a;
+    --coursesu-text: #ffffff;
+
+    /* Text sizes (rem: they follow the A− / A+ buttons through --ui-scale) */
+    --text-80: .8rem;
+    --text-85: .85rem;
+    --text-875: .875rem;
+    --text-90: .9rem;
+    --text-95: .95rem;
+    --text-100: 1rem;
+    --text-102: 1.02rem;
+    --text-105: 1.05rem;
+    --text-110: 1.1rem;
+    --text-115: 1.15rem;
+    --text-120: 1.2rem;
+    --text-130: 1.3rem;
+    --text-135: 1.35rem;
+    --text-140: 1.4rem;
+    --text-150: 1.5rem;
+    --text-160: 1.6rem;
+    --text-170: 1.7rem;
+    --text-180: 1.8rem;
+
+    /* Radii */
+    --radius-35: .35rem;
+    --radius-40: .4rem;
+    --radius-55: .55rem;
+    --radius-60: .6rem;
+    --radius-70: .7rem;
+    --radius-85: .85rem;
+    --radius-100: 1rem;
+    --radius: var(--radius-100); /* cards and panels */
+    --radius-pill: 999px;
+    --radius-round: 50%;
+
+    /* Spacing */
+    --space-1: .25rem;
+    --space-2: .4rem;
+    --space-3: .55rem;
+    --space-4: .7rem;
+    --space-5: .85rem;
+    --space-6: 1rem;
+    --space-7: 1.25rem;
+    --space-8: 1.6rem;
+    --space-9: 2rem;
+
+    /* Controls */
+    --control-h: 2.6rem;
+    --focus-ring: 0 0 0 3px rgba(21, 128, 61, .45);
+    /* Height of a bar fixed at the bottom of the screen (none yet) */
+    --bottom-bar-h: 0px;
+
+    /* Text scale, changed by the A− / A+ buttons (js/shell/text-size.js, js/boot.js) */
+    --ui-scale: 1;
+}
+
+@media (min-width: 900px) {
+    :root { --ui-scale: 1.125; }
+}
+
+/* Dark theme: automatic, unless the page is forced to light (data-theme on <html>) */
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --bg: #0f1419;
+        --surface: #171d24;
+        --surface-2: #1d242c;
+        --text: #e6e9ee;
+        --muted: #98a2b3;
+        --border: #2a333d;
+        --best-bg: #0f2a1a;
+        --warn: #f5c86b;
+        --warn-bg: #2a2210;
+    }
+}
+
+:root[data-theme="dark"] {
+    --bg: #0f1419;
+    --surface: #171d24;
+    --surface-2: #1d242c;
+    --text: #e6e9ee;
+    --muted: #98a2b3;
+    --border: #2a333d;
+    --best-bg: #0f2a1a;
+    --warn: #f5c86b;
+    --warn-bg: #2a2210;
+}

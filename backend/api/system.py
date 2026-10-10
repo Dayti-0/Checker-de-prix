@@ -1,7 +1,7 @@
 """The web page and the app itself: index.html, static files, version (area of P1, except /api/version)."""
 
 from fastapi import APIRouter, FastAPI
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from backend import __version__, config
@@ -17,9 +17,15 @@ async def api_version():
     return {"version": __version__}
 
 
+def index_html() -> str:
+    """index.html with the version of the app in the addresses of its files."""
+    page = (config.FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
+    return page.replace("__VERSION__", __version__)
+
+
 @pages.get("/")
 async def index():
-    return FileResponse(config.FRONTEND_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+    return HTMLResponse(index_html(), headers={"Cache-Control": "no-cache"})
 
 
 @pages.get("/favicon.ico")

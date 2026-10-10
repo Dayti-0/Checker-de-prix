@@ -1,7 +1,7 @@
-/* Settings view (js/views/settings.js) */
+/* Settings page (js/views/settings/): sections, forms */
 
 .settings-page { max-width: 46rem; margin: 0 auto; }
-.page-title { margin: .2rem 0 1rem; font-size: 1.3rem; }
+.page-title { margin: .2rem 0 1rem; font-size: var(--text-130); }
 
 .settings-section {
     padding: 1rem 1.1rem;
@@ -11,31 +11,11 @@
     border-radius: var(--radius);
     box-shadow: var(--shadow);
 }
-.settings-section h3 { margin: 0 0 .7rem; font-size: 1.1rem; }
+.settings-section h3 { margin: 0 0 .7rem; font-size: var(--text-110); }
 .row { display: flex; gap: .55rem; }
-.row input { flex: 1; min-width: 0; padding: .7rem .85rem; border: 1px solid var(--border); border-radius: .7rem; background: var(--surface); }
+.row input { flex: 1; min-width: 0; padding: .7rem .85rem; border: 1px solid var(--border); border-radius: var(--radius-70); background: var(--surface); }
 
-.retailer-card { padding: .85rem 0; border-bottom: 1px dashed var(--border); }
-.retailer-card:last-child { border-bottom: 0; }
-.retailer-head { display: flex; align-items: center; justify-content: space-between; gap: .55rem; margin-bottom: .4rem; }
-.state { font-size: .875rem; font-weight: 700; }
-.state.ok { color: var(--best); }
-.state.todo { color: var(--warn); }
-.retailer-card p { margin: .25rem 0 .55rem; }
-.retailer-actions { display: flex; flex-wrap: wrap; gap: .55rem; margin-top: .55rem; }
-.store-list { list-style: none; padding: 0; margin: .55rem 0; max-height: 18rem; overflow-y: auto; border: 1px solid var(--border); border-radius: .7rem; }
-.store-list li button {
-    width: 100%;
-    text-align: left;
-    padding: .65rem .85rem;
-    background: none;
-    border: 0;
-    border-bottom: 1px solid var(--border);
-}
-.store-list li:last-child button { border-bottom: 0; }
-.store-list li button:hover { background: var(--surface-2); }
-.store-list .addr { display: block; font-size: .85rem; color: var(--muted); }
 .commune-list { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .55rem; }
 
-.switch { display: flex; gap: .7rem; align-items: flex-start; font-size: .95rem; }
+.switch { display: flex; gap: .7rem; align-items: flex-start; font-size: var(--text-95); }
 .switch input { margin-top: .2rem; width: 1.2rem; height: 1.2rem; accent-color: var(--primary); }

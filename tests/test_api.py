@@ -20,7 +20,12 @@ def test_index_and_static(client):
     index = client.get("/").text
     assert "PrixMalin" in index
     assert '<script type="module" src="/static/js/main.js' in index
-    for path in ("/static/js/main.js", "/static/js/router.js", "/static/js/views/search.js", "/static/css/base.css"):
+    for path in (
+        "/static/js/main.js",
+        "/static/js/core/router.js",
+        "/static/js/views/search/index.js",
+        "/static/css/base.css",
+    ):
         response = client.get(path)
         assert response.status_code == 200, path
         # ES modules import each other without a version: always revalidate them

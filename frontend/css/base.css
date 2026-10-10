@@ -1,63 +1,17 @@
-/* Variables, reset, buttons, chips, badges, shared components, toast, utilities */
-
-:root {
-    --bg: #f4f6f8;
-    --surface: #ffffff;
-    --surface-2: #f8fafb;
-    --text: #1c2430;
-    --muted: #667085;
-    --border: #e3e7ec;
-    --primary: #15803d;
-    --primary-strong: #116a33;
-    --best: #16a34a;
-    --best-bg: #ecfdf3;
-    --danger: #c62828;
-    --warn: #8a5a00;
-    --warn-bg: #fff6e0;
-    --radius: 1rem;
-    --shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 1px 3px rgba(16, 24, 40, .08);
-
-    --aldi: #0a3d91;
-    --aldi-text: #ffffff;
-    --lidl: #0050aa;
-    --lidl-text: #fff000;
-    --carrefour: #1b3a8c;
-    --carrefour-text: #ffffff;
-    --intermarche: #f2c500;
-    --intermarche-text: #3a2a00;
-    --coursesu: #e2001a;
-    --coursesu-text: #ffffff;
-}
-
-@media (prefers-color-scheme: dark) {
-    :root {
-        --bg: #0f1419;
-        --surface: #171d24;
-        --surface-2: #1d242c;
-        --text: #e6e9ee;
-        --muted: #98a2b3;
-        --border: #2a333d;
-        --best-bg: #0f2a1a;
-        --warn: #f5c86b;
-        --warn-bg: #2a2210;
-    }
-}
+/* Reset and utilities */
 
 * { box-sizing: border-box; }
 
-/* Every size below is in rem: the A− / A+ buttons change --ui-scale (js/textsize.js) */
+/* Every size is in rem: the A− / A+ buttons change --ui-scale (css/tokens.css) */
 html {
     -webkit-text-size-adjust: 100%;
-    font-size: calc(16px * var(--ui-scale, 1));
-}
-@media (min-width: 900px) {
-    html { font-size: calc(16px * var(--ui-scale, 1.125)); }
+    font-size: calc(16px * var(--ui-scale));
 }
 
 body {
     margin: 0;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    font-size: 1rem;
+    font-size: var(--text-100);
     line-height: 1.4;
     color: var(--text);
     background: var(--bg);
@@ -69,150 +23,17 @@ button { cursor: pointer; }
 a { color: inherit; }
 
 .muted { color: var(--muted); }
-.small { font-size: .875rem; }
+.small { font-size: var(--text-875); }
 
-/* --- Buttons --- */
-
-.btn-primary {
-    background: var(--primary);
-    color: #fff;
-    border: 0;
-    border-radius: .7rem;
-    padding: .65rem 1.1rem;
-    font-weight: 600;
-    white-space: nowrap;
-}
-.btn-primary:hover { background: var(--primary-strong); }
-.btn-primary:disabled { opacity: .6; cursor: default; }
-.btn-primary.small { padding: .45rem .85rem; font-size: .875rem; }
-
-.btn-ghost {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: .7rem;
-    padding: .5rem .85rem;
-    font-size: .95rem;
-}
-.btn-ghost:hover { border-color: var(--muted); }
-.btn-ghost.danger { color: var(--danger); }
-.btn-ghost.small { padding: .35rem .75rem; font-size: .875rem; }
-
-.icon-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 2.6rem;
-    height: 2.6rem;
-    padding: 0 .4rem;
-    border-radius: .7rem;
-    border: 1px solid var(--border);
-    background: var(--surface);
-    font-weight: 700;
-    text-decoration: none;
-}
-.icon-btn svg { width: 1.3rem; height: 1.3rem; }
-
-.chip {
-    display: inline-flex;
-    align-items: center;
-    gap: .4rem;
-    height: 2.6rem;
-    padding: 0 .85rem;
-    border-radius: 999px;
-    border: 1px solid var(--border);
-    background: var(--surface);
-    max-width: 40vw;
+/* Read by screen readers, not shown (#live-region) */
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
     overflow: hidden;
+    clip: rect(0, 0, 0, 0);
     white-space: nowrap;
-    text-overflow: ellipsis;
-    text-decoration: none;
-}
-.chip svg { width: 1.1rem; height: 1.1rem; flex: none; }
-.chip span { overflow: hidden; text-overflow: ellipsis; }
-.chip.configured { border-color: var(--primary); color: var(--primary); }
-
-/* --- Text size (A− / A+) --- */
-
-.text-size { display: inline-flex; border: 1px solid var(--border); border-radius: .7rem; overflow: hidden; }
-.text-size button {
-    height: 2.6rem;
-    min-width: 2.4rem;
     border: 0;
-    background: var(--surface);
-    font-weight: 700;
 }
-.text-size button + button { border-left: 1px solid var(--border); }
-.text-size button:disabled { opacity: .35; cursor: default; }
-
-/* --- Retailer badges and dots (js/components/retailerBadge.js) --- */
-
-.dot { width: .7rem; height: .7rem; border-radius: 50%; display: inline-block; flex: none; }
-
-.badge {
-    display: inline-block;
-    padding: .2rem .7rem;
-    border-radius: .4rem;
-    font-weight: 700;
-    font-size: .95rem;
-    white-space: nowrap;
-}
-
-.aldi-bg { background: var(--aldi); color: var(--aldi-text); }
-.lidl-bg { background: var(--lidl); color: var(--lidl-text); }
-.carrefour-bg { background: var(--carrefour); color: var(--carrefour-text); }
-.intermarche-bg { background: var(--intermarche); color: var(--intermarche-text); }
-.coursesu-bg { background: var(--coursesu); color: var(--coursesu-text); }
-
-/* --- Retailer filters (js/components/storeFilters.js) --- */
-
-.store-filters { display: flex; flex-wrap: wrap; gap: .55rem; justify-content: center; margin-bottom: 1rem; }
-.store-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: .45rem;
-    padding: .45rem .95rem;
-    border-radius: 999px;
-    border: 1px solid var(--border);
-    background: var(--surface);
-    font-size: 1rem;
-    user-select: none;
-    cursor: pointer;
-}
-.store-toggle input { position: absolute; opacity: 0; pointer-events: none; }
-.store-toggle:not(.on) { opacity: .5; text-decoration: line-through; }
-
-/* --- Notices and loading --- */
-
-.notice { padding: 1rem; font-size: .95rem; }
-.notice.warn { background: var(--warn-bg); color: var(--warn); }
-.notice .actions { display: flex; flex-wrap: wrap; gap: .55rem; margin-top: .7rem; }
-
-.spinner {
-    display: inline-block;
-    width: 1rem;
-    height: 1rem;
-    border: 2px solid var(--border);
-    border-top-color: var(--primary);
-    border-radius: 50%;
-    animation: spin .7s linear infinite;
-    vertical-align: -.15rem;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-
-/* --- Toast --- */
-
-.toast {
-    position: fixed;
-    left: 50%;
-    bottom: 1.25rem;
-    transform: translateX(-50%);
-    z-index: 100;
-    max-width: calc(100vw - 2rem);
-    padding: .7rem 1.1rem;
-    border-radius: .7rem;
-    background: #1c2430;
-    color: #fff;
-    font-size: .95rem;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, .25);
-}
-.toast.error { background: var(--danger); }

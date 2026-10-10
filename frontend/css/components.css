@@ -1,0 +1,127 @@
+/* Shared components: buttons, retailer badges, retailer filters, notices, spinner, messages */
+
+/* --- Buttons --- */
+
+.btn-primary {
+    background: var(--primary);
+    color: var(--on-accent);
+    border: 0;
+    border-radius: var(--radius-70);
+    padding: .65rem 1.1rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.btn-primary:hover { background: var(--primary-strong); }
+.btn-primary:disabled { opacity: .6; cursor: default; }
+.btn-primary.small { padding: .45rem .85rem; font-size: var(--text-875); }
+
+.btn-ghost {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-70);
+    padding: .5rem .85rem;
+    font-size: var(--text-95);
+}
+.btn-ghost:hover { border-color: var(--muted); }
+.btn-ghost.danger { color: var(--danger); }
+.btn-ghost.small { padding: .35rem .75rem; font-size: var(--text-875); }
+
+.icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: var(--control-h);
+    height: var(--control-h);
+    padding: 0 .4rem;
+    border-radius: var(--radius-70);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    font-weight: 700;
+    text-decoration: none;
+}
+.icon-btn svg { width: 1.3rem; height: 1.3rem; }
+
+/* Icons of the sprite (js/core/icons.js) */
+.icon { width: 1.2em; height: 1.2em; flex: none; vertical-align: -.2em; }
+
+/* --- Retailer badges and dots (js/components/retailer-badge.js) --- */
+
+.dot { width: .7rem; height: .7rem; border-radius: var(--radius-round); display: inline-block; flex: none; }
+
+.badge {
+    display: inline-block;
+    padding: .2rem .7rem;
+    border-radius: var(--radius-40);
+    font-weight: 700;
+    font-size: var(--text-95);
+    white-space: nowrap;
+}
+
+.aldi-bg { background: var(--aldi); color: var(--aldi-text); }
+.lidl-bg { background: var(--lidl); color: var(--lidl-text); }
+.carrefour-bg { background: var(--carrefour); color: var(--carrefour-text); }
+.intermarche-bg { background: var(--intermarche); color: var(--intermarche-text); }
+.coursesu-bg { background: var(--coursesu); color: var(--coursesu-text); }
+
+/* --- Retailer filters (js/components/store-filters.js) --- */
+
+.store-filters { display: flex; flex-wrap: wrap; gap: .55rem; justify-content: center; margin-bottom: 1rem; }
+.store-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: .45rem;
+    padding: .45rem .95rem;
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    font-size: var(--text-100);
+    user-select: none;
+    cursor: pointer;
+}
+.store-toggle input { position: absolute; opacity: 0; pointer-events: none; }
+.store-toggle:not(.on) { opacity: .5; text-decoration: line-through; }
+
+/* --- Notices and loading --- */
+
+.notice { padding: 1rem; font-size: var(--text-95); }
+.notice.warn { background: var(--warn-bg); color: var(--warn); }
+.notice .actions { display: flex; flex-wrap: wrap; gap: .55rem; margin-top: .7rem; }
+
+.spinner {
+    display: inline-block;
+    width: 1rem;
+    height: 1rem;
+    border: 2px solid var(--border);
+    border-top-color: var(--primary);
+    border-radius: var(--radius-round);
+    animation: spin .7s linear infinite;
+    vertical-align: -.15rem;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* --- Messages (js/core/ui.js: notify) --- */
+
+.toast {
+    position: fixed;
+    left: 50%;
+    bottom: calc(1.25rem + var(--bottom-bar-h));
+    transform: translateX(-50%);
+    z-index: 100;
+    max-width: calc(100vw - 2rem);
+    padding: .7rem 1.1rem;
+    border-radius: var(--radius-70);
+    background: var(--toast-bg);
+    color: var(--on-accent);
+    font-size: var(--text-95);
+    box-shadow: var(--shadow-toast);
+}
+.toast.error { background: var(--danger); }
+.toast-action {
+    margin-left: .5rem;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font-weight: 700;
+    text-decoration: underline;
+}
