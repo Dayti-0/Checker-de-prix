@@ -29,7 +29,9 @@ VIEWPORTS = {
 
 # Reports CSP violations as console errors (the fixtures fail on them)
 CSP_WATCH = """
+window.__csp = [];
 document.addEventListener("securitypolicyviolation", (e) => {
+    window.__csp.push(e.violatedDirective);
     console.error(`CSP: ${e.violatedDirective} ${e.blockedURI}`);
 });
 """

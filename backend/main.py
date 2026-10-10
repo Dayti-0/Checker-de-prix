@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI
+from fastapi.middleware.gzip import GZipMiddleware
 
 from backend import __version__, config, database, instance, logging_setup, security
 from backend.api import api_router, errors, pages_router, system
@@ -48,6 +49,7 @@ def create_app() -> FastAPI:
     hooks.on_startup(warmup.warmup)
     errors.install(app)
     security.install(app)
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
     # Every /api route lives in backend/api/ (one router per area)
     app.include_router(api_router)
     app.include_router(pages_router)
