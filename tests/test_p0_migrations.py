@@ -81,6 +81,8 @@ def test_applied_migrations_are_not_replayed(monkeypatch):
     module.up = up
     monkeypatch.setitem(sys.modules, module.__name__, module)
 
+    # The migrations of the lots (p4_..., p5_...) are left out of this scenario
+    monkeypatch.setattr(migrations, "available", lambda: ["p0_001_initial"])
     run(database.get_db())  # p0 only
     first = rows(config.DB_PATH, "SELECT id, applied_at FROM schema_migrations")
     assert [r[0] for r in first] == ["p0_001_initial"]

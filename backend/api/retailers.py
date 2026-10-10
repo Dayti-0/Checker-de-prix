@@ -6,6 +6,7 @@ from backend.api.common import get_scraper
 from backend.api.errors import guard
 from backend.browser import browser
 from backend.models import (
+    AutoPickResult,
     RetailerInfo,
     Settings,
     StoreChoice,
@@ -16,6 +17,7 @@ from backend.models import (
 from backend.scrapers import SCRAPERS
 from backend.scrapers.coursesu import is_store_url, store_name_from_url
 from backend.services import settings as settings_service
+from backend.services import stores as stores_service
 
 router = APIRouter()
 
@@ -54,6 +56,26 @@ async def api_intermarche_stores():
     scraper = SCRAPERS["intermarche"]
     with guard("Recherche des magasins impossible", timeout_message="Intermarché n'a pas répondu à temps."):
         return await browser.run(scraper.key, scraper.find_stores, location.lat, location.lon, timeout=45)
+
+
+@router.get("/retailers/coursesu/stores", response_model=list[StoreOption])
+async def api_coursesu_stores(refresh: bool = False):
+    """The 8 Courses U stores nearest to the saved postal code (400 without one)."""
+    current = await settings_service.load_settings()
+    with guard("Recherche des magasins impossible", timeout_message="Courses U n'a pas répondu à temps."):
+        return await stores_service.nearest_coursesu_stores(current.location, refresh=refresh)
+
+
+@router.post("/retailers/coursesu/store/auto", response_model=AutoPickResult)
+async def api_coursesu_auto(refresh: bool = False):
+    """Choose the nearest Courses U store unless the user chose one (always 200)."""
+    return await stores_service.auto_pick_coursesu(refresh=refresh)
+
+
+@router.post("/retailers/coursesu/store/from-site", response_model=AutoPickResult)
+async def api_coursesu_from_site():
+    """Save the store chosen by the user on the Courses U site (always 200)."""
+    return await stores_service.read_back_coursesu()
 
 
 @router.put("/retailers/{key}/store", response_model=Settings)
