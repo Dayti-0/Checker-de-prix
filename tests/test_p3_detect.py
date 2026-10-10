@@ -1,6 +1,7 @@
 """B48: anchored challenge detection, debug snapshots kept per retailer."""
 
 import asyncio
+import contextlib
 import re
 from datetime import datetime, timedelta
 
@@ -121,3 +122,82 @@ def test_snapshot_on_a_real_page(manager, tmp_path):
     assert path.parent == config.DEBUG_DIR
     assert "Rien" in path.read_text()
     assert path.with_suffix(".png").exists()
+
+
+# --- B48: page kept when a search fails, source of the products ---------------------
+
+
+def test_failed_search_keeps_the_page(manager, monkeypatch):
+    from backend.scrapers import SCRAPERS
+
+    monkeypatch.setattr(config, "MIN_REQUEST_INTERVAL_SECONDS", 0)
+    monkeypatch.setattr(common, "CHALLENGE_WAIT_SECONDS", 1)
+    challenge = (
+        "<html><head><title>Just a moment...</title></head>"
+        "<body><div id='challenge-running'>Vérification</div></body></html>"
+    )
+
+    def routes(body=None):
+        async def scenario(page):
+            await page.unroute_all(behavior="ignoreErrors")
+            await page.route("**/*", lambda route: route.abort())
+
+            async def search_page(route):
+                if body is None:
+                    await asyncio.sleep(3)  # the site does not answer in time
+                    with contextlib.suppress(Exception):
+                        await route.abort()
+                    return
+                await route.fulfill(status=200, content_type="text/html; charset=utf-8", body=body)
+
+            await page.route(re.compile(r"https://www\.aldi\.fr/recherche\.html.*"), search_page)
+
+        return scenario
+
+    asyncio.run(manager.run("snap", routes(challenge), timeout=30))
+    with pytest.raises(common.BlockedError):
+        asyncio.run(manager.run("snap", SCRAPERS["aldi"].search, "farine", None, timeout=30))
+    asyncio.run(manager.run("snap", routes(None), timeout=30))
+    with pytest.raises(TimeoutError):
+        asyncio.run(manager.run("snap", SCRAPERS["aldi"].search, "farine", None, timeout=2))
+    names = sorted(p.name for p in config.DEBUG_DIR.glob("snap-*.html"))
+    assert [n.rsplit("-", 1)[1] for n in names] == ["blocked.html", "timeout.html"]
+    assert "challenge-running" in (config.DEBUG_DIR / names[0]).read_text()
+    assert (config.DEBUG_DIR / names[0]).with_suffix(".png").exists()
+
+
+def test_snapshot_status():
+    from backend.browser import snapshot_status
+    from backend.scrapers import SCRAPERS
+    from backend.scrapers.base import HardBlockError, StoreRequiredError
+
+    search = SCRAPERS["aldi"].search
+    assert snapshot_status(search, common.BlockedError("x")) == "blocked"
+    assert snapshot_status(search, HardBlockError("x")) == "blocked"
+    assert snapshot_status(search, TimeoutError()) == "timeout"
+    assert snapshot_status(search, ValueError("JSON")) == "error"
+    assert snapshot_status(search, StoreRequiredError("x")) is None
+
+    async def not_a_scraper(page):
+        return None
+
+    assert snapshot_status(not_a_scraper, TimeoutError()) is None
+
+
+def test_source_is_kept_and_a_fallback_is_logged(monkeypatch, caplog):
+    from backend.models import Product
+    from backend.services import search
+    from tests.conftest import run
+
+    async def generic(scraper, query, store):
+        scraper.last_source = "generic" if scraper.key == "lidl" else "api"
+        return [Product(store=scraper.key, name="Farine", price=1.0)]
+
+    monkeypatch.setattr(search, "_scrape", generic)
+    with caplog.at_level("WARNING", logger="prixmalin.search"):
+        lidl = run(search.search_store("lidl", "farine"))
+        carrefour = run(search.search_store("carrefour", "farine"))
+    assert (lidl.source, carrefour.source) == ("generic", "api")
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert any("Lidl" in w and "generic" in w for w in warnings)
+    assert not any("Carrefour" in w for w in warnings)

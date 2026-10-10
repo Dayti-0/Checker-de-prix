@@ -51,8 +51,8 @@ from urllib.parse import urlparse
 from backend import config
 from backend.errors import short_error
 from backend.models import BrowserStatus, RetailerWindow
-from backend.scrapers.base import BlockedError, HardBlockError
-from backend.scrapers.common import detect_block, hard_block_message
+from backend.scrapers.base import BaseScraper, BlockedError, HardBlockError, StoreRequiredError
+from backend.scrapers.common import detect_block, hard_block_message, is_timeout_error, save_debug_snapshot
 from backend.services.circuit import HardBlocks
 
 logger = logging.getLogger("prixmalin.browser")
@@ -111,6 +111,19 @@ class BrowserUnavailable(Exception):
 
 class QueueTimeout(TimeoutError):
     """Waited too long for the tab of a retailer (other searches before this one)."""
+
+
+def snapshot_status(fn: Callable[..., Any], error: BaseException) -> str | None:
+    """Status under which the page of a failed scraper call is kept (None: not kept)."""
+    if not isinstance(getattr(fn, "__self__", None), BaseScraper):
+        return None  # not a search of a scraper (tests, warm-up...)
+    if isinstance(error, StoreRequiredError):
+        return None
+    if isinstance(error, BlockedError):
+        return "blocked"
+    if is_timeout_error(error):
+        return "timeout"
+    return "error"
 
 
 def is_profile_locked(message: str) -> bool:
@@ -466,12 +479,33 @@ class BrowserManager:
         await slot.acquire(PRIORITIES.index(priority), config.QUEUE_TIMEOUT_SECONDS)
         try:
             await self._pace(key)
-            if timeout is None:
-                return await self._work(key, fn, args)
-            return await asyncio.wait_for(self._work(key, fn, args), timeout)
+            try:
+                if timeout is None:
+                    return await self._work(key, fn, args)
+                return await asyncio.wait_for(self._work(key, fn, args), timeout)
+            except Exception as e:
+                status = snapshot_status(fn, e)
+                if status:
+                    await self._snapshot(key, status)
+                raise
         finally:
             self._last_request[key] = time.monotonic()
             slot.release()
+
+    async def _snapshot(self, key: str, status: str) -> None:
+        """Keep the page of a search that failed (data/debug, B48)."""
+        if self.is_dedicated(key):
+            real = self._real.get(key)
+            page = real.current_page() if real is not None else None
+        else:
+            page = self._pages.get(key)
+        if page is None or page.is_closed():
+            return
+        try:
+            # No screenshot of the dedicated window (often minimized)
+            await asyncio.wait_for(save_debug_snapshot(page, key, status, screenshot=not self.is_dedicated(key)), 8)
+        except Exception as e:  # noqa: BLE001 (debugging aid only)
+            logger.debug("Snapshot of %s: %s", key, e)
 
     async def _pace(self, key: str) -> None:
         last = self._last_request.get(key)

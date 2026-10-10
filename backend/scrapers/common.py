@@ -368,7 +368,12 @@ async def save_debug_snapshot(page, key: str, status: str = "empty", *, screensh
     try:
         path = snapshot_path(key, status)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(await page.content(), encoding="utf-8")
+        try:
+            content = await page.content()
+        except Exception as e:  # noqa: BLE001 (still loading: the address and the screenshot are kept)
+            logger.debug("snapshot content: %s", e)
+            content = f"<!-- PrixMalin : page en cours de chargement ({status}) : {page.url} -->\n"
+        path.write_text(content, encoding="utf-8")
         if screenshot:
             await page.screenshot(path=str(path.with_suffix(".png")), full_page=False, timeout=5000)
         logger.info("%s: page saved in %s (%s)", key, path.name, status)
