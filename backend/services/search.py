@@ -85,6 +85,7 @@ async def search_store(
             products = await _scrape(scraper, query, store)
         except ScraperError as e:
             result.status, result.message = e.status, str(e)
+            result.retry_after = getattr(e, "retry_after", None)
         except TimeoutError:
             result.status = "timeout"
             result.message = f"{scraper.label} n'a pas répondu à temps. Réessayez dans un instant."

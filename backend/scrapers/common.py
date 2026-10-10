@@ -136,10 +136,52 @@ def blocked_message(label: str) -> str:
     )
 
 
-def hard_block_message(label: str) -> str:
+def clock_text(when: float, now: float | None = None) -> str:
+    """« 15 h 40 », « demain à 1 h 10 » or « le 12/10 à 9 h 05 » (local time of the PC)."""
+    moment = datetime.fromtimestamp(when)
+    today = datetime.fromtimestamp(now if now is not None else datetime.now().timestamp()).date()
+    clock = f"{moment.hour} h {moment.minute:02d}"
+    days = (moment.date() - today).days
+    if days == 0:
+        return clock
+    if days == 1:
+        return f"demain à {clock}"
+    return f"le {moment:%d/%m} à {clock}"
+
+
+def hard_block_message(label: str, until: float | None = None, now: float | None = None) -> str:
+    """Message of a hard block: the site refuses the connection for a while."""
+    if until is None:
+        return (
+            f"{label} bloque temporairement cette connexion. "
+            "Inutile de relancer : PrixMalin attendra avant de réessayer."
+        )
     return (
-        f"{label} bloque temporairement cette connexion. Inutile de relancer : PrixMalin attendra avant de réessayer."
+        f"{label} bloque temporairement cette connexion. PrixMalin ne réessaiera pas avant "
+        f"{clock_text(until, now)}. Inutile de relancer."
     )
+
+
+def is_timeout_error(error: BaseException) -> bool:
+    """A time limit was reached (asyncio, or a Playwright/patchright action)."""
+    if isinstance(error, TimeoutError):
+        return True
+    return type(error).__name__ == "TimeoutError" and type(error).__module__.startswith(("playwright", "patchright"))
+
+
+# Messages of Playwright when the page or the browser went away, or a navigation failed
+_NAVIGATION_ERROR = re.compile(
+    r"net::ERR_|Navigation failed|navigation|Target page, context or browser has been closed|Target closed|"
+    r"Page closed|has been closed|frame was detached|Execution context was destroyed",
+    re.I,
+)
+
+
+def is_navigation_error(error: BaseException) -> bool:
+    """The page failed to load or was closed (worth one more try in a fresh tab)."""
+    if isinstance(error, (ValueError, TimeoutError)) or is_timeout_error(error):
+        return False
+    return bool(_NAVIGATION_ERROR.search(str(error)))
 
 
 @dataclass
@@ -212,7 +254,7 @@ async def detect_block(page) -> str | None:
 
 def raise_for_block(kind: str, label: str, captcha_message: str | None = None) -> None:
     if kind == "hard_block":
-        raise HardBlockError(hard_block_message(label))
+        raise HardBlockError(hard_block_message(label), label=label)
     raise BlockedError(captcha_message or blocked_message(label))
 
 

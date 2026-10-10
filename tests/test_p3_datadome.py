@@ -1,5 +1,6 @@
 """B41: DataDome answers told apart (captcha or hard block), Intermarché API errors."""
 
+import asyncio
 import json
 
 import pytest
@@ -92,3 +93,87 @@ def test_unexpected_shape_is_detected():
     assert intermarche.has_products_list({"data": {"products": [{}]}})
     assert not intermarche.has_products_list({"error": "maintenance"})
     assert not intermarche.has_products_list([])
+
+
+# --- pause after a hard block (services/circuit.py) ---------------------------------
+
+HOUR = 3600
+
+
+def test_hard_block_pause_doubles_up_to_four_hours():
+    from backend.services.circuit import next_hard_block
+
+    now = 1_000_000.0
+    first = next_hard_block(None, now)
+    assert (first.seconds, first.until) == (30 * 60, now + 30 * 60)
+    pauses = [first.seconds]
+    record = first
+    for _ in range(5):
+        now = record.until + 60  # blocked again just after the pause
+        record = next_hard_block(record, now)
+        pauses.append(record.seconds)
+    assert pauses == [1800, 3600, 7200, 14400, 14400, 14400]
+    # A day without block: back to 30 minutes
+    later = next_hard_block(record, record.until + 25 * HOUR)
+    assert later.seconds == 1800
+
+
+def test_hard_block_pause_survives_a_restart(tmp_path):
+    from backend.services.circuit import HardBlocks
+    from tests.conftest import run
+
+    async def scenario():
+        blocks = HardBlocks(persist=True)
+        record = await blocks.hard_block("intermarche", now=1000.0)
+        assert await blocks.until("intermarche", now=1001.0) == record.until
+        # PrixMalin restarted: a new object reads the database
+        again = HardBlocks(persist=True)
+        assert await again.until("intermarche", now=1001.0) == 1000.0 + 1800
+        assert await again.until("intermarche", now=1000.0 + 1801) is None
+        await again.clear("intermarche")
+        assert await HardBlocks(persist=True).until("intermarche", now=1001.0) is None
+
+    run(scenario())
+
+
+def test_no_call_to_the_site_during_the_pause(tmp_path):
+    from backend.browser import BrowserManager
+
+    manager = BrowserManager(tmp_path / "profile")
+
+    async def scenario():
+        await manager.hard_blocks.hard_block("intermarche")
+
+        async def must_not_run(page):
+            raise AssertionError("site called")
+
+        with pytest.raises(HardBlockError) as error:
+            await manager.run("intermarche", must_not_run, timeout=5)
+        assert error.value.retry_after is not None
+        assert "ne réessaiera pas avant" in str(error.value)
+        assert manager._thread is None  # no browser started at all
+
+    asyncio.run(scenario())
+
+
+def test_kill_switch_goes_back_to_the_shared_browser(tmp_path, monkeypatch):
+    from backend import config
+    from backend.browser import BrowserManager
+
+    manager = BrowserManager(tmp_path / "profile")
+    assert manager.is_dedicated("intermarche")
+    assert [w.store for w in manager.status().windows] == ["intermarche"]
+    monkeypatch.setattr(config, "REAL_CHROME_STORES", ())
+    assert not manager.is_dedicated("intermarche")
+    assert manager.status().windows == []
+
+
+def test_clock_text():
+    from datetime import datetime
+
+    from backend.scrapers.common import clock_text
+
+    now = datetime(2026, 10, 3, 14, 0).timestamp()
+    assert clock_text(datetime(2026, 10, 3, 15, 5).timestamp(), now) == "15 h 05"
+    assert clock_text(datetime(2026, 10, 4, 1, 10).timestamp(), now) == "demain à 1 h 10"
+    assert clock_text(datetime(2026, 10, 12, 9, 5).timestamp(), now) == "le 12/10 à 9 h 05"

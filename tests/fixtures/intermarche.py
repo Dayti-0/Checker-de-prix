@@ -153,7 +153,9 @@ FINGERPRINT_PROBE_JS = r"""
     if (!pre) { pre = document.createElement('pre'); pre.id = 'report'; document.body.appendChild(pre); }
     pre.textContent = JSON.stringify(R);
   };
-  window.addEventListener('message', (m) => { if (m.data && m.data.probeFrame) { R.frame = m.data.probeFrame; out(); } });
+  window.addEventListener('message', (m) => {
+    if (m.data && m.data.probeFrame) { R.frame = m.data.probeFrame; out(); }
+  });
   done.then(out);
   setInterval(out, 300);
 })();

@@ -50,12 +50,16 @@ CIRCUIT_TIMEOUTS = 2
 HARD_BLOCK_COOLDOWN_SECONDS = 30 * 60
 HARD_BLOCK_COOLDOWN_MAX_SECONDS = 4 * 60 * 60
 
+
+def parse_store_list(value: str) -> tuple[str, ...]:
+    """``"intermarche, carrefour"`` → ``("intermarche", "carrefour")`` (empty: none)."""
+    return tuple(k.strip().lower() for k in value.split(",") if k.strip())
+
+
 # Retailers driven through a dedicated real Chrome window (backend/real_chrome.py)
 # instead of the shared Playwright browser. PRIXMALIN_REAL_CHROME= (empty) goes
-# back to the shared browser for every retailer.
-REAL_CHROME_STORES = tuple(
-    k.strip().lower() for k in os.environ.get("PRIXMALIN_REAL_CHROME", "intermarche").split(",") if k.strip()
-)
+# back to the shared browser for every retailer (not advised for Intermarché).
+REAL_CHROME_STORES = parse_store_list(os.environ.get("PRIXMALIN_REAL_CHROME", "intermarche"))
 # chrome.exe or msedge.exe to use (found automatically when empty)
 CHROME_PATH = os.environ.get("PRIXMALIN_CHROME_PATH", "").strip()
 # Extra command line switches of that Chrome: for the tests only (--no-sandbox)

@@ -41,7 +41,7 @@ PAGE_SIZE = 40
 LABEL = "Intermarché"
 CAPTCHA_MESSAGE = (
     "Intermarché demande une vérification : appuyez sur « Ouvrir le site », validez-la dans la "
-    "fenêtre Chrome d'Intermarché ouverte par PrixMalin, puis relancez la recherche."
+    "fenêtre Chrome d'Intermarché ouverte par PrixMalin, puis appuyez sur « J'ai terminé »."
 )
 
 # Identifiers the site sends with each API call (taken from its own cookies)
@@ -180,7 +180,7 @@ def check_answer(status: int, text: str) -> None:
     if status in (401, 403, 405, 429) or "captcha-delivery.com" in head:
         kind = classify_datadome(None, head)
         if kind == "hard_block" or status == 429:
-            raise HardBlockError(hard_block_message(LABEL))
+            raise HardBlockError(hard_block_message(LABEL), label=LABEL)
         raise BlockedError(CAPTCHA_MESSAGE)
     if status == 0:
         logger.warning("Intermarché unreachable: %s", head[:200])

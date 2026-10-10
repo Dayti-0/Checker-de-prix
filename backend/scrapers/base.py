@@ -16,13 +16,16 @@ class BlockedError(ScraperError):
 class HardBlockError(BlockedError):
     """The site refuses this connection for a while ("Accès temporairement restreint").
 
-    Nothing the user can solve: PrixMalin stops calling the retailer until
-    ``retry_after`` (Unix time, set by services/circuit.py) and never retries.
+    Nothing the user can solve: PrixMalin makes no call to the retailer before
+    ``retry_after`` (Unix time) and never retries. Raised by a scraper without
+    ``retry_after``; ``browser.run`` then records the pause (30 min, doubled at
+    each new block, at most 4 h) and sets it.
     """
 
-    def __init__(self, message: str = "", retry_after: float | None = None) -> None:
+    def __init__(self, message: str = "", retry_after: float | None = None, label: str | None = None) -> None:
         super().__init__(message)
         self.retry_after = retry_after
+        self.label = label
 
 
 class StoreRequiredError(ScraperError):
