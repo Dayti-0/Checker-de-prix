@@ -12,3 +12,5 @@ venv/
 # Database, browser profile and debug snapshots
 data/
 test-artifacts/
+*.egg-info/
+build/
