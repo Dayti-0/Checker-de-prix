@@ -38,4 +38,6 @@ addopts = "-ra"
 filterwarnings = [
     # Starlette's TestClient on recent anyio versions
     "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
+    # Starlette 1.7 prefers httpx2 for its TestClient; httpx stays a dependency of the app
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated:UserWarning",
 ]

@@ -11,3 +11,4 @@ venv/
 .venv/
 # Database, browser profile and debug snapshots
 data/
+test-artifacts/
