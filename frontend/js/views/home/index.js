@@ -15,7 +15,7 @@ export const CARDS = { recent, list, alerts, savings, status, setup };
 
 export const enabled = true;
 export const title = "Rechercher";
-export const nav = { id: "search", label: "Rechercher", icon: "search", order: 10, also: ["/recherche"] };
+export const nav = { id: "search", label: "Rechercher", icon: "search", order: 10, also: ["/recherche"], keepParams: true };
 export const shell = { search: true, filters: true };
 
 let cleanups = [];
@@ -35,8 +35,13 @@ export function render(el) {
         box.className = "home-card";
         box.dataset.card = name;
         welcome.append(box);
-        const cleanup = card.render(box);
-        if (typeof cleanup === "function") cleanups.push(cleanup);
+        try {
+            const cleanup = card.render(box);
+            if (typeof cleanup === "function") cleanups.push(cleanup);
+        } catch (err) {
+            console.error(err);
+            box.remove();
+        }
     }
     document.getElementById("q").value = "";
     // As before: the home page forgets the last search

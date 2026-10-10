@@ -129,3 +129,20 @@ def test_browser_unavailable_elsewhere(client, monkeypatch):
     assert (done.status_code, done.json()["detail"]) == (502, "Pas de navigateur")
     patch = client.patch("/api/settings", json={"show_browser": True})
     assert (patch.status_code, patch.json()["detail"]) == (502, "Pas d'écran")
+
+
+def test_http_and_validation_errors_are_in_french(client):
+    unknown = client.get("/api/search/inconnu", params={"q": "farine"})
+    assert unknown.status_code == 404
+    assert unknown.json() == {"detail": "Enseigne inconnue : inconnu", "code": "http_404"}
+
+    missing = client.get("/api/route-qui-n-existe-pas")
+    assert missing.status_code == 404
+    assert missing.json() == {"detail": "Introuvable.", "code": "http_404"}
+
+    invalid = client.post("/api/settings/location", json={"postal_code": "<script>"})
+    assert invalid.status_code == 422
+    body = invalid.json()
+    assert body["code"] == "validation"
+    assert body["detail"] == "Données invalides : postal_code."
+    assert "<script>" not in invalid.text

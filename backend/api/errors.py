@@ -8,6 +8,8 @@
 | BrowserUnavailable            | 502  | browser_unavailable          |
 | ScraperError (and subclasses) | 502  | its status (blocked...)      |
 | TimeoutError (asyncio too)    | 504  | timeout                      |
+| HTTPException                 | its status | http_<status>          |
+| RequestValidationError        | 422  | validation                   |
 
 ``guard(action)`` turns any other error of a block into a 502 whose message
 starts with ``action``.
@@ -16,9 +18,12 @@ starts with ``action``.
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
+from http import HTTPStatus
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from backend.browser import BrowserUnavailable
 from backend.errors import AppError, short_error
@@ -49,7 +54,43 @@ async def _timeout(request: Request, error: TimeoutError) -> JSONResponse:
     return error_response(504, TIMEOUT_MESSAGE, "timeout")
 
 
+# Default English phrases of Starlette, shown to the user in French
+HTTP_MESSAGES = {
+    400: "Requête invalide.",
+    401: "Accès refusé.",
+    403: "Accès interdit.",
+    404: "Introuvable.",
+    405: "Action non autorisée.",
+    413: "Envoi trop volumineux.",
+    429: "Trop de demandes, réessayez dans un instant.",
+}
+
+
+async def _http_error(request: Request, error: StarletteHTTPException) -> JSONResponse:
+    detail = error.detail if isinstance(error.detail, str) else ""
+    # Messages written in French by the routes are kept; Starlette's defaults are translated
+    try:
+        default = HTTPStatus(error.status_code).phrase
+    except ValueError:
+        default = ""
+    if not detail or detail == default:
+        detail = HTTP_MESSAGES.get(error.status_code, "Erreur.")
+    response = error_response(error.status_code, detail, f"http_{error.status_code}")
+    for name, value in (error.headers or {}).items():
+        response.headers[name] = value
+    return response
+
+
+async def _validation_error(request: Request, error: RequestValidationError) -> JSONResponse:
+    # Field names only: the submitted values are never echoed back
+    fields = sorted({".".join(str(part) for part in e.get("loc", ())[1:]) or "requête" for e in error.errors()})
+    message = "Données invalides : " + ", ".join(fields) + "."
+    return error_response(422, message, "validation")
+
+
 def install(app: FastAPI) -> None:
+    app.add_exception_handler(StarletteHTTPException, _http_error)
+    app.add_exception_handler(RequestValidationError, _validation_error)
     app.add_exception_handler(AppError, _app_error)
     app.add_exception_handler(BrowserUnavailable, _browser_unavailable)
     app.add_exception_handler(ScraperError, _scraper_error)

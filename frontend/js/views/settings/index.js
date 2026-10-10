@@ -46,8 +46,14 @@ export function render(container, params) {
         el.dataset.section = section.id;
         setHtml(el, html`<h3>${section.title}</h3><div class="settings-section-body"></div>`);
         page.append(el);
-        const cleanup = section.render(el.querySelector(".settings-section-body"));
-        if (typeof cleanup === "function") cleanups.push(cleanup);
+        const body = el.querySelector(".settings-section-body");
+        try {
+            const cleanup = section.render(body);
+            if (typeof cleanup === "function") cleanups.push(cleanup);
+        } catch (err) {
+            console.error(err);
+            setHtml(body, html`<p class="notice warn">Cette section n'a pas pu s'afficher.</p>`);
+        }
     }
     const focused = focusRetailer(params.enseigne);
     // Fresh state of the stores and of the browser

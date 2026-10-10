@@ -1,5 +1,7 @@
 import asyncio
 import os
+import re
+from pathlib import Path
 
 import pytest
 
@@ -18,12 +20,19 @@ def browser_missing(reason: str):
     pytest.skip(reason)
 
 
+ARTIFACTS = os.environ.get("PRIXMALIN_TEST_ARTIFACTS", "")
+
+
 @pytest.fixture(autouse=True)
-def temp_data_dir(tmp_path, monkeypatch):
+def temp_data_dir(tmp_path, monkeypatch, request):
     """Each test gets its own database and data directory."""
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "test.db")
-    monkeypatch.setattr(config, "DEBUG_DIR", tmp_path / "debug")
+    # In the CI, pages saved by a failing scraper are published with the artifacts
+    debug_dir = tmp_path / "debug"
+    if ARTIFACTS:
+        debug_dir = Path(ARTIFACTS) / "debug" / re.sub(r"[^\w.-]+", "_", request.node.nodeid)
+    monkeypatch.setattr(config, "DEBUG_DIR", debug_dir)
     database._db = None
     yield tmp_path
     database._db = None

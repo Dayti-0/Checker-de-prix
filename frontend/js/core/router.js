@@ -64,7 +64,11 @@ function match(path) {
         if (found) {
             const params = {};
             route.compiled.keys.forEach((key, i) => {
-                params[key] = decodeURIComponent(found[i + 1]);
+                try {
+                    params[key] = decodeURIComponent(found[i + 1]);
+                } catch {
+                    params[key] = found[i + 1];
+                }
             });
             return { route, params };
         }
@@ -152,7 +156,7 @@ function handleRoute() {
     const allParams = { ...params, ...found.params };
     const hash = hrefFor(path, params);
     const owner = navOwner(route);
-    if (owner) lastHashByNav[owner.view.nav.id || owner.name] = hash;
+    if (owner && owner.view.nav.keepParams) lastHashByNav[owner.view.nav.id || owner.name] = hash;
 
     if (current && current.route === route) {
         if (current.hash === hash) return;

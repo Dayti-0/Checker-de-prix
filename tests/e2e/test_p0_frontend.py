@@ -315,3 +315,22 @@ def test_icons(desktop):
     assert ids == ["true", "Supprimer", "img", "/static/icons.svg#search"]
     for name in ("search", "list", "settings", "map-pin", "trash-2", "bell", "x", "plus"):
         assert f'<symbol id="{name}"' in sprite.text(), name
+
+
+def test_settings_link_forgets_the_retailer_anchor(desktop):
+    # Only « Rechercher » remembers its last address (nav.keepParams)
+    page = desktop
+    page.goto(f"{page.base}/#/reglages?enseigne=coursesu")
+    page.get_by_role("link", name=re.compile("Ma liste")).click()
+    expect(page).to_have_url(re.compile(r"#/liste$"))
+    settings = page.locator("nav a", has_text="Réglages").first
+    expect(settings).to_have_attribute("href", "#/reglages")
+
+
+def test_malformed_path_parameter_does_not_break_the_router(desktop):
+    page = desktop
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(f"{page.base}/#/produit/aldi/%E0%A4%A")
+    expect(page).to_have_url(f"{page.base}/#/")
+    assert errors == []

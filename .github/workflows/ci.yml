@@ -74,6 +74,5 @@ jobs:
           name: test-artifacts-python-${{ matrix.python-version }}
           path: |
             test-artifacts/
-            data/debug/
           if-no-files-found: ignore
           retention-days: 7
