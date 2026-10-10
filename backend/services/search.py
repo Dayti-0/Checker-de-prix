@@ -74,6 +74,9 @@ PROBLEM_TEXT = {
     "store_required": "magasin à choisir",
 }
 
+# Pause before the new try after a navigation error
+RETRY_PAUSE_SECONDS = 1.0
+
 _circuit = Circuit()
 
 
@@ -157,7 +160,7 @@ async def _scrape(scraper: BaseScraper, query: str, store: StoreSelection | None
                 raise
             logger.warning("%s: %s, new try in a fresh tab", scraper.label, short_error(e))
             await browser.reset_tab(key)
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(RETRY_PAUSE_SECONDS)
     return []
 
 
