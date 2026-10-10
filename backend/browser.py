@@ -272,8 +272,9 @@ class BrowserManager:
         except HardBlockError as e:
             await self._record_hard_block(key, e)
             raise
-        except BlockedError:
+        except BlockedError as e:
             await self.hard_blocks.blocked(key)
+            e.recorded = True
             real = self._real.get(key)
             if real is not None:
                 real.challenge_pending = True  # « Ouvrir le site » loads the page again

@@ -8,6 +8,7 @@ from backend.browser import browser
 from backend.models import BrowserSetupRequest, BrowserStatus
 from backend.repos import cache
 from backend.security import is_local_request
+from backend.services import search
 from backend.services import settings as settings_service
 
 router = APIRouter()
@@ -21,6 +22,7 @@ def status_for(http_request: Request) -> BrowserStatus:
 
 @router.get("/browser", response_model=BrowserStatus)
 async def api_browser_status(http_request: Request):
+    await browser.hard_blocks.load()
     return status_for(http_request)
 
 
@@ -39,7 +41,14 @@ async def api_browser_setup(request: BrowserSetupRequest, http_request: Request)
 
 @router.post("/browser/setup/done", response_model=BrowserStatus)
 async def api_browser_setup_done(http_request: Request):
-    await browser.end_setup()
-    # The store or the session may have changed on the sites: forget old results
-    await cache.clear_cache()
+    shown = browser.setup_store
+    store = await browser.end_setup() or shown
+    if store and store != "_setup":
+        # The store or the session may have changed on that site: forget its
+        # old results, and allow its visits again (circuit breaker)
+        await cache.clear_cache(f"{store}|")
+        search.reset_circuit(store)
+    else:
+        await cache.clear_cache()
+        search.reset_circuit()
     return status_for(http_request)

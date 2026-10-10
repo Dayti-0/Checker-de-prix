@@ -146,13 +146,19 @@ class CircuitState:
     timeouts: int = 0  # timeouts in a row
     status: str | None = None  # status and message of the answer that opened it
     message: str | None = None
+    # Products without price of a « store required » answer (shown again meanwhile)
+    products: tuple = ()
+    fetched_at: float | None = None
 
 
-def after_result(state: CircuitState | None, status: str, message: str | None, now: float) -> CircuitState:
+def after_result(
+    state: CircuitState | None, status: str, message: str | None, now: float, products: tuple = ()
+) -> CircuitState:
     """State after a real call to the site that ended with ``status``."""
     state = state or CircuitState()
     if status in ("blocked", "store_required"):
-        return CircuitState(status, now + config.CIRCUIT_BLOCKED_SECONDS, 0, status, message)
+        kept = tuple(products) if status == "store_required" else ()
+        return CircuitState(status, now + config.CIRCUIT_BLOCKED_SECONDS, 0, status, message, kept, now)
     if status == "timeout":
         timeouts = state.timeouts + 1
         if timeouts >= config.CIRCUIT_TIMEOUTS:
@@ -179,31 +185,53 @@ def may_call(state: CircuitState | None, now: float, *, refresh: bool, priority:
 
 
 class Circuit:
-    """Circuits of every (retailer, store context), in memory."""
+    """Circuits of every (retailer, store context), in memory.
+
+    They belong to the database in use (each test has its own): another
+    database starts with every circuit closed.
+    """
 
     def __init__(self) -> None:
         self._states: dict[tuple[str, str], CircuitState] = {}
+        self._database: str | None = None
+
+    @property
+    def _all(self) -> dict[tuple[str, str], CircuitState]:
+        if self._database != str(config.DB_PATH):
+            self._database = str(config.DB_PATH)
+            self._states = {}
+        return self._states
 
     def get(self, key: str, store_ctx: str) -> CircuitState | None:
-        return self._states.get((key, store_ctx))
+        return self._all.get((key, store_ctx))
 
-    def update(self, key: str, store_ctx: str, status: str, message: str | None, now: float | None = None) -> None:
+    def update(
+        self,
+        key: str,
+        store_ctx: str,
+        status: str,
+        message: str | None,
+        now: float | None = None,
+        products: tuple = (),
+    ) -> None:
         now = time.time() if now is None else now
-        state = after_result(self._states.get((key, store_ctx)), status, message, now)
+        states = self._all
+        state = after_result(states.get((key, store_ctx)), status, message, now, products)
         if state == CircuitState():
-            self._states.pop((key, store_ctx), None)
+            states.pop((key, store_ctx), None)
         else:
-            self._states[(key, store_ctx)] = state
+            states[(key, store_ctx)] = state
 
     def reset(self, key: str | None = None) -> None:
         """Close the circuits of ``key`` (« J'ai terminé »), or of every retailer."""
-        for k in [k for k in self._states if key is None or k[0] == key]:
-            del self._states[k]
+        states = self._all
+        for k in [k for k in states if key is None or k[0] == key]:
+            del states[k]
 
     def state(self, key: str, hard: BlockRecord, now: float | None = None) -> RetailerState:
         now = time.time() if now is None else now
         result = RetailerState(store=key, last_blocked=hard.last_blocked or None)
-        states = [s for (k, _), s in self._states.items() if k == key]
+        states = [s for (k, _), s in self._all.items() if k == key]
         if states:
             result.timeouts = max(s.timeouts for s in states)
         opened = [s for s in states if is_open(s, now)]

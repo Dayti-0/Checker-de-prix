@@ -221,7 +221,8 @@ def test_search_result_tells_when_and_how(monkeypatch):
     before, fresh, cached = run(scenario())
     assert fresh.source == "api" and fresh.fetched_at >= before and not fresh.cached
     assert cached.cached and cached.fetched_at == pytest.approx(fresh.fetched_at, abs=1)
-    assert cached.source is None and cached.stale is False
+    # B46 (P3): the cache remembers how the products were read
+    assert cached.source == "api" and cached.stale is False
 
 
 def test_search_store_signature():

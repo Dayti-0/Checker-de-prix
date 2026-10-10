@@ -11,6 +11,8 @@ class BlockedError(ScraperError):
     """The site shows an anti-bot challenge (Cloudflare, DataDome...)."""
 
     status = "blocked"
+    # Already noted by browser.run (services/circuit.py HardBlocks)
+    recorded = False
 
 
 class HardBlockError(BlockedError):
