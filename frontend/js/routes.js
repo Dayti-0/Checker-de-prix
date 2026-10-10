@@ -11,7 +11,7 @@ import * as search from "./views/search/index.js";
 import * as settings from "./views/settings/index.js";
 import * as shopping from "./views/shopping/index.js";
 import * as status from "./views/status/index.js";
-import * as history from "./views/tracking/history.js";
+import * as priceHistory from "./views/tracking/history.js";
 import * as tracking from "./views/tracking/index.js";
 
 export const DEFAULT_PATH = "/";
@@ -23,7 +23,7 @@ export const ROUTES = [
     { name: "basket", path: "/panier", view: basket }, // P5
     { name: "shopping", path: "/courses", view: shopping }, // P5: mode « En magasin »
     { name: "tracking", path: "/suivis", view: tracking }, // P6
-    { name: "history", path: "/historique", view: history }, // P6
+    { name: "history", path: "/historique", view: priceHistory }, // P6
     { name: "product", path: "/produit/:store/:key", view: product }, // P6
     { name: "settings", path: "/reglages", view: settings }, // P1: #/reglages?enseigne=intermarche
     { name: "status", path: "/etat", view: status }, // P4: état des enseignes
