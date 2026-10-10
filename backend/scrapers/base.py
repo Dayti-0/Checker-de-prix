@@ -13,6 +13,18 @@ class BlockedError(ScraperError):
     status = "blocked"
 
 
+class HardBlockError(BlockedError):
+    """The site refuses this connection for a while ("Accès temporairement restreint").
+
+    Nothing the user can solve: PrixMalin stops calling the retailer until
+    ``retry_after`` (Unix time, set by services/circuit.py) and never retries.
+    """
+
+    def __init__(self, message: str = "", retry_after: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
 class StoreRequiredError(ScraperError):
     """Prices cannot be shown until a store is chosen."""
 
