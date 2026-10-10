@@ -4,7 +4,7 @@
 .retailer-card:last-child { border-bottom: 0; }
 .retailer-head { display: flex; align-items: center; justify-content: space-between; gap: .55rem; margin-bottom: .4rem; }
 .state { font-size: var(--text-875); font-weight: 700; }
-.state.ok { color: var(--best); }
+.state.ok { color: var(--best-text); }
 .state.todo { color: var(--warn); }
 .retailer-card p { margin: .25rem 0 .55rem; }
 .retailer-actions { display: flex; flex-wrap: wrap; gap: .55rem; margin-top: .55rem; }

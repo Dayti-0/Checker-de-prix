@@ -14,7 +14,12 @@
     --best: #16a34a;
     --accent-best: #16a34a;
     --best-bg: #ecfdf3;
+    /* Readable versions (WCAG AA) of the green and the red, for texts and tags */
+    --best-text: #15803d;
+    --best-strong: #15803d;
+    --primary-text: #15803d;
     --danger: #c62828;
+    --danger-text: #c62828;
     --warn: #8a5a00;
     --warn-bg: #fff6e0;
     --promo: #b00020;
@@ -103,6 +108,9 @@
         --muted: #98a2b3;
         --border: #2a333d;
         --best-bg: #0f2a1a;
+        --best-text: #4ade80;
+        --primary-text: #4ade80;
+        --danger-text: #f87171;
         --warn: #f5c86b;
         --warn-bg: #2a2210;
     }
@@ -116,6 +124,9 @@
     --muted: #98a2b3;
     --border: #2a333d;
     --best-bg: #0f2a1a;
+    --best-text: #4ade80;
+    --primary-text: #4ade80;
+    --danger-text: #f87171;
     --warn: #f5c86b;
     --warn-bg: #2a2210;
 }

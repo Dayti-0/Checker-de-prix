@@ -26,7 +26,7 @@
     border: 1px solid var(--best);
     border-radius: var(--radius);
 }
-.summary-card .label { font-size: var(--text-80); text-transform: uppercase; letter-spacing: .4px; color: var(--best); font-weight: 700; }
+.summary-card .label { font-size: var(--text-80); text-transform: uppercase; letter-spacing: .4px; color: var(--best-text); font-weight: 700; }
 .summary-card .value { font-size: var(--text-170); font-weight: 800; }
 .summary-card .what { font-size: var(--text-100); }
 .summary-progress { font-size: var(--text-90); color: var(--muted); align-self: center; }

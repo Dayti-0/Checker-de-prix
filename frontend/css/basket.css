@@ -11,5 +11,5 @@
 .basket-table td.cell { min-width: 10rem; }
 .basket-table .cell-price { font-weight: 700; }
 .basket-table .cell-name { color: var(--muted); font-size: var(--text-85); display: block; max-width: 16rem; }
-.basket-table td.cheapest .cell-price { color: var(--best); }
+.basket-table td.cheapest .cell-price { color: var(--best-text); }
 .basket-table tfoot td { font-weight: 800; font-size: var(--text-105); }

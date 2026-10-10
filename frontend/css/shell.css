@@ -37,7 +37,7 @@
 }
 .chip svg { width: 1.1rem; height: 1.1rem; flex: none; }
 .chip span { overflow: hidden; text-overflow: ellipsis; }
-.chip.configured { border-color: var(--primary); color: var(--primary); }
+.chip.configured { border-color: var(--primary); color: var(--primary-text); }
 
 /* --- Text size (A− / A+) --- */
 

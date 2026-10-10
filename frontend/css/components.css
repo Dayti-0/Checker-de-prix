@@ -23,7 +23,7 @@
     font-size: var(--text-95);
 }
 .btn-ghost:hover { border-color: var(--muted); }
-.btn-ghost.danger { color: var(--danger); }
+.btn-ghost.danger { color: var(--danger-text); }
 .btn-ghost.small { padding: .35rem .75rem; font-size: var(--text-875); }
 
 .icon-btn {
@@ -79,7 +79,9 @@
     cursor: pointer;
 }
 .store-toggle input { position: absolute; opacity: 0; pointer-events: none; }
-.store-toggle:not(.on) { opacity: .5; text-decoration: line-through; }
+/* Unticked: grey crossed-out text, faded dot (the text stays readable) */
+.store-toggle:not(.on) { color: var(--muted); text-decoration: line-through; }
+.store-toggle:not(.on) .dot { opacity: .5; }
 
 /* --- Notices and loading --- */
 
