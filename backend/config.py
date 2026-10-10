@@ -37,6 +37,7 @@ QUEUE_TIMEOUT_SECONDS = float(os.environ.get("PRIXMALIN_QUEUE_TIMEOUT", "90"))
 
 # Politeness delay between two requests to the same retailer (plus 0 to 0.5 s)
 MIN_REQUEST_INTERVAL_SECONDS = 1.0
+REQUEST_JITTER_SECONDS = 0.5
 REQUEST_INTERVAL_SECONDS = {"intermarche": 1.1}
 
 # Circuit breaker: after a "blocked" or "store_required" answer the retailer is

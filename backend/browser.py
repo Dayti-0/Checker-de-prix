@@ -512,7 +512,7 @@ class BrowserManager:
         if last is None:
             return
         interval = config.REQUEST_INTERVAL_SECONDS.get(key, config.MIN_REQUEST_INTERVAL_SECONDS)
-        jitter = random.uniform(0, 0.5)  # noqa: S311 (not cryptographic)
+        jitter = random.uniform(0, config.REQUEST_JITTER_SECONDS)  # noqa: S311 (not cryptographic)
         wait = interval + jitter - (time.monotonic() - last)
         if wait > 0:
             await asyncio.sleep(wait)
