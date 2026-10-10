@@ -5,12 +5,26 @@ from fastapi import APIRouter, HTTPException
 from backend.api.common import get_scraper
 from backend.api.errors import guard
 from backend.browser import browser
-from backend.models import RetailerInfo, Settings, StoreOption, StoreSelection
+from backend.models import (
+    RetailerInfo,
+    Settings,
+    StoreChoice,
+    StoreOption,
+    StoreSelection,
+    valid_store_id,
+)
 from backend.scrapers import SCRAPERS
 from backend.scrapers.coursesu import is_store_url, store_name_from_url
 from backend.services import settings as settings_service
 
 router = APIRouter()
+
+# Same prices everywhere in France
+NATIONAL = {"aldi", "lidl"}
+# PrixMalin lists the stores near the user
+FINDS_STORES = {"intermarche", "coursesu"}
+
+COURSESU_URL_HINT = "Adresse invalide. Exemple : https://www.coursesu.com/drive-superu-roujan"
 
 
 @router.get("/retailers", response_model=list[RetailerInfo])
@@ -24,6 +38,8 @@ async def api_retailers():
             store_hint=s.store_hint,
             home_url=s.home_url,
             store=current.stores.get(s.key),
+            national=s.key in NATIONAL,
+            finds_stores=s.key in FINDS_STORES,
         )
         for s in SCRAPERS.values()
     ]
@@ -41,16 +57,27 @@ async def api_intermarche_stores():
 
 
 @router.put("/retailers/{key}/store", response_model=Settings)
-async def api_set_store(key: str, selection: StoreSelection):
+async def api_set_store(key: str, choice: StoreChoice):
     scraper = get_scraper(key)
+    if key in ("coursesu", "intermarche") and choice.id is not None and not valid_store_id(choice.id):
+        raise HTTPException(422, "Identifiant de magasin invalide.")
     if key == "coursesu":
-        if not selection.url or not is_store_url(selection.url):
-            raise HTTPException(400, "Adresse invalide. Exemple : https://www.coursesu.com/drive-superu-roujan")
-        selection.url = selection.url.strip().rstrip("/")
-        selection.name = selection.name or store_name_from_url(selection.url)
+        url = (choice.url or "").rstrip("/")
+        if not url or not is_store_url(url):
+            raise HTTPException(400, COURSESU_URL_HINT)
+        selection = StoreSelection(
+            id=choice.id,
+            name=choice.name or store_name_from_url(url),
+            url=url,
+            address=choice.address,
+            distance_km=choice.distance_km,
+        )
     elif key == "intermarche":
-        if not selection.id:
+        if not choice.id:
             raise HTTPException(400, "Magasin manquant.")
+        selection = StoreSelection(
+            id=choice.id, name=choice.name, address=choice.address, distance_km=choice.distance_km
+        )
     else:
         raise HTTPException(400, f"{scraper.label} ne nécessite pas de choisir un magasin ici.")
     return await settings_service.set_store(key, selection)

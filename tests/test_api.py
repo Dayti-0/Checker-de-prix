@@ -36,7 +36,8 @@ def test_index_and_static(client):
 def test_api_routes(client):
     """The split of the API into routers (backend/api/) keeps every URL."""
     paths = {path: sorted(methods) for path, methods in main.app.openapi()["paths"].items()}
-    assert paths == {
+    # Every URL of PrixMalin 2.1 still answers (the lots add their own routes)
+    expected = {
         "/api/search": ["get"],
         "/api/search/{store}": ["get"],
         "/api/retailers": ["get"],
@@ -54,6 +55,7 @@ def test_api_routes(client):
         "/": ["get"],
         "/favicon.ico": ["get"],
     }
+    assert {path: paths.get(path) for path in expected} == expected
 
 
 def test_search_endpoints(client):
@@ -77,6 +79,8 @@ def test_retailers_and_store_selection(client):
         "name": "Super U Roujan",
         "url": "https://www.coursesu.com/drive-superu-roujan",
         "address": None,
+        "auto": False,
+        "distance_km": None,
     }
     assert client.put("/api/retailers/aldi/store", json={"id": "1"}).status_code == 400
     assert client.put("/api/retailers/intermarche/store", json={"id": "06814", "name": "Lattes"}).status_code == 200

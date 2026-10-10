@@ -4,6 +4,7 @@ import os
 import pytest
 
 os.environ.setdefault("PRIXMALIN_WARMUP", "0")
+os.environ.setdefault("PRIXMALIN_ONBOARDING", "0")  # the first-launch assistant does not open by itself
 
 from backend import config, database  # noqa: E402
 
