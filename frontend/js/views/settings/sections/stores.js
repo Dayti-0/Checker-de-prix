@@ -105,6 +105,9 @@ function detail(r, setup) {
             lines.push(html`<p class="retailer-detail">${storeLine(r.store)}</p>`);
         }
         if (r.store.address) lines.push(html`<p class="retailer-address small muted">${r.store.address}</p>`);
+        if (r.key === "coursesu" && r.store.auto && r.store.distance_km > FAR_KM) {
+            lines.push(html`<p class="retailer-detail warn-text">Aucun drive Courses U à moins de ${FAR_KM} km.</p>`);
+        }
     } else if (r.key === "coursesu") {
         lines.push(coursesuWithoutStore());
     } else if (r.key === "intermarche") {

@@ -130,3 +130,16 @@ def test_home_card_while_the_setup_is_incomplete(desktop):
     expect(card).to_have_count(0)
     stores = page.request.get(f"{page.base}/api/settings").json()["stores"]
     assert stores["coursesu"]["auto"] is True
+
+
+def test_assistant_in_dark_mode(dark):
+    page = dark
+    page.goto(f"{page.base}/#/bienvenue")
+    postal = page.get_by_role("textbox", name="Code postal")
+    postal.fill("34480")
+    postal.press("Enter")
+    expect(page.get_by_role("radio", name="Magalas")).to_be_visible()
+    assert_accessible(page, "assistant en sombre, étape 1")
+    page.get_by_role("button", name="Continuer").click()
+    expect(page.get_by_role("group", name=re.compile("Magasin Courses U")).get_by_role("radio")).to_have_count(4)
+    assert_accessible(page, "assistant en sombre, étape 2")
