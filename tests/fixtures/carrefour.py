@@ -73,3 +73,37 @@ CARREFOUR_PAGE = """<!DOCTYPE html>
   </article></li>
 </ul>
 </body></html>"""
+
+
+def _carrefour_item(ean, title, brand, price, per_unit_label, images=None):
+    return {
+        "type": "product",
+        "id": ean,
+        "attributes": {
+            "ean": ean,
+            "title": title,
+            "brand": brand,
+            "slug": title.lower().replace(" ", "-"),
+            "format": "1kg",
+            "images": images or [{"large": f"/media/540x540/Photosite/{ean}.jpg"}],
+            "offers": {
+                ean: {"0001_1": {"attributes": {"price": {"price": price, "perUnitLabel": per_unit_label}}}},
+            },
+        },
+    }
+
+
+# Two pages of a search: page 1 says there are 3 products, page 2 holds the
+# third one and again one of page 1 (merged once)
+CARREFOUR_SEARCH_PAGE1 = {
+    "data": CARREFOUR_SEARCH["data"],
+    "meta": {"total": 3},
+    "links": {"self": "/s?q=farine&page=1", "next": "/s?q=farine&page=2"},
+}
+CARREFOUR_SEARCH_PAGE2 = {
+    "data": [
+        _carrefour_item("3560070123452", "Farine de blé T55", "CARREFOUR CLASSIC'", 0.79, "0,79 € / KG"),
+        CARREFOUR_SEARCH["data"][0],
+    ],
+    "meta": {"total": 3},
+}

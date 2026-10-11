@@ -1,10 +1,24 @@
+"""Aldi: the product tiles of the search page (rendered by the site from Algolia).
+
+A « Voir plus » button or a link to the next page is followed once, in the first
+half of the search (``extract.read_more``). Fallbacks: the Algolia answers seen
+by the page, the generic cards, the JSON-LD.
+"""
+
 import logging
 from urllib.parse import quote
 
 from backend.models import Product, StoreSelection
 from backend.scrapers.base import BaseScraper
 from backend.scrapers.common import accept_cookies, save_debug_snapshot, wait_for_clearance
-from backend.scrapers.extract import extract_cards, extract_json_ld, products_from_json
+from backend.scrapers.extract import (
+    PageBudget,
+    extract_cards,
+    extract_json_ld,
+    merge_pages,
+    products_from_json,
+    read_more,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +33,8 @@ TILE_OPTIONS = {
     "priceSelector": "[data-testid$='tag-current-price-amount'], .tag__label--price",
     "unitSelector": ".tag__marker--base-price",
     "quantitySelector": ".tag__marker--salesunit",
+    # Tiles read at most (two pages)
+    "limit": 120,
 }
 
 
@@ -30,6 +46,7 @@ class AldiScraper(BaseScraper):
 
     async def search(self, page, query: str, store: StoreSelection | None) -> list[Product]:
         self.last_source = None
+        budget = PageBudget(self.key)
         algolia_responses = []
 
         def on_response(response) -> None:
@@ -50,7 +67,13 @@ class AldiScraper(BaseScraper):
                 logger.info("Aldi: no product tile for '%s'", query)
             await page.wait_for_timeout(500)
 
-            products = self.found(await extract_cards(page, self.key, BASE_URL, **TILE_OPTIONS), "html")
+            def tiles():
+                return extract_cards(page, self.key, BASE_URL, **TILE_OPTIONS)
+
+            products = self.found(await tiles(), "html")
+            if products:
+                more = await read_more(page, tiles, budget, card_selector=TILE_OPTIONS["cardSelector"])
+                return self.found(merge_pages(products, more), "html")
             if not products:
                 # Tiles changed: use the search API responses captured meanwhile
                 for response in algolia_responses:

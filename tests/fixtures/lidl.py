@@ -28,3 +28,24 @@ LIDL_SEARCH = {
         },
     ],
 }
+
+
+def _lidl_item(product_id, title, price, base_price, ean=None):
+    data = {
+        "productId": product_id,
+        "fullTitle": title,
+        "canonicalUrl": f"/p/{title.lower().replace(' ', '-')}/p{product_id}",
+        "price": {"price": price, "basePrice": {"text": base_price}},
+    }
+    if ean:
+        data["ians"] = [ean]
+    return {"gridbox": {"data": data}}
+
+
+# Two answers of the API: 3 products found, 2 in the first answer, the third at offset 2
+LIDL_SEARCH_PAGE1 = {"numFound": 3, "offset": 0, "items": LIDL_SEARCH["items"]}
+LIDL_SEARCH_PAGE2 = {
+    "numFound": 3,
+    "offset": 2,
+    "items": [_lidl_item(100014, "Farine de blé complète", 1.15, "1 kg (1 kg = 1,15 €)", ean="3200411000010")],
+}

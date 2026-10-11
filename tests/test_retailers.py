@@ -18,7 +18,7 @@ def test_carrefour_json():
     assert first.price == 0.85
     assert (first.unit_price, first.unit) == (0.85, "kg")
     assert first.product_url == "https://www.carrefour.fr/p/farine-de-ble-t45-carrefour-classic-3560070472888"
-    assert first.image_url == "https://www.carrefour.fr/media/540x540/Photosite/farine.jpg"
+    assert first.image_url == "https://www.carrefour.fr/media/280x280/Photosite/farine.jpg"  # B40: thumbnail
     assert first.promo == "2ème à -50%"
     assert first.quantity_label == "1kg"
     second = finalize_product(products[1])
