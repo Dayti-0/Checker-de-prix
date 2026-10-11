@@ -103,7 +103,8 @@ function undoer(query, before, after, store) {
 }
 
 // Saves the choice of the sheet. Returns the message shown.
-export async function addToMyList({ query, product = null, quantity = 1 }) {
+// `saved` runs once the list is saved, before the message (the sheet closes)
+export async function addToMyList({ query, product = null, quantity = 1, saved = null }) {
     const before = copy(lineFor(query));
     const replaced = product && before && before.picks[product.store];
     const replacedOther = replaced && !sameProduct(replaced, product) ? replaced : null;
@@ -112,6 +113,7 @@ export async function addToMyList({ query, product = null, quantity = 1 }) {
         item = await api(`/api/list/${item.id}`, { method: "PATCH", body: { quantity } });
     }
     await loadList();
+    if (saved) saved();
     let message;
     if (product) {
         message = `Ajouté à « ${item.query} »`;
@@ -190,11 +192,16 @@ function ensureDialog() {
         await confirm();
     });
     dialog.addEventListener("close", () => {
-        const opener = current && current.opener;
+        let opener = current && current.opener;
+        const key = current && current.focusKey;
         current = null;
-        if (opener && opener.isConnected) opener.focus({ preventScroll: true });
-        // Never under the message at the bottom of the screen
-        if (opener && opener.isConnected) opener.scrollIntoView({ block: "nearest" });
+        // The « + » may have been drawn again meanwhile (« ✓ »): its new button
+        if (opener && !opener.isConnected && key) opener = document.querySelector(`[data-focus="${CSS.escape(key)}"]`);
+        if (opener && opener.isConnected) {
+            opener.focus({ preventScroll: true });
+            // Never under the message at the bottom of the screen
+            opener.scrollIntoView({ block: "nearest" });
+        }
     });
     return dialog;
 }
@@ -228,8 +235,7 @@ async function confirm() {
     const submit = dialog.querySelector("[type=submit]");
     submit.disabled = true;
     try {
-        await addToMyList({ query, product: exact ? product : null, quantity });
-        closeSheet();
+        await addToMyList({ query, product: exact ? product : null, quantity, saved: closeSheet });
     } catch (err) {
         notify(err.message, { type: "error" });
     } finally {
@@ -239,7 +245,7 @@ async function confirm() {
 
 export function openAddSheet(product, query, opener = document.activeElement) {
     ensureDialog();
-    current = { product, query, opener };
+    current = { product, query, opener, focusKey: opener && opener.dataset ? opener.dataset.focus : null };
     const line = lineFor(query);
     const label = retailer(product.store).label;
     const meta = [brandText(product.brand), product.quantity_label].filter(Boolean).join(" · ");
@@ -271,7 +277,7 @@ export function openAddSheet(product, query, opener = document.activeElement) {
                     <button type="button" data-step="1" aria-label="Un de plus">${icon("plus")}</button>
                 </div>
             </div>
-            <p class="sheet-note" id="sheet-note" role="status" hidden></p>
+            <p class="sheet-note" id="sheet-note" aria-live="polite" hidden></p>
             <div class="sheet-actions">
                 <button type="button" class="btn-ghost" data-sheet-cancel>Annuler</button>
                 <button type="submit" class="btn-primary" autofocus>${line ? "Enregistrer" : "Ajouter"}</button>
