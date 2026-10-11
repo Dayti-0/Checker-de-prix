@@ -1,22 +1,203 @@
-/* Retailers and their stores (Settings › Enseignes: js/views/settings/sections/stores.js) */
+/* Retailers and their stores (P4): Réglages › Localisation and Enseignes
+   (js/views/settings/sections/{location,stores}.js), state pills shared with
+   « État des enseignes » and the assistant, banner « J'ai terminé » on a phone. */
 
-.retailer-card { padding: .85rem 0; border-bottom: 1px dashed var(--border); }
-.retailer-card:last-child { border-bottom: 0; }
-.retailer-head { display: flex; align-items: center; justify-content: space-between; gap: .55rem; margin-bottom: .4rem; }
-.state { font-size: var(--text-875); font-weight: 700; }
-.state.ok { color: var(--best-text); }
-.state.todo { color: var(--warn); }
-.retailer-card p { margin: .25rem 0 .55rem; }
-.retailer-actions { display: flex; flex-wrap: wrap; gap: .55rem; margin-top: .55rem; }
-.store-list { list-style: none; padding: 0; margin: .55rem 0; max-height: 18rem; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-70); }
-.store-list li button {
-    width: 100%;
-    text-align: left;
-    padding: .65rem .85rem;
+/* --- State pills (js/views/status/shared.js: statePill) --- */
+
+.pill {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: .15rem .6rem;
+    border-radius: var(--radius-pill);
+    border: 1px solid transparent;
+    font-size: var(--text-85);
+    font-weight: 700;
+    white-space: nowrap;
+    max-width: 100%;
+}
+.pill-ready { background: var(--best-bg); color: var(--best-text); }
+.pill-store, .pill-warn { background: var(--warn-bg); color: var(--warn); }
+.pill-check, .pill-bad { background: var(--surface); color: var(--danger-text); border-color: currentColor; }
+.pill-unknown { background: var(--surface-2); color: var(--muted); border-color: var(--border); }
+
+.warn-text { color: var(--warn); }
+
+/* --- Localisation --- */
+
+.location-form { margin-bottom: var(--space-2); }
+.field-label { display: block; font-weight: 600; margin: 0 0 var(--space-2); }
+.field-error { color: var(--danger-text); font-weight: 600; margin: var(--space-2) 0 0; font-size: var(--text-90); }
+.location-form input[aria-invalid="true"] { border-color: var(--danger-text); }
+.location-form input:focus-visible { outline: none; box-shadow: var(--focus-ring); border-color: var(--primary); }
+.location-form .btn-primary { min-height: var(--control-h); }
+.location-info { margin: var(--space-3) 0 0; }
+
+.commune-choice { margin-top: var(--space-5); }
+.commune-choice .field-label { margin-bottom: 0; }
+.commune {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-height: 2.75rem;
+    padding: .45rem .9rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    background: var(--surface);
+}
+.commune::before {
+    content: "";
+    width: .9rem;
+    height: .9rem;
+    border: 2px solid var(--muted);
+    border-radius: var(--radius-round);
+    flex: none;
+}
+.commune[aria-checked="true"] { border-color: var(--primary); background: var(--best-bg); color: var(--best-text); font-weight: 700; }
+.commune[aria-checked="true"]::before { border-color: var(--best-text); background: var(--best-text); box-shadow: inset 0 0 0 2px var(--best-bg); }
+.commune:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/* --- Enseignes: one row per retailer --- */
+
+/* Query container: the menu « ⋯ » is never wider than the rows (cqw) */
+.retailer-rows { display: grid; container-type: inline-size; }
+.retailer-row { padding: var(--space-5) 0; border-bottom: 1px solid var(--border); min-width: 0; }
+.retailer-row:first-child { padding-top: 0; }
+.retailer-row:last-child { border-bottom: 0; }
+.retailer-row-head { display: flex; align-items: flex-start; gap: var(--space-3); }
+.retailer-title { flex: 1 1 auto; min-width: 0; min-height: 2.75rem; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-3); }
+.retailer-name { margin: 0; font-size: var(--text-100); min-width: 0; }
+.retailer-detail { margin: var(--space-3) 0 0; overflow-wrap: anywhere; }
+.retailer-address { margin: var(--space-1) 0 0; overflow-wrap: anywhere; }
+.retailer-main { margin-top: var(--space-3); }
+.retailer-main .btn-primary { min-height: 2.75rem; }
+
+.link-btn {
     background: none;
     border: 0;
-    border-bottom: 1px solid var(--border);
+    padding: .55rem .2rem;
+    margin: -.55rem 0;
+    color: var(--primary-text);
+    text-decoration: underline;
+    font-weight: 600;
 }
-.store-list li:last-child button { border-bottom: 0; }
-.store-list li button:hover { background: var(--surface-2); }
-.store-list .addr { display: block; font-size: var(--text-85); color: var(--muted); }
+.link-btn:focus-visible, .menu-btn:focus-visible, .retailer-menu > :focus-visible, .store-option:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+/* Menu « ⋯ » */
+.menu-wrap { position: relative; }
+.menu-btn {
+    width: 2.75rem;
+    height: 2.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-70);
+    background: var(--surface);
+    font-size: var(--text-120);
+    font-weight: 700;
+    line-height: 1;
+}
+.menu-btn[aria-expanded="true"] { border-color: var(--primary); }
+.retailer-menu {
+    position: absolute;
+    right: 0;
+    top: calc(100% + var(--space-1));
+    z-index: 20;
+    /* Anchored on the right of its button, which ends the row: as wide as the
+       row at most, so that it never starts left of the screen (large text) */
+    min-width: min(15rem, calc(100vw - 2rem));
+    max-width: calc(100vw - 2rem);
+    min-width: min(15rem, 100cqw);
+    max-width: 100cqw;
+    padding: var(--space-1);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-70);
+    box-shadow: var(--shadow-toast);
+}
+.retailer-menu > button, .retailer-menu > a {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    width: 100%;
+    min-height: 2.75rem;
+    padding: .5rem .7rem;
+    background: none;
+    border: 0;
+    border-radius: var(--radius-55);
+    text-align: left;
+    text-decoration: none;
+    font-size: var(--text-95);
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+.retailer-menu > button svg, .retailer-menu > a svg { flex: none; }
+.retailer-menu > button:hover, .retailer-menu > a:hover { background: var(--surface-2); }
+.retailer-menu > .danger { color: var(--danger-text); }
+
+/* List of the nearest stores */
+.store-picker {
+    margin-top: var(--space-4);
+    padding: var(--space-4);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-70);
+}
+.picker-title { margin: 0 0 var(--space-3); font-weight: 700; }
+.store-options { list-style: none; margin: 0 0 var(--space-3); padding: 0; display: grid; gap: var(--space-2); }
+.store-option {
+    display: grid;
+    gap: var(--space-1);
+    width: 100%;
+    min-height: 2.75rem;
+    padding: .6rem .8rem;
+    text-align: left;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-60);
+}
+.store-option:hover { border-color: var(--primary); }
+.store-option-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-1) var(--space-3); }
+.store-option-head strong { overflow-wrap: anywhere; }
+.store-option-distance { color: var(--muted); font-size: var(--text-90); white-space: nowrap; }
+.store-option-address { color: var(--muted); font-size: var(--text-90); overflow-wrap: anywhere; }
+.services { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.service {
+    padding: .05rem .5rem;
+    border-radius: var(--radius-pill);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    font-size: var(--text-80);
+}
+.manual-url { margin: var(--space-3) 0; }
+.manual-url summary { cursor: pointer; font-weight: 600; min-height: 2.75rem; display: flex; align-items: center; }
+.manual-url summary:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--radius-40); }
+.url-form { margin-top: var(--space-2); }
+.url-form .row { flex-wrap: wrap; }
+.url-form input { flex: 1 1 14rem; }
+.url-form input:focus-visible { outline: none; box-shadow: var(--focus-ring); border-color: var(--primary); }
+.url-form .btn-primary { min-height: var(--control-h); }
+.url-form p { margin: var(--space-2) 0 0; overflow-wrap: anywhere; }
+.store-picker .btn-ghost { min-height: 2.75rem; }
+
+.settings-links { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-6); margin: var(--space-5) 0 0; }
+.settings-links a { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 2.75rem; color: var(--primary-text); font-weight: 600; }
+
+/* --- Banner « J'ai terminé » (js/features/setup-banner.js): at the bottom on a phone --- */
+
+@media (max-width: 640px) {
+    .setup-banner {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: var(--bottom-bar-h);
+        z-index: 40;
+        box-shadow: var(--shadow-toast);
+        padding-bottom: max(.7rem, env(safe-area-inset-bottom));
+    }
+    .setup-banner .btn-primary { min-height: 2.75rem; }
+    /* --setup-banner-h: height of the banner, measured by setup-banner.js */
+    body.has-setup-banner { padding-bottom: calc(var(--setup-banner-h, 8rem) + var(--bottom-bar-h)); }
+    body.has-setup-banner .toast { bottom: calc(var(--setup-banner-h, 8rem) + var(--bottom-bar-h) + var(--space-4)); }
+}

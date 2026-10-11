@@ -1,1 +1,117 @@
-/* Premier lancement (P4: js/views/onboarding/). Empty for now. */
+/* Premier lancement (P4: js/views/onboarding/) and the home card
+   « Finissez la configuration » (js/views/home/cards/setup.js). */
+
+/* Container: the step indicator follows the width in rem, so the text size too */
+.onboarding { max-width: 46rem; margin: 0 auto; container-type: inline-size; }
+
+.onb-steps { display: flex; gap: var(--space-3); list-style: none; margin: 0 0 var(--space-6); padding: 0; counter-reset: none; }
+.onb-steps li { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: var(--space-2); color: var(--muted); font-size: var(--text-90); }
+.onb-step-label { min-width: 0; overflow-wrap: break-word; }
+/* Narrow (phone, large text): only the current step keeps its name, the
+   others show their number (their names stay for screen readers) */
+@container (max-width: 22rem) {
+    .onb-steps li { flex: none; }
+    .onb-steps li.current { flex: 0 1 auto; }
+    .onb-steps li:not(.current) .onb-step-label {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+    }
+}
+.onb-steps li.current { color: var(--text); font-weight: 700; }
+.onb-steps li.done { color: var(--best-text); }
+.onb-step-number {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 1.8rem;
+    height: 1.8rem;
+    border-radius: var(--radius-round);
+    border: 2px solid currentColor;
+    font-weight: 700;
+}
+.onb-steps li.current .onb-step-number { background: var(--primary); border-color: var(--primary); color: var(--on-accent); }
+
+.onb-card {
+    padding: var(--space-7);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+.onb-title { margin: 0 0 var(--space-4); font-size: var(--text-115); }
+.onb-title:focus { outline: none; }
+.onb-title:focus-visible { box-shadow: var(--focus-ring); border-radius: var(--radius-40); }
+.onb-location { margin: var(--space-5) 0; }
+
+.onb-nav { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-top: var(--space-7); }
+.onb-nav-space { flex: 1 1 auto; }
+.onb-nav button { min-height: 2.75rem; max-width: 100%; display: inline-flex; align-items: center; gap: var(--space-2); white-space: normal; text-align: center; }
+.onb-nav button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+.onb-store-lists { display: grid; gap: var(--space-6); margin-top: var(--space-5); }
+@media (min-width: 900px) {
+    .onb-store-lists { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.onb-stores { margin: 0; padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-70); min-width: 0; }
+.onb-stores legend { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); max-width: 100%; padding: 0 var(--space-2); font-weight: 700; overflow-wrap: anywhere; }
+.onb-stores legend .badge { font-size: var(--text-85); }
+.onb-store {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-3);
+    min-height: 2.75rem;
+    padding: var(--space-3) var(--space-2);
+    border-radius: var(--radius-55);
+    cursor: pointer;
+}
+.onb-store:hover { background: var(--surface-2); }
+.onb-store input { margin-top: .2rem; width: 1.2rem; height: 1.2rem; flex: none; accent-color: var(--primary); }
+.onb-store input:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.onb-store-text { min-width: 0; overflow-wrap: anywhere; }
+.onb-store-address { display: block; color: var(--muted); font-size: var(--text-90); }
+.onb-store-tag {
+    display: inline-block;
+    padding: .05rem .5rem;
+    border-radius: var(--radius-pill);
+    background: var(--best-bg);
+    color: var(--best-text);
+    font-size: var(--text-80);
+    font-weight: 700;
+}
+
+.onb-trial { list-style: none; margin: var(--space-5) 0; padding: 0; display: grid; gap: var(--space-2); }
+.onb-trial-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-4);
+    padding: var(--space-3) 0;
+    border-bottom: 1px solid var(--border);
+}
+.onb-trial-name { flex: 0 0 7.5rem; }
+.onb-trial-text { flex: 1 1 12rem; min-width: 0; overflow-wrap: anywhere; color: var(--muted); }
+.onb-trial-row .btn-ghost { min-height: 2.75rem; }
+.onboarding .btn-ghost.small { min-height: 2.75rem; display: inline-flex; align-items: center; gap: var(--space-2); }
+
+/* --- Home card « Finissez la configuration » --- */
+
+.setup-card {
+    max-width: 46rem;
+    margin: var(--space-6) auto 0;
+    padding: var(--space-6) var(--space-7);
+    text-align: left;
+    color: var(--text);
+    background: var(--surface);
+    border: 2px solid var(--primary);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+.setup-card-title { display: flex; align-items: center; gap: var(--space-2); margin: 0 0 var(--space-3); font-size: var(--text-110); color: var(--primary-text); }
+.setup-card p { margin: 0 0 var(--space-5); }
+.setup-card .btn-primary { display: inline-flex; align-items: center; min-height: 2.75rem; text-decoration: none; }
+.setup-card .btn-primary:focus-visible { outline: none; box-shadow: var(--focus-ring); }
