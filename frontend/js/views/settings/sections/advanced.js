@@ -12,6 +12,18 @@ export const enabled = true;
 
 const BROWSER_NAMES = { chrome: "Google Chrome", msedge: "Microsoft Edge", chromium: "Chromium" };
 
+// Finger-sized targets: at least 44 px (--control-h is only 41.6 px at the default text size)
+const TARGET = "max(44px, var(--control-h))";
+
+// Through the CSSOM: this section has no stylesheet of its own
+function fingerSized(el, { inline = false } = {}) {
+    el.style.minHeight = TARGET;
+    if (inline) {
+        el.style.display = "inline-flex";
+        el.style.alignItems = "center";
+    }
+}
+
 // 1791661200 → "15 h 40" (today), "demain à 1 h 10", "le 12/10 à 9 h 05"
 export function clockText(ts, now = Date.now()) {
     const when = new Date(Number(ts) * 1000);
@@ -69,15 +81,16 @@ export function render(el) {
             <summary>Dépannage</summary>
             <p class="muted small">Ouvrez un site dans le navigateur de PrixMalin pour valider une vérification anti-robot ou choisir votre magasin, puis appuyez sur « J'ai terminé ».</p>
             <div class="retailer-actions" id="setup-links"></div>
-            <p class="small"><a href="#/etat">État des enseignes</a></p>
+            <p class="small"><a href="#/etat" data-status-link>État des enseignes</a></p>
         </details>`,
     );
     const checkbox = el.querySelector("#show-browser");
-    // Finger-sized targets (CSSOM: no stylesheet of its own)
+    fingerSized(checkbox.closest("label")); // the whole label toggles the switch
     const summary = el.querySelector("summary");
-    summary.style.minHeight = "var(--control-h)";
+    fingerSized(summary);
     summary.style.paddingBlock = ".6rem";
     summary.style.cursor = "pointer";
+    fingerSized(el.querySelector("[data-status-link]"), { inline: true });
 
     function renderSwitch() {
         if (state.settings) checkbox.checked = state.settings.show_browser;
@@ -106,7 +119,7 @@ export function render(el) {
             )}`,
         );
         for (const btn of el.querySelectorAll("#dedicated-windows button, #setup-links button")) {
-            btn.style.minHeight = "var(--control-h)";
+            fingerSized(btn);
         }
     }
 

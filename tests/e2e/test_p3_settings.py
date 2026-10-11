@@ -133,3 +133,25 @@ def test_no_horizontal_scroll_on_a_phone(mobile, paused, width, scale):
     overflow = page.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
     assert overflow <= 0
     page.evaluate("() => localStorage.removeItem('prixmalin.textScale')")
+
+
+@pytest.mark.parametrize("scale", [0.9, 1])
+def test_finger_sized_targets(mobile, paused, scale):
+    """Every target of the section measures at least 44x44 px, at the smallest text size too."""
+    page = mobile
+    page.goto(page.base)
+    page.evaluate(f"() => localStorage.setItem('prixmalin.textScale', '{scale}')")
+    page.goto(f"{page.base}/#/reglages")
+    advanced = section(page)
+    advanced.get_by_text("Dépannage").click()
+    expect(advanced.get_by_role("button", name="Réessayer Intermarché maintenant")).to_be_visible()
+    sizes = advanced.evaluate(
+        """el => [...el.querySelectorAll('button, summary, a, label.switch')].map(t => {
+            const r = t.getBoundingClientRect();
+            return [t.textContent.trim().slice(0, 30), Math.round(r.width), Math.round(r.height)];
+        })"""
+    )
+    assert len(sizes) >= 9  # switch, summary, 5 « Ouvrir », « Réessayer », link
+    small = [s for s in sizes if s[1] < 44 or s[2] < 44]
+    assert small == []
+    page.evaluate("() => localStorage.removeItem('prixmalin.textScale')")
