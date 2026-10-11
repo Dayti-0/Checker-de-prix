@@ -390,6 +390,7 @@ class BrowserManager:
             self._thread.join(timeout=5)
         self._loop = None
         self._thread = None
+        await self.flush()  # a pause started by a search nobody waited for any more
 
     # ------------------------------------------------------------------
     # Caller side helpers

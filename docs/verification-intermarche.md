@@ -41,7 +41,7 @@ Intermarché affiche peut-être « Magasin à choisir » : c'est normal, c'est l
    - acceptez ou refusez les cookies, comme vous le feriez vous-même ;
    - promenez-vous un peu sur le site (une catégorie, un produit) ;
    - si un puzzle apparaît, faites-le **une fois**.
-4. Revenez dans PrixMalin et appuyez sur **« J'ai terminé »**.
+4. Revenez dans PrixMalin et appuyez sur **« J'ai terminé »**. Si vous avez déjà fermé la fenêtre Chrome, appuyez quand même dessus : seul Intermarché est concerné, les prix des autres enseignes ne sont pas effacés.
 5. Si ce n'est pas déjà fait, choisissez votre magasin Intermarché dans **Réglages › Enseignes** (code postal, puis votre magasin dans la liste).
 
 Si la fenêtre affiche « Accès temporairement restreint » : arrêtez-vous là et lisez « En cas de blocage » plus bas.
@@ -80,7 +80,7 @@ Refaites une ou deux recherches le lendemain, sans repasser par « Ouvrir le sit
 
 Le message « Accès temporairement restreint » (dans la fenêtre Chrome) ou « Intermarché bloque temporairement cette connexion » (dans PrixMalin) veut dire qu'Intermarché refuse **votre connexion Internet** pendant un moment. Personne ne peut le débloquer à la main : il faut attendre.
 
-1. **N'insistez pas.** Chaque nouvelle tentative prolonge le blocage. PrixMalin le sait : il ne contacte plus Intermarché avant l'heure affichée, même si vous relancez une recherche ou redémarrez PrixMalin.
+1. **N'insistez pas.** Chaque nouvelle tentative prolonge le blocage. PrixMalin le sait : il ne contacte plus Intermarché avant l'heure affichée, même si vous relancez une recherche ou redémarrez PrixMalin. Si plusieurs recherches attendaient au même moment (deux recherches tapées à la suite, le téléphone en même temps que l'ordinateur, la recherche d'un magasin), aucune d'elles ne contacte Intermarché après le refus : la pause reste de 30 minutes au premier blocage.
 2. **Faites le test de votre Chrome habituel** (début de ce document), mais une seule fois :
    - s'il est bloqué aussi, c'est la connexion : attendez plusieurs heures, jusqu'à 24 h ;
    - s'il fonctionne, notez-le pour le développeur.
