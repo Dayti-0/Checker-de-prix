@@ -15,7 +15,7 @@ from backend.models import (
     valid_store_id,
 )
 from backend.scrapers import SCRAPERS
-from backend.scrapers.coursesu import is_store_url, store_name_from_url
+from backend.scrapers.coursesu import is_store_url, store_name_from_url, store_url_from_href
 from backend.services import settings as settings_service
 from backend.services import stores as stores_service
 
@@ -92,7 +92,9 @@ async def api_set_store(key: str, choice: StoreChoice):
     if key in ("coursesu", "intermarche") and choice.id is not None and not valid_store_id(choice.id):
         raise HTTPException(422, "Identifiant de magasin invalide.")
     if key == "coursesu":
-        url = (choice.url or "").rstrip("/")
+        raw = (choice.url or "").strip()
+        # Page of a drive: query string (?utm_…) and fragment dropped, slug in lower case
+        url = store_url_from_href(raw) or raw.rstrip("/")
         if not url or not is_store_url(url):
             raise HTTPException(400, COURSESU_URL_HINT)
         selection = StoreSelection(

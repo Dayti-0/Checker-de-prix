@@ -13,7 +13,9 @@ drives), read from inside the Courses U tab (``fetch_store_directory``):
    than ``MIN_DIRECTORY_STORES``, the link-based reader (``_DIRECTORY_LINKS_JS`` +
    ``cards_to_stores``) is tried and the HTML is saved in
    ``data/debug/coursesu-stores.html``;
-3. nothing at all: the page of the department (``/drive-herault``).
+3. nothing at all: the page of the department (``/drive-herault``), saved in
+   ``data/debug/coursesu-stores-departement.html`` when it gives nothing either
+   (the snapshot of /drive-france is kept).
 
 The markup of the directory was not seen live (research of 2026, mcp-superU):
 the fixtures of tests/fixtures/coursesu.py are synthetic.
@@ -50,8 +52,10 @@ DIRECTORY_URL = BASE_URL + "/drive-france"
 REVISIT_SECONDS = 20 * 60
 # Fewer stores than this in /drive-france: the reader is probably outdated
 MIN_DIRECTORY_STORES = 50
-# Directory page kept when it gave few stores (data/debug/coursesu-stores.html)
+# Directory page kept when it gave few stores (data/debug/coursesu-stores.html),
+# department page kept when it gave none
 DIRECTORY_SNAPSHOT = "coursesu-stores.html"
+DEPARTMENT_SNAPSHOT = "coursesu-stores-departement.html"
 
 STORE_GONE = "Ce magasin n'existe plus sur Courses U, choisissez-en un autre."
 DIRECTORY_BLOCKED = (
@@ -74,14 +78,27 @@ _STORE_URL = re.compile(r"^https://www\.coursesu\.com/[\w-]+/?$")
 # (not /drive-herault, /drive-dept-paris, /drive-pieton-paris: lists of stores)
 BANNERS = ("superu", "hyperu", "uexpress", "marcheu", "marcheru", "marketu", "utile", "u")
 _BANNER = "(?:" + "|".join(BANNERS) + ")"
+# A query string or a fragment may follow the path (/drive-superu-roujan?origin=annuaire)
 _STORE_LINK = re.compile(
-    r"""href=["'](?:https?://www\.coursesu\.com)?/drive-(""" + _BANNER + r"""-[\w-]+?)/?["']""", re.I
+    r"""href=["'](?:https?://www\.coursesu\.com)?/drive-(""" + _BANNER + r"""-[\w-]+?)/?(?:[?#][^"']*)?["']""",
+    re.I,
 )
-_STORE_PATH = re.compile(r"^(?:https?://www\.coursesu\.com)?/drive-(" + _BANNER + r"-[\w-]+?)/?$", re.I)
-_ADDRESS = re.compile(r"<(\w+)[^>]*class=[\"'][^\"']*\bstores-text-address\b[^\"']*[\"'][^>]*>(.*?)</\1>", re.I | re.S)
+_STORE_PATH = re.compile(
+    r"^(?:https?://www\.coursesu\.com)?/drive-(" + _BANNER + r"-[\w-]+?)/?(?:[?#].*)?$", re.I | re.S
+)
+# Opening tags of the address and of the name of a store
+_ADDRESS_TAG = re.compile(
+    r"""<(?P<tag>\w+)\b[^>]*\bclass\s*=\s*["'][^"']*\bstores-text-address\b[^"']*["'][^>]*>""", re.I
+)
+_NAME_TAG = re.compile(r"<(?P<tag>\w+)\b(?P<attrs>[^>]*\bdata-store-name\b[^>]*)>", re.I)
+_NAME_VALUE = re.compile(r"""\bdata-store-name\s*=\s*(?:"([^"]*)"|'([^']*)')""", re.I)
+_VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
+# Longest text taken as the name of a store (more: the element holds the whole entry)
+_MAX_NAME = 120
 _POSTAL_TOWN = re.compile(r"\b(\d{5})\s+([^,\d][^,]*)$")
 _POSTAL = re.compile(r"\b\d{5}\b")
 _TAG = re.compile(r"<[^>]+>")
+_BLOCK_END = re.compile(r"<br\s*/?>|</(?:address|div|li|p)\s*>", re.I)
 _SERVICES = (("Drive", r"\bdrive\b"), ("Livraison", r"\blivraison\b"), ("Retrait", r"\bretrait\b"))
 
 # Pages of anti-robot checks (Cloudflare, DataDome)
@@ -120,12 +137,46 @@ def store_url_from_href(href: str) -> str | None:
 
 
 def _clean_text(fragment: str) -> str:
-    """Text of an HTML fragment: <br> become « , », tags removed, entities decoded."""
-    text = re.sub(r"<br\s*/?>", ", ", fragment, flags=re.I)
+    """Text of an HTML fragment: <br> and ends of blocks (</div>, </p>) become « , »,
+    tags removed, entities decoded."""
+    text = _BLOCK_END.sub(", ", fragment or "")
     text = html_lib.unescape(_TAG.sub(" ", text))
     text = re.sub(r"\s+", " ", text)
     text = re.sub(r"\s*,\s*(,\s*)*", ", ", text)
     return text.strip(" ,")
+
+
+def _inner_html(html: str, opening: re.Match) -> str:
+    """Content of the element opened by ``opening`` (group ``tag``) up to its own
+    closing tag: elements of the same name inside it are counted."""
+    tag = opening.group("tag").lower()
+    if tag in _VOID_TAGS or opening.group(0).endswith("/>"):
+        return ""
+    depth = 1
+    for match in re.finditer(r"<(/?)" + re.escape(tag) + r"\b[^>]*>", html[opening.end() :], re.I):
+        if match.group(1):
+            depth -= 1
+            if depth == 0:
+                return html[opening.end() : opening.end() + match.start()]
+        elif not match.group(0).endswith("/>"):
+            depth += 1
+    return html[opening.end() :]
+
+
+def _store_name(block: str, url: str) -> str:
+    """Name of a store entry: value of ``data-store-name``, else the text of the
+    element that carries it (tags inside it included), else from its link."""
+    value = _NAME_VALUE.search(block)
+    candidates = [(value.group(1) or value.group(2)) if value else None]
+    element = _NAME_TAG.search(block)
+    # The entry itself carrying the attribute: its text is the whole entry
+    if element and "data-wrapper-store-details" not in element.group("attrs"):
+        candidates.append(_inner_html(block, element))
+    for candidate in candidates:
+        name = _clean_text(candidate or "")
+        if name and len(name) <= _MAX_NAME:
+            return name
+    return store_name_from_url(url)
 
 
 def _first(pattern: str, text: str, flags: int = re.I | re.S) -> str | None:
@@ -179,19 +230,13 @@ def parse_store_directory(html: str) -> list[StoreOption]:
         if not link:
             continue
         url = f"{BASE_URL}/drive-{link.group(1).lower()}"
-        name = (
-            _first(r"data-store-name[^>]*>\s*([^<]+?)\s*<", block)
-            or _first(r'data-store-name="([^"]+)"', block)
-            or _first(r"data-store-name='([^']+)'", block)
-        )
-        name = html_lib.unescape(name).strip() if name else store_name_from_url(url)
-        address_match = _ADDRESS.search(block)
-        address = _clean_text(address_match.group(2)) if address_match else None
+        address_tag = _ADDRESS_TAG.search(block)
+        address = _clean_text(_inner_html(block, address_tag))[:300] if address_tag else None
         postal_code, city = _postal_town(address)
         stores.append(
             StoreOption(
                 id=_first(r"""data-store-id=["']?(\d+)""", block) or "",
-                name=name,
+                name=_store_name(block, url),
                 address=address or None,
                 url=url,
                 services=_services(_clean_text(block)),
@@ -456,17 +501,21 @@ class CoursesUScraper(BaseScraper):
             if type(e) is not BlockedError:  # another kind of block keeps its message
                 raise
             raise BlockedError(DIRECTORY_BLOCKED) from e
-        stores, method = await self._read_directory(page, DIRECTORY_URL)
+        stores, method = await self._read_directory(page, DIRECTORY_URL, MIN_DIRECTORY_STORES, DIRECTORY_SNAPSHOT)
         if not stores and department_name:
-            stores, _ = await self._read_directory(page, f"{BASE_URL}/drive-{department_slug(department_name)}")
+            # A department has a few dozen drives: its page is kept only when it gives none
+            url = f"{BASE_URL}/drive-{department_slug(department_name)}"
+            stores, _ = await self._read_directory(page, url, 1, DEPARTMENT_SNAPSHOT)
             method = "département"
         logger.info("Courses U : %d magasins (méthode=%s)", len(stores), method)
         return {"stores": stores, "method": method}
 
-    async def _read_directory(self, page, url: str) -> tuple[list[StoreOption], str]:
+    async def _read_directory(self, page, url: str, minimum: int, snapshot: str) -> tuple[list[StoreOption], str]:
+        """Stores of a directory page; fewer than ``minimum``: the link-based reader
+        is tried and the page is saved in data/debug/``snapshot``."""
         html = await self._directory_html(page, url)
         stores, method = parse_store_directory(html), "blocs"
-        if len(stores) < MIN_DIRECTORY_STORES:
+        if len(stores) < minimum:
             try:
                 cards = await page.evaluate(_DIRECTORY_LINKS_JS, html)
             except Exception as e:  # noqa: BLE001 (fallback reader only)
@@ -475,7 +524,7 @@ class CoursesUScraper(BaseScraper):
             by_links = cards_to_stores(cards)
             if len(by_links) > len(stores):
                 stores, method = by_links, "liens"
-            self._save_directory(html)
+            self._save_directory(html, snapshot)
         return stores, method
 
     async def _directory_html(self, page, url: str) -> str:
@@ -499,10 +548,10 @@ class CoursesUScraper(BaseScraper):
         await accept_cookies(page)
         return await page.content()
 
-    def _save_directory(self, html: str) -> None:
+    def _save_directory(self, html: str, snapshot: str = DIRECTORY_SNAPSHOT) -> None:
         """Keep the directory page that gave few stores, to fix the reader."""
         try:
-            path = config.DEBUG_DIR / DIRECTORY_SNAPSHOT
+            path = config.DEBUG_DIR / snapshot
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(html or "", encoding="utf-8")
             logger.info("Courses U: directory page saved in %s", path)

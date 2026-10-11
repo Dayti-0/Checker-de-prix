@@ -70,6 +70,82 @@ def test_parse_store_directory_reads_coordinates_and_ignores_garbage():
     assert cu.parse_store_directory("<p>rien</p>") == []
 
 
+@pytest.mark.parametrize(
+    "entry, name",
+    [
+        # Name in the attribute of the entry, other elements inside it (indented markup)
+        (
+            '<div data-wrapper-store-details data-store-id="1" data-store-name="Super U Foo">\n'
+            '  <div><span>Nom</span></div>\n  <a href="/drive-superu-foo">x</a></div>',
+            "Super U Foo",
+        ),
+        # Element without value whose text is in a child element, after a line break
+        (
+            '<div data-wrapper-store-details data-store-id="2">\n  <h3 data-store-name>\n'
+            '    <span>Super U Bar</span>\n  </h3>\n  <a href="/drive-superu-bar">x</a></div>',
+            "Super U Bar",
+        ),
+        # Name cut by a tag
+        (
+            "<div data-wrapper-store-details><h3 data-store-name>Super U <b>Saint-Jean</b> &amp; Co</h3>"
+            '<a href="/drive-superu-saintjean">x</a></div>',
+            "Super U Saint-Jean & Co",
+        ),
+        # Attribute only, the element holds nothing but white space
+        (
+            "<div data-wrapper-store-details data-store-id=\"7\" data-store-name='U Express Lyon'>\n   "
+            '<a href="/drive-uexpress-lyon">x</a></div>',
+            "U Express Lyon",
+        ),
+        # Empty everywhere: the name comes from the link, never an empty name
+        (
+            '<div data-wrapper-store-details data-store-name="  "><h3 data-store-name> </h3>'
+            '<a href="/drive-superu-vide">x</a></div>',
+            "Super U Vide",
+        ),
+        # The entry carries the attribute without value: its text is not a name
+        (
+            "<div data-wrapper-store-details data-store-name><p>Drive</p><p>1 rue X, 34000 Montpellier</p>"
+            '<a href="/drive-hyperu-mtp">Choisir</a></div>',
+            "Hyper U Mtp",
+        ),
+    ],
+)
+def test_parse_store_directory_names(entry, name):
+    (store,) = cu.parse_store_directory(entry)
+    assert store.name == name
+
+
+def test_parse_store_directory_addresses_with_child_elements():
+    html = (
+        '<div data-wrapper-store-details data-store-id="5"><h3 data-store-name>Super U Qux</h3>'
+        '<div class="stores-text-address"><div>2 av X</div><div>34120 P&eacute;zenas</div></div>'
+        '<a href="/drive-superu-qux">x</a></div>'
+        '<div data-wrapper-store-details data-store-id="6"><h3 data-store-name>Super U Baz</h3>'
+        '<p class="stores-text-address"><span>Route de B&eacute;ziers</span> <span>34120 P&eacute;zenas</span></p>'
+        '<a href="/drive-superu-baz">x</a></div>'
+    )
+    qux, baz = cu.parse_store_directory(html)
+    assert (qux.address, qux.postal_code, qux.city) == ("2 av X, 34120 Pézenas", "34120", "Pézenas")
+    assert (baz.address, baz.postal_code, baz.city) == ("Route de Béziers 34120 Pézenas", "34120", "Pézenas")
+
+
+def test_parse_store_directory_links_with_query_strings():
+    html = (
+        '<div data-wrapper-store-details data-store-id="6"><a href="/drive-superu-x?foo=1">x</a></div>'
+        '<div data-wrapper-store-details data-store-id="7">'
+        "<a href='https://www.coursesu.com/drive-SuperU-Upper/#horaires'>y</a></div>"
+    )
+    assert [(s.id, s.url) for s in cu.parse_store_directory(html)] == [
+        ("6", "https://www.coursesu.com/drive-superu-x"),
+        ("7", "https://www.coursesu.com/drive-superu-upper"),
+    ]
+    cards = [{"href": "/drive-superu-roujan?origin=annuaire", "text": "Avenue de Pézenas\n34320 Roujan", "id": "1"}]
+    assert [s.url for s in cu.cards_to_stores(cards)] == ["https://www.coursesu.com/drive-superu-roujan"]
+    selection = cu.site_store_selection({"link": "https://www.coursesu.com/drive-superu-eysines?x=1#y"})
+    assert selection.url == "https://www.coursesu.com/drive-superu-eysines"
+
+
 def test_cards_to_stores():
     cards = [
         {
@@ -97,6 +173,9 @@ def test_cards_to_stores():
         ("/drive-superu-roujan", "https://www.coursesu.com/drive-superu-roujan"),
         ("https://www.coursesu.com/drive-UEXPRESS-Lyon3bonnel/", "https://www.coursesu.com/drive-uexpress-lyon3bonnel"),
         ("/drive-marcheu-x", "https://www.coursesu.com/drive-marcheu-x"),
+        ("/drive-superu-roujan?origin=annuaire", "https://www.coursesu.com/drive-superu-roujan"),
+        ("https://www.coursesu.com/drive-superu-roujan/#horaires", "https://www.coursesu.com/drive-superu-roujan"),
+        ("/drive-herault?page=2", None),
         ("/drive-herault", None),
         ("/drive-dept-paris", None),
         ("/drive-pieton-paris", None),
@@ -633,6 +712,15 @@ def test_api_choose_a_listed_store(client, located):
     assert not retailers["carrefour"]["national"]
 
 
+def test_api_pasted_address_with_query_string(client):
+    url = "https://www.coursesu.com/drive-SuperU-Roujan/?utm_source=partage#horaires"
+    saved = client.put("/api/retailers/coursesu/store", json={"url": url}).json()["stores"]["coursesu"]
+    assert (saved["url"], saved["name"]) == ("https://www.coursesu.com/drive-superu-roujan", "Super U Roujan")
+    # Other pages of the site stay refused
+    response = client.put("/api/retailers/coursesu/store", json={"url": "https://www.coursesu.com/recherche?q=farine"})
+    assert response.status_code == 400
+
+
 def test_api_auto_and_from_site(client, located, monkeypatch):
     result = client.post("/api/retailers/coursesu/store/auto").json()
     assert result["status"] == "chosen"
@@ -740,8 +828,45 @@ def test_browser_directory_department_page(manager, fast):
         await page.route("https://www.coursesu.com/drive-herault", html(fixtures.COURSESU_DIRECTORY_HTML))
         return await fast.fetch_store_directory(page, "Hérault")
 
+    (config.DEBUG_DIR / cu.DEPARTMENT_SNAPSHOT).unlink(missing_ok=True)
     result = asyncio.run(manager.run("coursesu-dept", scenario, timeout=60))
     assert result["method"] == "département"
+    assert len(result["stores"]) == 4
+    # The snapshot to send is the page of /drive-france that gave nothing, not the
+    # department page that worked
+    assert "Bientôt" in (config.DEBUG_DIR / cu.DIRECTORY_SNAPSHOT).read_text(encoding="utf-8")
+    assert not (config.DEBUG_DIR / cu.DEPARTMENT_SNAPSHOT).exists()
+
+
+def test_browser_directory_department_page_without_stores_is_kept_apart(manager, fast):
+    async def scenario(page):
+        await home(page)
+        await page.route("https://www.coursesu.com/drive-france", html("<html><body>Bientôt</body></html>"))
+        await page.route("https://www.coursesu.com/drive-herault", html("<html><body>Département vide</body></html>"))
+        return await fast.fetch_store_directory(page, "Hérault")
+
+    (config.DEBUG_DIR / cu.DEPARTMENT_SNAPSHOT).unlink(missing_ok=True)
+    result = asyncio.run(manager.run("coursesu-dept-empty", scenario, timeout=60))
+    assert result == {"stores": [], "method": "département"}
+    assert "Bientôt" in (config.DEBUG_DIR / cu.DIRECTORY_SNAPSHOT).read_text(encoding="utf-8")
+    assert "Département vide" in (config.DEBUG_DIR / cu.DEPARTMENT_SNAPSHOT).read_text(encoding="utf-8")
+
+
+def test_browser_directory_link_based_reader_with_query_strings(manager, fast):
+    page_html = fixtures.COURSESU_DIRECTORY_ALT_HTML.replace(
+        'href="https://www.coursesu.com/drive-superu-roujan"',
+        'href="https://www.coursesu.com/drive-superu-roujan?origin=annuaire"',
+    )
+    assert page_html != fixtures.COURSESU_DIRECTORY_ALT_HTML
+
+    async def scenario(page):
+        await home(page)
+        await page.route("https://www.coursesu.com/drive-france", html(page_html))
+        return await fast.fetch_store_directory(page)
+
+    result = asyncio.run(manager.run("coursesu-alt-query", scenario, timeout=60))
+    assert result["method"] == "liens"
+    assert result["stores"][0].url == "https://www.coursesu.com/drive-superu-roujan"
     assert len(result["stores"]) == 4
 
 
