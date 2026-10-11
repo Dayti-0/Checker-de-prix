@@ -45,8 +45,21 @@ class Product(BaseModel):
     product_url: str = ""
     promo: str | None = None
     available: bool = True
-    # 1.0 = every keyword of the query is in the product name
+    # Shown in the results: 1.0 = relevant product (every keyword of the query,
+    # match_score high enough); between 0 and 1 = "Produits proches" (share of
+    # the keywords found, at most 0.99); 0 = unrelated
     relevance: float = 1.0
+    # How well the product matches the query, from 0 to 1: services/matching.py
+    # (sort by relevance, product chosen in the basket)
+    match_score: float = 1.0
+    # Price before a promotion, when the site shows it (struck out)
+    old_price: float | None = None
+    # Sold by the piece: what one piece is ("œuf", "rouleau"...), for "€/œuf"
+    count_label: str | None = None
+    # Computed by services/products.py: organic product, retailer's own brand
+    # (True), national brand (False) or unknown brand (None)
+    bio: bool = False
+    store_brand: bool | None = None
     # Contract fields (filled by the scrapers that know them): barcode and
     # identifier of the product on the retailer site
     ean: str | None = None
@@ -57,7 +70,7 @@ class Product(BaseModel):
     def _cut_name(cls, value: object) -> object:
         return _cut(value, NAME_MAX)
 
-    @field_validator("unit", "unit_price_label", "quantity_label", "ean", "sku", mode="before")
+    @field_validator("unit", "unit_price_label", "quantity_label", "ean", "sku", "count_label", mode="before")
     @classmethod
     def _cut_label(cls, value: object) -> object:
         return _cut(value, LABEL_MAX)
