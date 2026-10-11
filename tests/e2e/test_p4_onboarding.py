@@ -188,9 +188,13 @@ def test_home_card_while_the_setup_is_incomplete(desktop):
     )
     page.reload()
     # Courses U: the nearest store is chosen by itself once the settings are loaded
-    expect(card).to_have_count(0)
-    stores = page.request.get(f"{page.base}/api/settings").json()["stores"]
+    for _ in range(200):
+        stores = page.request.get(f"{page.base}/api/settings").json()["stores"]
+        if "coursesu" in stores:
+            break
+        page.wait_for_timeout(50)
     assert stores["coursesu"]["auto"] is True
+    expect(card).to_have_count(0)
 
 
 def test_assistant_in_dark_mode(dark):

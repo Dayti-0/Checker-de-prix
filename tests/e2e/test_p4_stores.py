@@ -128,6 +128,12 @@ def test_town_chosen_while_the_nearest_store_is_searched(desktop, monkeypatch):
     page = settings_page(desktop)
     save_postal(page, "34480")
     towns = page.get_by_role("radiogroup", name="Votre commune")
+    # The town is chosen once the first choice is made, before its answer reaches the page
+    for _ in range(100):
+        if calls:
+            break
+        page.wait_for_timeout(50)
+    assert calls == ["Magalas"]
     towns.get_by_role("radio", name="Laurens").click()
     coursesu = row(page, "coursesu")
     expect(coursesu).to_contain_text("Choisi automatiquement : Super U Roujan (≈ 10 km)")
