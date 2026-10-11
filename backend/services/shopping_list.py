@@ -87,10 +87,14 @@ def _clean(text: str | None) -> str | None:
     return text or None
 
 
-def _check_category(category: str | None) -> str | None:
+def _check_category(category: str | None, query: str | None = None) -> str | None:
+    """The aisle chosen by the user; None when it is the one guessed for ``query``
+    (the guess follows the improvements of the dictionary)."""
     category = _clean(category)
     if category is not None and not is_category(category):
         raise AppError("Rayon inconnu.", 422, "validation")
+    if category is not None and query is not None and category == categorize(query):
+        return None
     return category
 
 
@@ -215,7 +219,7 @@ async def _add(db, query: str, data: ListItemCreate, category: str | None, pick:
 async def add_item(data: ListItemCreate) -> ListItem:
     """Add a query to the list, or update the existing line for the same query."""
     query = _clean(data.query) or data.query.strip()
-    category = _check_category(data.category)
+    category = _check_category(data.category, query)
     pick = await verified_pick(data.product, query) if data.product else None
     async with transaction() as db:
         item_id = await _add(db, query, data, category, pick)
@@ -228,7 +232,7 @@ async def bulk_add(items: list[ListItemCreate]) -> list[ListItem]:
     for data in items:
         query = _clean(data.query) or data.query.strip()
         pick = await verified_pick(data.product, query) if data.product else None
-        prepared.append((query, data, _check_category(data.category), pick))
+        prepared.append((query, data, _check_category(data.category, query), pick))
     async with transaction() as db:
         current = {item["key"] for item in await repo.list_items()}
         new = {repo.list_key(query) for query, *_ in prepared} - current
@@ -251,7 +255,7 @@ async def update_item(item_id: int, data: ListItemUpdate) -> ListItem | None:
         return None
     query = (_clean(data.query) or current["query"]) if data.query is not None else current["query"]
     pick = await verified_pick(data.set_pick, query) if data.set_pick is not None else None
-    category = _check_category(data.category) if data.category is not None else None
+    category = _check_category(data.category, query) if data.category is not None else None
     async with transaction() as db:
         raw = await repo.get_item(item_id)
         if raw is None:
