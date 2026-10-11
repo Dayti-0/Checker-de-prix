@@ -163,7 +163,9 @@ def test_profile_lock_messages():
 
 
 def test_half_launched_browser_is_closed(tmp_path, monkeypatch):
-    manager = BrowserManager(tmp_path / "profile")
+    # One channel: where Chrome and Edge are installed too (CI runners), each
+    # would be launched twice and closed again, beyond the timeout of the search
+    manager = BrowserManager(tmp_path / "profile", channel="chromium")
     failures = []
 
     async def broken_stealth(context):
