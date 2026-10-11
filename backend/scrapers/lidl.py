@@ -1,7 +1,8 @@
 """Lidl: the search API used by lidl.fr, called from inside a lidl.fr tab.
 
 Each result is a "gridbox" (fullTitle, price.price, price.basePrice.text...),
-the same structure on every Lidl country site.
+the same structure on every Lidl country site. ``numFound`` above the products
+read: the next ones (``offset``) are asked once, in the first half of the search.
 """
 
 import logging
@@ -17,13 +18,26 @@ from backend.scrapers.common import (
     save_debug_snapshot,
     wait_for_clearance,
 )
-from backend.scrapers.extract import extract_cards, extract_json_ld, first_url, products_from_json
+from backend.scrapers.extract import (
+    PageBudget,
+    barcode_of,
+    extract_cards,
+    extract_json_ld,
+    first_url,
+    identifier_of,
+    json_of,
+    merge_pages,
+    pause_between_pages,
+    products_from_json,
+)
 from backend.scrapers.parsing import clean_text, parse_price
 
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://www.lidl.fr"
-SEARCH_API = BASE_URL + "/q/api/search?q={query}&assortment=FR&locale=fr_FR&version=v2.0.0&fetchsize=48"
+# Products asked at once
+FETCH_SIZE = 48
+SEARCH_API = BASE_URL + "/q/api/search?q={query}&assortment=FR&locale=fr_FR&version=v2.0.0&fetchsize=" + str(FETCH_SIZE)
 SEARCH_URL = BASE_URL + "/q/search?q={query}"
 
 
@@ -82,9 +96,24 @@ def parse_search_json(data: object) -> list[Product]:
                 image_url=urljoin(BASE_URL, image) if isinstance(image, str) and image else None,
                 product_url=urljoin(BASE_URL, url) if url else BASE_URL,
                 promo=promo,
+                old_price=old_price if old_price and price and old_price > price else None,
+                ean=barcode_of(grid),
+                sku=identifier_of(grid),
             )
         )
     return products
+
+
+def next_offset(data: object) -> int | None:
+    """Where the next products start when the answer holds fewer than ``numFound``, else None."""
+    if not isinstance(data, dict) or not isinstance(data.get("items"), list) or not data["items"]:
+        return None
+    found = data.get("numFound")
+    if isinstance(found, bool) or not isinstance(found, int):
+        return None
+    offset = data.get("offset") if isinstance(data.get("offset"), int) else 0
+    read = offset + len(data["items"])
+    return read if found > read else None
 
 
 class LidlScraper(BaseScraper):
@@ -98,19 +127,17 @@ class LidlScraper(BaseScraper):
 
     async def search(self, page, query: str, store: StoreSelection | None) -> list[Product]:
         self.last_source = None
+        budget = PageBudget(self.key)
         await ensure_origin(page, self.home_url, self.label)
         result = await page_fetch(page, SEARCH_API.format(query=quote(query)), headers={"accept": "application/json"})
-        if result.ok and result.is_json:
-            try:
-                data = result.json()
-            except ValueError:
-                data = None
-            if isinstance(data, dict):
-                products = self.found(parse_search_json(data), "api") or self.found(
-                    products_from_json(data, self.key, BASE_URL), "generic"
-                )
-                if products or data.get("items") == []:
-                    return products
+        data = json_of(result)
+        if data is not None:
+            products = self.found(parse_search_json(data), "api")
+            if products:
+                return self.found(await self._next_products(page, query, data, products, budget), "api")
+            products = self.found(products_from_json(data, self.key, BASE_URL), "generic")
+            if products or data.get("items") == []:
+                return products
         logger.info("Lidl: JSON search unavailable (HTTP %s), reading the page", result.status)
 
         await page.goto(SEARCH_URL.format(query=quote(query)), wait_until="domcontentloaded", timeout=30000)
@@ -126,3 +153,16 @@ class LidlScraper(BaseScraper):
         if not products:
             await save_debug_snapshot(page, self.key)
         return products
+
+    async def _next_products(self, page, query: str, data: dict, products: list[Product], budget: PageBudget):
+        """The next products of the API (``offset``) when ``numFound`` says there are more."""
+        offset = next_offset(data)
+        if offset is None or not budget.allows_more():
+            return products
+        await pause_between_pages(page)
+        url = SEARCH_API.format(query=quote(query)) + f"&offset={offset}"
+        more = json_of(await page_fetch(page, url, headers={"accept": "application/json"}))
+        if more is None:
+            logger.info("Lidl: next products unavailable")
+            return products
+        return merge_pages(products, parse_search_json(more))

@@ -1,85 +1,281 @@
 // #/recherche?q=farine : prices of a product at every ticked retailer (area of P2).
 //
+// Layout, from top to bottom:
+//   #summary         the best offer and one line per retailer (summary.js, B26)
+//   toolbar          « Tout trié | Par enseigne », sort, « Actualiser » (B25, B30)
+//   #result-filters  Bio, En promo, Disponible, marques (filters.js, B31)
+//   #unavailable     retailers without results, with their actions (parts.js, B27)
+//   #results-body    « Tout trié » (offers.js) or the columns (columns.js),
+//                    or « Aucun produit » (parts.js, B34)
+//
 // The search state lives in state.search (core/store.js): it survives a trip
-// to another view, and each retailer column is shown as soon as its retailer
-// answers. Searches are asked with the event "search:requested" (form of the
-// page, suggestions...) and replace the address in the history.
+// to another view, and each retailer is shown as soon as it answers (one
+// request per retailer, all cancelled by the next search). The page is
+// updated in place (patch.js): the focus, the scroll and the images stay.
+// Searches are asked with the event "search:requested" (form, suggestions,
+// « Aucun produit ») and each one adds an entry to the history; going back to
+// a search made a moment ago shows it again without asking the sites.
 
-import { retailerBadge } from "../../components/retailer-badge.js";
 import { api } from "../../core/api.js";
-import { euros, plural } from "../../core/fmt.js";
+import { euros, plural, relativeTime } from "../../core/fmt.js";
 import { html, setHtml } from "../../core/html.js";
-import { navigate } from "../../core/router.js";
-import { addToList, emit, on, openSetup, retailer, state } from "../../core/store.js";
-import { notify } from "../../core/ui.js";
-import { productRow } from "./product-row.js";
+import { icon } from "../../core/icons.js";
+import { currentRoute, navigate } from "../../core/router.js";
+import { emit, on, openSetup, retailer, state } from "../../core/store.js";
+import { announce, notify } from "../../core/ui.js";
+import { addToMyList, isListed, openAddSheet, removeFromMyList } from "./add-sheet.js";
+import { initAutocomplete } from "./autocomplete.js";
+import { columnsMarkup } from "./columns.js";
+import { resultFiltersMarkup } from "./filters.js";
+import { group } from "./group.js";
+import { readChoice, recordDuration, rememberSearch, saveChoice, usualDuration } from "./memory.js";
+import { offersMarkup } from "./offers.js";
+import { noResults, unavailableBar } from "./parts.js";
+import { patch } from "./patch.js";
+import {
+    applyFilters,
+    closeOf,
+    filterCounts,
+    gap,
+    gapText,
+    productKey,
+    rank,
+    rankClose,
+    relevantOf,
+    retailerState,
+    SORTS,
+    summarize,
+    valueOf,
+} from "./rank.js";
+import { applyBars, slowAfter, summaryMarkup } from "./summary.js";
 
-const PAGE_SIZE = 5;
+const VIEW_KEY = "prixmalin.resultsView";
+const SORT_KEY = "prixmalin.resultsSort";
+const VIEWS = ["all", "stores"];
+// Under this width, « Tout trié » is the default view
+const WIDE = "(min-width: 760px)";
+// A search shown again from the history when it is younger than this
+const SNAPSHOT_MS = 15 * 60000;
+
 const search = state.search;
+Object.assign(search, {
+    view: readChoice(VIEW_KEY, VIEWS, window.matchMedia(WIDE).matches ? "stores" : "all"),
+    sort: readChoice(SORT_KEY, SORTS, "price"),
+    filters: [],
+    expanded: {},
+    closeOpen: {},
+    groupsOpen: {},
+    shown: new Set(), // retailers whose offers are in « Tout trié »
+    held: new Set(), // retailers that answered while the user was reading further down
+    controller: null,
+    storeControllers: {},
+    finishedAt: 0,
+});
 
+const snapshots = new Map();
 let root = null; // container while the view is shown
-// Products rendered on the page, referenced by the « + » buttons
-let productIndex = [];
+let products = new Map(); // product key → product, for the buttons
+let ticker = null;
+let clock = "";
 
 const TEMPLATE = html`
-    <div id="results">
-        <div id="summary" class="summary"></div>
-        <div class="toolbar">
-            <label class="sort">Trier par
-                <select id="sort">
-                    <option value="price">prix</option>
-                    <option value="unit">prix au kg / L</option>
-                </select>
-            </label>
-            <button id="add-query-btn" class="btn-ghost" type="button"></button>
-            <button id="refresh-btn" class="btn-ghost" type="button" title="Ignorer le cache et relancer la recherche">↻ Actualiser</button>
+    <div id="results" class="results" aria-busy="false">
+        <section id="summary" class="summary" aria-labelledby="summary-title" data-testid="summary"></section>
+        <div class="results-toolbar" data-testid="results-toolbar">
+            <fieldset class="seg" id="view-switch">
+                <legend class="visually-hidden">Affichage des résultats</legend>
+                <label><input type="radio" name="results-view" value="all"><span>${icon("list")}Tout trié</span></label>
+                <label><input type="radio" name="results-view" value="stores"><span>${icon("store")}Par enseigne</span></label>
+            </fieldset>
+            <div class="refresh-box">
+                <span id="updated" class="updated"></span>
+                <button id="refresh-btn" class="icon-btn" type="button" aria-label="Actualiser les prix" title="Actualiser les prix">${icon("refresh-cw")}</button>
+            </div>
+            <fieldset class="seg" id="sort-switch">
+                <legend class="seg-legend">Trier</legend>
+                <label><input type="radio" name="results-sort" value="price"><span>Prix</span></label>
+                <label><input type="radio" name="results-sort" value="unit"><span id="sort-unit-label">Prix au kg/L</span></label>
+                <label><input type="radio" name="results-sort" value="promo"><span>Promos</span></label>
+                <label><input type="radio" name="results-sort" value="relevance"><span>Pertinence</span></label>
+            </fieldset>
         </div>
-        <div id="columns" class="columns"></div>
+        <div id="result-filters" class="result-filters"></div>
+        <div id="unavailable"></div>
+        <div id="results-body" class="results-body"></div>
     </div>`;
 
 const $ = (sel) => (root ? root.querySelector(sel) : null);
+
+function enabledKeys() {
+    return state.retailers.filter((r) => state.enabled.has(r.key)).map((r) => r.key);
+}
+
+function snapshotKey(query) {
+    return `${query.trim().toLocaleLowerCase("fr")}|${enabledKeys().join(",")}`;
+}
+
+function isLoading(key) {
+    return retailerState(search.results[key]) === "loading";
+}
+
+// Retailers « plus longs que d'habitude » and the half-minute: when this
+// changes, the texts that depend on the time are drawn again
+function clockSignature(now) {
+    const slow = enabledKeys().filter(
+        (k) => isLoading(k) && now - (search.results[k].started || now) > slowAfter(usualDuration(k)),
+    );
+    return `${slow.join(",")}|${Math.floor(now / 30000)}`;
+}
 
 // ---------------------------------------------------------------- searching
 
 // Searches `query` at every ticked retailer (works even when the view is hidden)
 function runSearch(query, refresh = false) {
+    if (search.controller) search.controller.abort();
+    search.controller = new AbortController();
+    search.storeControllers = {};
     search.query = query;
     search.results = {};
     search.expanded = {};
+    search.closeOpen = {};
+    search.groupsOpen = {};
+    search.shown = new Set();
+    search.held = new Set();
+    search.finishedAt = 0;
     const token = ++search.token;
-    for (const key of state.enabled) search.results[key] = { status: "loading" };
+    const keys = enabledKeys();
+    for (const key of keys) search.results[key] = { status: "loading", started: Date.now() };
+    rememberSearch(query);
     emit("search:started", { query });
+    announce(`Recherche de « ${query} » dans ${plural(keys.length, "enseigne")}…`);
     renderResults();
-    for (const key of state.enabled) searchStore(key, token, refresh);
+    // A new search is read from its top (the previous one was perhaps read
+    // further down: the new offers would otherwise wait, held back)
+    if (root && window.scrollY > 0) window.scrollTo(0, 0);
+    for (const key of keys) searchStore(key, token, refresh);
 }
 
 function resetSearch() {
+    if (search.controller) search.controller.abort();
     search.query = "";
     search.results = {};
     search.expanded = {};
     search.token++;
 }
 
+// The user scrolled down the list of « Tout trié »: new offers wait (no jump)
+function readingFurther() {
+    if (!root || search.view !== "all" || ![...search.shown].some((k) => relevantOf(search.results[k]).length)) {
+        return false;
+    }
+    // « Si l'utilisateur a défilé »: the page is no longer at its top
+    return window.scrollY > 80;
+}
+
 async function searchStore(key, token, refresh = false) {
-    search.results[key] = { status: "loading" };
+    const controller = new AbortController();
+    search.storeControllers[key] = controller;
+    const parent = search.controller;
+    if (parent) parent.signal.addEventListener("abort", () => controller.abort(), { once: true });
+    search.results[key] = { status: "loading", started: Date.now() };
+    search.shown.delete(key);
+    search.held.delete(key);
     renderResults();
+    startTicker();
     let result;
     try {
-        result = await api(`/api/search/${key}?q=${encodeURIComponent(search.query)}${refresh ? "&refresh=true" : ""}`);
+        const path = `/api/search/${encodeURIComponent(key)}?q=${encodeURIComponent(search.query)}${refresh ? "&refresh=true" : ""}`;
+        result = await api(path, { signal: controller.signal });
     } catch (err) {
-        result = { store: key, status: "error", message: err.message, products: [] };
+        if (err.code === "aborted") return; // a newer search, or « Ignorer »
+        result = { store: key, label: retailer(key).label, status: "error", message: err.message, products: [] };
     }
     if (token !== search.token) return;
+    if (!result.cached && result.elapsed_ms > 0) recordDuration(key, result.elapsed_ms);
     search.results[key] = result;
+    if (readingFurther()) search.held.add(key);
+    else search.shown.add(key);
     emit("search:result", { query: search.query, store: key, result });
-    if (Object.values(search.results).every((r) => r.status !== "loading")) emit("search:done", { query: search.query });
+    if (enabledKeys().every((k) => !isLoading(k))) finish();
     renderResults();
 }
 
-// A search asked from the page (form, suggestion): the address follows the query
+// « Ignorer »: the answer of this retailer is no longer awaited
+function skipStore(key) {
+    const controller = search.storeControllers[key];
+    if (controller) controller.abort();
+    const label = retailer(key).label;
+    search.results[key] = {
+        store: key,
+        label,
+        status: "skipped",
+        message: `${label} est ignorée pour cette recherche.`,
+        products: [],
+    };
+    search.shown.add(key);
+    if (enabledKeys().every((k) => !isLoading(k))) finish();
+    renderResults();
+}
+
+function finish() {
+    search.finishedAt = Date.now();
+    emit("search:done", { query: search.query });
+    const keys = enabledKeys();
+    const best = summarize(search.results, keys, { sort: "price" }).cheapest;
+    const failed = keys.filter((k) => retailerState(search.results[k]) === "error").length;
+    const first = best
+        ? `Terminé : le moins cher est ${retailer(best.store).label}, ${euros(best.price)}, ${best.name}.`
+        : `Terminé : aucun produit pour « ${search.query} ».`;
+    announce(failed ? `${first} ${plural(failed, "enseigne indisponible", "enseignes indisponibles")}.` : first);
+    snapshots.delete(snapshotKey(search.query));
+    snapshots.set(snapshotKey(search.query), { results: { ...search.results }, time: Date.now() });
+    if (snapshots.size > 10) snapshots.delete(snapshots.keys().next().value);
+}
+
+// Shows again a search made a moment ago (back in the history): no request
+function restore(query) {
+    const saved = snapshots.get(snapshotKey(query));
+    if (!saved || Date.now() - saved.time > SNAPSHOT_MS) return false;
+    if (search.controller) search.controller.abort();
+    search.token++;
+    search.query = query;
+    search.results = { ...saved.results };
+    search.expanded = {};
+    search.closeOpen = {};
+    search.groupsOpen = {};
+    search.shown = new Set(Object.keys(saved.results));
+    search.held = new Set();
+    search.finishedAt = saved.time;
+    renderResults();
+    return true;
+}
+
+function startTicker() {
+    if (ticker || !root) return;
+    ticker = setInterval(() => {
+        if (root && search.query && clockSignature(Date.now()) !== clock) renderResults();
+    }, 1000);
+}
+
+function stopTicker() {
+    clearInterval(ticker);
+    ticker = null;
+}
+
+// ---------------------------------------------------------------- events
+
+// A search asked from the page (form, suggestion): a new entry of the history
 on("search:requested", ({ query, refresh = false }) => {
+    const box = document.getElementById("q");
+    if (box) {
+        box.value = query;
+        // The keyboard of a phone hides the results: closed after the search
+        if (window.matchMedia("(pointer: coarse)").matches) box.blur();
+    }
     runSearch(query, refresh);
-    navigate("/recherche", { q: query }, { replace: true });
+    const route = currentRoute();
+    const here = Boolean(route) && route.name === "search" && route.params.q === query;
+    navigate("/recherche", { q: query }, { replace: here });
 });
 
 on("search:reset", resetSearch);
@@ -89,200 +285,288 @@ on("results:stale", () => {
     if (search.query) runSearch(search.query);
 });
 
-// A retailer was ticked: search it too
+// A retailer was ticked: search it too. Unticked while it was searching: its
+// answer is no longer awaited (the search may be over without it)
 on("filters:changed", (key) => {
-    if (search.query && state.enabled.has(key) && !search.results[key]) searchStore(key, search.token);
-    else renderResults();
+    if (search.query && state.enabled.has(key) && !search.results[key]) {
+        searchStore(key, search.token);
+        return;
+    }
+    if (search.query && !state.enabled.has(key) && search.results[key] && isLoading(key)) {
+        if (search.storeControllers[key]) search.storeControllers[key].abort();
+        delete search.results[key];
+        if (enabledKeys().every((k) => !isLoading(k))) finish();
+    }
+    renderResults();
 });
 
-function sortProducts(products) {
-    const list = [...products];
-    if (search.sort === "unit") {
-        list.sort(
-            (a, b) =>
-                (a.unit_price == null) - (b.unit_price == null) ||
-                (a.unit_price ?? 0) - (b.unit_price ?? 0) ||
-                (a.price == null) - (b.price == null) ||
-                (a.price ?? 0) - (b.price ?? 0),
-        );
-    } else {
-        list.sort((a, b) => (a.price == null) - (b.price == null) || (a.price ?? 0) - (b.price ?? 0));
-    }
-    return list;
-}
-
-function relevantProducts(result) {
-    return (result.products || []).filter((p) => p.relevance >= 1);
-}
-
-function bestOffers() {
-    const all = [];
-    for (const key of state.enabled) {
-        const r = search.results[key];
-        if (r && r.products) all.push(...relevantProducts(r).filter((p) => p.price != null && p.available));
-    }
-    const byPrice = all.length ? all.reduce((a, b) => (b.price < a.price ? b : a)) : null;
-    const withUnit = all.filter((p) => p.unit_price != null);
-    const byUnit = withUnit.length ? withUnit.reduce((a, b) => (b.unit_price < a.unit_price ? b : a)) : null;
-    return { byPrice, byUnit };
-}
+// The « ✓ » of the products follow the list
+on("list:changed", () => renderResults());
 
 // ---------------------------------------------------------------- rendering
 
+function retailerModel(key, keys, unit) {
+    const r = retailer(key);
+    const result = search.results[key] || { status: "loading" };
+    const allRelevant = rank(relevantOf(result), { sort: search.sort, unit, order: keys });
+    return {
+        key,
+        label: r.label,
+        retailer: r,
+        result,
+        state: retailerState(result),
+        allRelevant,
+        relevant: applyFilters(allRelevant, search.filters),
+        close: rankClose(applyFilters(closeOf(result), search.filters), keys),
+    };
+}
+
+// Where a retailer goes: "grid" (a column), "error" or "empty" (the bar), or
+// "offers" (« Tout trié »)
+function placeOf(m) {
+    const hasProducts = (m.result.products || []).length > 0;
+    if (search.view === "stores") {
+        if (m.state === "loading" || m.state === "ok") return "grid";
+        if (m.state === "error") return m.result.status === "store_required" && hasProducts ? "grid" : "error";
+        return m.close.length || m.allRelevant.length ? "grid" : "empty";
+    }
+    if (m.state === "error") return "error";
+    if (m.state === "none" && !m.allRelevant.length && !m.close.length) return "empty";
+    return "offers";
+}
+
+// « Mis à jour il y a 5 min »: age of the oldest prices shown
+function updatedText(keys, now) {
+    if (keys.some(isLoading)) return "";
+    const times = keys
+        .map((k) => search.results[k])
+        .filter((r) => r && r.status === "ok" && r.fetched_at)
+        .map((r) => r.fetched_at * 1000);
+    const ts = times.length ? Math.min(...times) : search.finishedAt;
+    return ts ? `Mis à jour ${relativeTime(ts, now)}` : "";
+}
+
+const UNIT_SORT_LABEL = { kg: "Prix au kg", L: "Prix au litre", pièce: "Prix à la pièce" };
+
+function syncToolbar(summary, keys, now) {
+    for (const input of root.querySelectorAll("input[name=results-view]")) input.checked = input.value === search.view;
+    for (const input of root.querySelectorAll("input[name=results-sort]")) input.checked = input.value === search.sort;
+    const unitLabel = UNIT_SORT_LABEL[summary.unit] || "Prix au kg/L";
+    if ($("#sort-unit-label").textContent !== unitLabel) $("#sort-unit-label").textContent = unitLabel;
+    const updated = updatedText(keys, now);
+    if ($("#updated").textContent !== updated) $("#updated").textContent = updated;
+}
+
+const SKELETON_ROWS = html`<div class="offers-loading" data-key="loading" aria-hidden="true">${[1, 2, 3].map(
+    () =>
+        html`<div class="skeleton"><div class="s-img"></div><div><div class="s-line"></div><div class="s-line short"></div></div></div>`,
+)}</div>`;
+
+// « Aucun produit » for the whole search (one block, B34): every retailer
+// answered and none has the product (or none is left by the filters)
+function nothingFound(models, loading) {
+    const anyRelevant = models.some((m) => m.state === "ok" && m.allRelevant.length);
+    const filteredOut = anyRelevant && !models.some((m) => m.state === "ok" && m.relevant.length);
+    return {
+        nothing: !loading && (!anyRelevant || filteredOut) && models.some((m) => m.state !== "error"),
+        filteredOut,
+    };
+}
+
+function bodyMarkup(models, placed, keys, unit, view, loading) {
+    const { nothing, filteredOut } = nothingFound(models, loading);
+    if (search.view === "stores") {
+        const grid = placed.filter((x) => x.place === "grid").map((x) => x.m);
+        return html`${nothing && noResults(search.query, { filtered: filteredOut })}${grid.length > 0 && columnsMarkup(grid, view)}`;
+    }
+    const inList = placed.filter((x) => x.place === "offers").map((x) => x.m);
+    const offers = rank(
+        inList.filter((m) => m.state === "ok").flatMap((m) => m.relevant),
+        { sort: search.sort, unit, order: keys },
+    );
+    const close = rankClose(
+        inList.flatMap((m) => m.close),
+        keys,
+    );
+    const pending = models
+        .filter((m) => search.held.has(m.key) && m.state === "ok")
+        .reduce((n, m) => n + m.relevant.length, 0);
+    if (nothing) {
+        const rest = close.length > 0 && offersMarkup({ groups: [], count: 0, stores: 0, close, pending: 0 }, view);
+        return html`${noResults(search.query, { filtered: filteredOut })}${rest}`;
+    }
+    if (!offers.length && loading) return SKELETON_ROWS;
+    if (!offers.length && !close.length && !pending) return html``;
+    const stores = new Set(offers.map((p) => p.store)).size;
+    return offersMarkup({ groups: group(offers), count: offers.length, stores, close, pending }, view);
+}
+
 function renderResults() {
     if (!root || !search.query) return;
-    productIndex = [];
-    $("#add-query-btn").textContent = `+ Ajouter « ${search.query} » à ma liste`;
-    const best = bestOffers();
-    renderSummary(best);
-    setHtml(
-        $("#columns"),
-        html`${state.retailers.filter((r) => state.enabled.has(r.key)).map((r) => renderColumn(r, best))}`,
+    const now = Date.now();
+    const keys = enabledKeys();
+    const summary = summarize(search.results, keys, { sort: search.sort, filters: search.filters });
+    const { unit, criterion } = summary;
+    const models = keys.map((k) => retailerModel(k, keys, unit));
+    const loading = models.some((m) => m.state === "loading");
+    products = new Map();
+    for (const m of models) for (const p of m.result.products || []) products.set(productKey(p), p);
+
+    const cheapestKey = summary.cheapest ? productKey(summary.cheapest) : null;
+    const bestUnitKey = summary.bestUnit ? productKey(summary.bestUnit) : null;
+    const bestValue = summary.best ? valueOf(summary.best, criterion, unit) : null;
+    const view = {
+        query: search.query,
+        now,
+        results: search.results,
+        keys,
+        filtered: search.filters.length > 0,
+        expanded: search.expanded,
+        closeOpen: search.closeOpen,
+        groupsOpen: search.groupsOpen,
+        label: (k) => retailer(k).label,
+        usual: usualDuration,
+        rowOptions: (p, inAll = false) => ({
+            cheapest: cheapestKey,
+            bestUnit: bestUnitKey,
+            sort: search.sort,
+            showStore: inAll,
+            listed: isListed(p),
+            gap: inAll ? gapText(gap(valueOf(p, criterion, unit), bestValue), criterion === "unit" ? unit : null) : "",
+        }),
+        closeRowOptions: (p) => ({ sort: search.sort, showStore: search.view === "all", listed: isListed(p) }),
+    };
+
+    // In « Tout trié », the retailers held back (the user reads further down) wait
+    const visible = (m) => search.view === "stores" || !search.held.has(m.key);
+    const placed = models.map((m) => ({ m, place: visible(m) ? placeOf(m) : "held" }));
+    const found = nothingFound(models, loading);
+    // The retailers without the product are not listed again under « Aucun produit »
+    const empties = found.nothing ? [] : placed.filter((x) => x.place === "empty");
+    const bar = [
+        ...placed.filter((x) => x.place === "error").map((x) => ({ ...x.m, kind: "error" })),
+        ...empties.map((x) => ({ ...x.m, kind: "empty" })),
+    ];
+    const unavailable = models.filter((m) => m.state === "error").length;
+    const shownRelevant = models.filter(visible).flatMap((m) => (m.state === "ok" ? m.allRelevant : []));
+
+    patch($("#summary"), summaryMarkup(summary, { ...view, unavailable }));
+    // « Aucun produit » anywhere: the block says it, the summary would only repeat it
+    $("#summary").hidden = found.nothing && !found.filteredOut;
+    // The filters stay in place while the retailers answer; gone when nothing was found
+    const withFilters = loading || shownRelevant.length > 0 || search.filters.length > 0;
+    patch(
+        $("#result-filters"),
+        withFilters
+            ? resultFiltersMarkup(filterCounts(shownRelevant), shownRelevant.length, search.filters)
+            : html``,
     );
-}
-
-function renderSummary({ byPrice, byUnit }) {
-    const keys = [...state.enabled];
-    const done = keys.filter((k) => search.results[k] && search.results[k].status !== "loading").length;
-    const cards = [];
-    if (byPrice) {
-        cards.push(summaryCard("Le moins cher", euros(byPrice.price), byPrice));
-    }
-    if (byUnit && (!byPrice || byUnit !== byPrice)) {
-        cards.push(summaryCard(`Meilleur prix au ${byUnit.unit}`, `${euros(byUnit.unit_price)}/${byUnit.unit}`, byUnit));
-    }
-    if (done < keys.length) {
-        cards.push(
-            html`<div class="summary-progress"><span class="spinner"></span> ${done}/${keys.length} enseignes ont répondu…</div>`,
-        );
-    }
-    setHtml($("#summary"), html`${cards}`);
-}
-
-function summaryCard(label, value, product) {
-    return html`
-        <div class="summary-card">
-            ${retailerBadge(product.store)}
-            <div>
-                <div class="label">${label}</div>
-                <div class="value">${value}</div>
-                <div class="what">${product.name}</div>
-            </div>
-        </div>`;
-}
-
-function row(p, best) {
-    return productRow(p, best, productIndex.push(p) - 1);
-}
-
-const SKELETON = html`<div class="skeleton"><div class="s-img"></div><div><div class="s-line"></div><div class="s-line short"></div></div></div>`;
-const STATUS_TEXT = { empty: "0 produit", store_required: "Magasin à choisir", blocked: "Bloqué", timeout: "Délai dépassé" };
-
-function renderColumn(r, best) {
-    const result = search.results[r.key] || { status: "loading" };
-    let status;
-    const body = [];
-
-    if (result.status === "loading") {
-        status = html`<span class="spinner"></span> Recherche…`;
-        body.push(SKELETON, SKELETON, SKELETON);
-    } else if (result.status === "ok") {
-        const relevant = sortProducts(relevantProducts(result));
-        // Products sharing at least one word with the query
-        const approx = sortProducts(result.products.filter((p) => p.relevance > 0 && p.relevance < 1));
-        status = `${plural(relevant.length, "produit")}${result.cached ? " · en cache" : ""}`;
-        const expanded = search.expanded[r.key];
-        if (relevant.length) {
-            const shown = expanded ? relevant : relevant.slice(0, PAGE_SIZE);
-            body.push(html`<ul class="products">${shown.map((p) => row(p, best))}</ul>`);
-            if (relevant.length > shown.length) {
-                body.push(
-                    html`<button class="more-btn" type="button" data-more="${r.key}">Voir ${relevant.length - shown.length} de plus</button>`,
-                );
-            }
-        } else {
-            body.push(html`<div class="notice">Aucun produit ne contient tous les mots de « ${search.query} ».</div>`);
-        }
-        if (approx.length && (expanded || !relevant.length)) {
-            body.push(html`<div class="approx-title">Résultats approchants</div>
-                <ul class="products">${approx.slice(0, expanded ? 50 : PAGE_SIZE).map((p) => row(p, best))}</ul>`);
-        } else if (approx.length && relevant.length <= PAGE_SIZE) {
-            const what = plural(approx.length, "résultat approchant", "résultats approchants");
-            body.push(html`<button class="more-btn" type="button" data-more="${r.key}">Voir ${what}</button>`);
-        }
-    } else {
-        status = STATUS_TEXT[result.status] || "Erreur";
-        const actions = [];
-        if (result.status === "store_required") {
-            actions.push(
-                html`<button class="btn-primary small" type="button" data-open-settings="${r.key}">Choisir mon magasin</button>`,
-            );
-        }
-        if (result.status === "blocked") {
-            actions.push(html`<button class="btn-primary small" type="button" data-setup="${r.key}">Ouvrir le site</button>`);
-        }
-        if (result.status !== "empty") {
-            actions.push(html`<button class="btn-ghost small" type="button" data-retry="${r.key}">Réessayer</button>`);
-        }
-        const warn = result.status === "empty" ? "" : " warn";
-        body.push(html`<div class="notice${warn}">${result.message || "Erreur inconnue"}
-            ${actions.length > 0 && html`<div class="actions">${actions}</div>`}</div>`);
-        if (result.status === "store_required" && result.products && result.products.length) {
-            body.push(html`<ul class="products">${result.products.slice(0, PAGE_SIZE).map((p) => row(p, best))}</ul>`);
-        }
-    }
-
-    const sub = result.store_label || (r.store && r.store.name);
-    return html`
-        <div class="column" data-store="${r.key}">
-            <div class="column-head">
-                ${retailerBadge(r.key, r.label)}
-                <span class="column-status">${status}</span>
-            </div>
-            ${sub && html`<div class="column-sub">${sub}</div>`}
-            ${body}
-        </div>`;
+    patch($("#unavailable"), unavailableBar(bar, now));
+    patch($("#results-body"), bodyMarkup(models, placed, keys, unit, view, loading));
+    applyBars(root);
+    syncToolbar(summary, keys, now);
+    $("#results").setAttribute("aria-busy", loading ? "true" : "false");
+    clock = clockSignature(now);
 }
 
 // ---------------------------------------------------------------- actions
 
-async function addQueryOrProduct(query, product) {
-    try {
-        await addToList(query, product);
-        notify(
-            product ? `Ajouté : ${product.name} (${retailer(product.store).label})` : `« ${query} » ajouté à votre liste`,
+function showHeld() {
+    for (const key of search.held) search.shown.add(key);
+    search.held = new Set();
+    renderResults();
+    $("#results-body")?.scrollIntoView({ block: "start" });
+    announce("Nouvelles offres affichées");
+}
+
+// « 3 produits affichés » after a change of the filters
+function filtersText() {
+    const count = enabledKeys()
+        .map((k) => search.results[k])
+        .filter((r) => r && r.status === "ok")
+        .reduce((n, r) => n + applyFilters(relevantOf(r), search.filters).length, 0);
+    return plural(count, "produit affiché", "produits affichés");
+}
+
+function onClick(e) {
+    const target = e.target.closest("button");
+    if (!target || !root || !root.contains(target)) return;
+    const { action } = target.dataset;
+    const key = target.dataset.storeKey;
+    if (target.dataset.openSettings) {
+        navigate("/reglages", { enseigne: target.dataset.openSettings });
+    } else if (target.dataset.setup) {
+        openSetup(target.dataset.setup);
+    } else if (action === "add") {
+        const product = products.get(target.dataset.product);
+        if (product) openAddSheet(product, search.query, target);
+    } else if (action === "remove") {
+        const product = products.get(target.dataset.product);
+        if (product) removeFromMyList(product);
+    } else if (action === "more") {
+        search.expanded[key] = true;
+        renderResults();
+    } else if (action === "close") {
+        search.closeOpen[target.dataset.close] = !search.closeOpen[target.dataset.close];
+        renderResults();
+    } else if (action === "group") {
+        search.groupsOpen[target.dataset.group] = !search.groupsOpen[target.dataset.group];
+        renderResults();
+    } else if (action === "retry") {
+        searchStore(key, search.token, true);
+    } else if (action === "skip") {
+        skipStore(key);
+    } else if (action === "show-pending") {
+        showHeld();
+    } else if (action === "filter") {
+        if (target.getAttribute("aria-disabled") === "true") return;
+        const id = target.dataset.filter;
+        search.filters = search.filters.includes(id) ? search.filters.filter((f) => f !== id) : [...search.filters, id];
+        renderResults();
+        announce(filtersText());
+    } else if (action === "clear-filters") {
+        search.filters = [];
+        renderResults();
+        announce(filtersText());
+    } else if (action === "query") {
+        emit("search:requested", { query: target.dataset.query });
+    } else if (action === "add-query") {
+        addToMyList({ query: search.query, quantity: 1, absolute: false }).catch((err) =>
+            notify(err.message, { type: "error" }),
         );
-    } catch (err) {
-        notify(err.message, { type: "error" });
+    }
+}
+
+// Back near the top of the list: the offers held back are shown
+function onScroll() {
+    if (!search.held.size || readingFurther()) return;
+    for (const key of search.held) search.shown.add(key);
+    search.held = new Set();
+    renderResults();
+}
+
+function onChange(e) {
+    const input = e.target;
+    if (input.name === "results-view" && VIEWS.includes(input.value)) {
+        search.view = input.value;
+        saveChoice(VIEW_KEY, search.view);
+        for (const key of search.held) search.shown.add(key);
+        search.held = new Set();
+        renderResults();
+    } else if (input.name === "results-sort" && SORTS.includes(input.value)) {
+        search.sort = input.value;
+        saveChoice(SORT_KEY, search.sort);
+        renderResults();
     }
 }
 
 function bind() {
-    $("#refresh-btn").addEventListener("click", () => search.query && emit("search:requested", { query: search.query, refresh: true }));
-
-    $("#sort").addEventListener("change", (e) => {
-        search.sort = e.target.value;
-        renderResults();
+    root.addEventListener("click", onClick);
+    root.addEventListener("change", onChange);
+    $("#refresh-btn").addEventListener("click", () => {
+        if (search.query) emit("search:requested", { query: search.query, refresh: true });
     });
-
-    $("#add-query-btn").addEventListener("click", () => addQueryOrProduct(search.query, null));
-
-    $("#columns").addEventListener("click", async (e) => {
-        const target = e.target.closest("button");
-        if (!target) return;
-        if (target.dataset.more) {
-            search.expanded[target.dataset.more] = true;
-            renderResults();
-        } else if (target.dataset.retry) {
-            searchStore(target.dataset.retry, search.token, true);
-        } else if (target.dataset.openSettings) {
-            navigate("/reglages", { enseigne: target.dataset.openSettings });
-        } else if (target.dataset.setup) {
-            openSetup(target.dataset.setup);
-        } else if (target.dataset.add) {
-            await addQueryOrProduct(search.query, productIndex[Number(target.dataset.add)]);
-        }
-    });
+    window.addEventListener("scroll", onScroll, { passive: true });
 }
 
 // Shows the search of the address; without q, back to the home page
@@ -292,10 +576,13 @@ function applyParams(params) {
         navigate("/", {}, { replace: true });
         return;
     }
-    document.getElementById("q").value = q;
-    if (q !== search.query) runSearch(q);
-    else renderResults();
+    const box = document.getElementById("q");
+    if (box && box.value !== q) box.value = q;
+    if (q === search.query) renderResults();
+    else if (!restore(q)) runSearch(q);
 }
+
+initAutocomplete();
 
 export const enabled = true;
 export const title = (params) => (params.q ? `${params.q} – Rechercher` : "Rechercher");
@@ -304,8 +591,8 @@ export const shell = { search: true, filters: true };
 export function render(container, params) {
     root = container;
     setHtml(root, TEMPLATE);
-    $("#sort").value = search.sort;
     bind();
+    startTicker();
     applyParams(params);
 }
 
@@ -314,5 +601,7 @@ export function update(params) {
 }
 
 export function destroy() {
+    window.removeEventListener("scroll", onScroll);
+    stopTicker();
     root = null;
 }

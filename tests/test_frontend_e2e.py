@@ -192,7 +192,7 @@ def test_search_shows_one_column_per_retailer(page):
     expect(page).to_have_title("farine – Rechercher · PrixMalin")
 
     # Sort by unit price, then the store filter hides a column
-    page.select_option("#sort", "unit")
+    page.get_by_role("radio", name="Prix au kg").check()
     expect(page.locator(".column[data-store=aldi] .unit")).to_have_text(["0,79 €/kg", "2,98 €/kg"])
     page.locator(".store-toggle", has_text="Carrefour").click()
     expect(page.locator(".column")).to_have_count(4)
@@ -241,10 +241,14 @@ def test_add_to_list_updates_the_nav_badge(page):
     search_farine(page)
     expect(page.locator(".nav-link[data-nav=list] .count")).to_have_text("0")
     page.locator(".column[data-store=lidl] .add-btn").first.click()
-    expect(page.locator("#toast")).to_have_text("Ajouté : Farine de blé 1kg (Lidl)")
+    page.click("#add-sheet button[type=submit]")  # « Ajouter », exactly this product
+    expect(page.locator("#toast")).to_contain_text("Ajouté à « farine »")
     expect(page.locator(".nav-link[data-nav=list] .count")).to_have_text("1")
-    page.click("#add-query-btn")  # same query: merged into the same line
-    expect(page.locator("#toast")).to_have_text("« farine » ajouté à votre liste")
+    # The search only, at another retailer: same query, merged into the same line
+    page.locator(".column[data-store=aldi] .add-btn").first.click()
+    page.check("#add-sheet input[value=query]")
+    page.click("#add-sheet button[type=submit]")
+    expect(page.locator("#toast")).to_contain_text("« farine »")
     expect(page.locator(".nav-link[data-nav=list] .count")).to_have_text("1")
 
 
@@ -252,6 +256,7 @@ def test_list_compares_the_basket(page):
     page.goto(page.base)
     search_farine(page)
     page.locator(".column[data-store=carrefour] .add-btn").nth(1).click()  # Francine at Carrefour
+    page.click("#add-sheet button[type=submit]")
     expect(page.locator(".nav-link[data-nav=list] .count")).to_have_text("1")
 
     page.click(".nav-link[data-nav=list]")

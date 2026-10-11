@@ -3,16 +3,22 @@
 Retailers change their CSS classes often. These extractors rely on what every
 product listing has in common (a link to the product page, a name, a price in
 euros) so that a scraper keeps working when its specific selectors break.
+
+Also here: the reading of a second page of results (``PageBudget``,
+``read_more``, ``merge_pages``), shared by the scrapers.
 """
 
 import json
+import logging
 import re
-from collections.abc import Iterator
+import time
+from collections.abc import Awaitable, Callable, Iterator
 from typing import Any
 from urllib.parse import urljoin
 
+from backend import config
 from backend.models import Product
-from backend.scrapers.parsing import UNIT_PRICE_FRAGMENT, clean_text, parse_price
+from backend.scrapers.parsing import UNIT_PRICE_FRAGMENT, clean_text, parse_price, valid_ean
 
 # Runs in the page. Finds product cards and returns their raw texts; all the
 # parsing happens in Python (see card_to_product) so it can be unit tested.
@@ -73,13 +79,24 @@ CARDS_JS = r"""
 
     let image = null;
     if (img) {
-      const srcset = (img.getAttribute('srcset') || img.getAttribute('data-srcset') || '')
-        .split(',').pop().trim().split(' ')[0];
+      // A light thumbnail: the smallest candidate of at least 200 px of the srcset
+      const sources = (img.getAttribute('srcset') || img.getAttribute('data-srcset') || '').split(',')
+        .map((c) => c.trim().split(/\s+/)).filter((c) => c[0])
+        .map(([u, w]) => [u, parseInt(w, 10) || 0]).sort((a, b) => a[1] - b[1]);
+      const srcset = (sources.find((c) => c[1] >= 200) || sources[sources.length - 1] || [''])[0];
       const candidates = [img.currentSrc, img.getAttribute('src'), img.getAttribute('data-src'),
         img.getAttribute('data-lazy-src'), srcset];
       const found = candidates.find((u) => u && !u.startsWith('data:'));
       if (found) { try { image = new URL(found, location.href).href; } catch (e) { image = found; } }
     }
+    const attrOf = (names) => {
+      for (const n of names) {
+        const el = card.matches(`[${n}]`) ? card : card.querySelector(`[${n}]`);
+        const v = el ? clean(el.getAttribute(n)) : '';
+        if (v) return v;
+      }
+      return null;
+    };
     const priceTexts = [];
     if (opts.priceSelector) {
       for (const el of card.querySelectorAll(opts.priceSelector)) {
@@ -97,6 +114,10 @@ CARDS_JS = r"""
       strike: [...card.querySelectorAll(strikeSel)].map((e) => clean(e.textContent)).filter(Boolean),
       text: clean(card.innerText || card.textContent).slice(0, 800),
       image,
+      ean: attrOf(['data-ean', 'data-ean13', 'data-gtin', 'data-gtin13', 'data-barcode'])
+        || textOf(card, '[itemprop^="gtin"]'),
+      sku: attrOf(['data-sku', 'data-pid', 'data-product-id', 'data-productid', 'data-article-id',
+        'data-articleid', 'data-item-id']),
     });
   }
   return out;
@@ -160,6 +181,7 @@ def card_to_product(card: dict, store: str, base_url: str) -> Product | None:
         promo = f"Au lieu de {old_price:.2f} €".replace(".", ",")
 
     url = card.get("url")
+    sku = clean_text(card.get("sku")) or None
     return Product(
         store=store,
         name=name,
@@ -170,6 +192,9 @@ def card_to_product(card: dict, store: str, base_url: str) -> Product | None:
         image_url=urljoin(base_url, card["image"]) if card.get("image") else None,
         product_url=urljoin(base_url, url) if url else base_url,
         promo=promo,
+        old_price=old_price if promo else None,
+        ean=valid_ean(card.get("ean")) or valid_ean(sku),
+        sku=sku,
     )
 
 
@@ -177,6 +202,136 @@ async def extract_cards(page, store: str, base_url: str, **options: Any) -> list
     raw = await page.evaluate(CARDS_JS, {k: v for k, v in options.items() if v})
     products = [card_to_product(card, store, base_url) for card in raw]
     return [p for p in products if p is not None]
+
+
+# --- Several pages of results -----------------------------------------------
+
+logger = logging.getLogger("prixmalin.extract")
+
+# Another page is read only before this share of the time of a search
+PAGE_BUDGET_SHARE = 0.5
+# Pause before another page, as a person who scrolls
+PAGE_PAUSE_MS = 800
+
+
+class PageBudget:
+    """Time of a search: another page of results only in its first half (B39)."""
+
+    def __init__(self, key: str, timeout: float | None = None, clock: Callable[[], float] = time.monotonic) -> None:
+        self.timeout = config.scraper_timeout(key) if timeout is None else timeout
+        self.clock = clock
+        self.start = clock()
+
+    def elapsed(self) -> float:
+        return self.clock() - self.start
+
+    def allows_more(self) -> bool:
+        return self.elapsed() < PAGE_BUDGET_SHARE * self.timeout
+
+    def wait_ms(self, longest: float = 8000) -> float:
+        """Longest wait for another page that keeps the search within its time."""
+        return max(500.0, min(longest, (self.timeout * 0.9 - self.elapsed()) * 1000))
+
+
+def merge_pages(*pages: list[Product]) -> list[Product]:
+    """The products of several pages, each once (same barcode, or same page, name and price)."""
+    seen: set[tuple] = set()
+    merged: list[Product] = []
+    for products in pages:
+        for product in products:
+            key = ("ean", product.ean) if product.ean else (product.product_url, product.name.lower(), product.price)
+            if key not in seen:
+                seen.add(key)
+                merged.append(product)
+    return merged
+
+
+async def pause_between_pages(page) -> None:
+    """Wait a little before another page of results, as a person who scrolls."""
+    await page.wait_for_timeout(PAGE_PAUSE_MS)
+
+
+def json_of(result) -> dict | None:
+    """The JSON object of a ``page_fetch`` answer, None when it failed or is not JSON."""
+    if not (result.ok and result.is_json):
+        return None
+    try:
+        data = result.json()
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+# Finds the way to more results: a link to the next page, or a « Voir plus » button
+MORE_JS = r"""
+(opts) => {
+  const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
+  const what = '(?:produits|résultats|articles)';
+  // « Voir plus », « Afficher plus de produits », « Charger la suite »... (buttons and links)
+  const more = new RegExp('^(?:(?:voir|afficher|charger|montrer)(?: les)? (?:plus|la suite)(?: de ' + what
+    + ')?|plus de ' + what + ')$', 'i');
+  // « Page suivante », « Suivant » (links only: carousels have « Suivant » buttons)
+  const nextPage = /^(?:page suivante|suivante?|›|»)$/i;
+  const usable = (el) => !el.disabled && el.getAttribute('aria-disabled') !== 'true'
+    && !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length)
+    && !(opts.cardSelector && el.closest(opts.cardSelector));
+  const here = location.href.split('#')[0];
+  const linkTo = (el) => {
+    const href = el.tagName === 'A' ? el.href : '';
+    return href && !href.startsWith('javascript') && href.split('#')[0] !== here ? href : null;
+  };
+  const rel = document.querySelector('a[rel="next"][href], link[rel="next"][href]');
+  if (rel && rel.href && rel.href.split('#')[0] !== here) return {next: rel.href};
+  for (const el of document.querySelectorAll('button, a[href], [role="button"]')) {
+    const text = clean(el.innerText || el.textContent) || clean(el.getAttribute('aria-label'));
+    if (text.length > 60 || !usable(el)) continue;
+    const href = linkTo(el);
+    if (more.test(text)) {
+      if (href) return {next: href};
+      const count = opts.cardSelector ? document.querySelectorAll(opts.cardSelector).length : 0;
+      el.click();
+      return {clicked: true, count};
+    }
+    if (href && nextPage.test(text)) return {next: href};
+  }
+  return null;
+}
+"""
+
+_MORE_LOADED_JS = "([selector, count]) => document.querySelectorAll(selector).length > count"
+
+
+async def read_more(
+    page,
+    extract: Callable[[], Awaitable[list[Product]]],
+    budget: PageBudget,
+    card_selector: str | None = None,
+) -> list[Product]:
+    """Products of the next page of results (« Voir plus » or a link to page 2), [] when there is none.
+
+    Only within the first half of the time of the search (``budget``).
+    """
+    if not budget.allows_more():
+        return []
+    await pause_between_pages(page)
+    action = await page.evaluate(MORE_JS, {"cardSelector": card_selector})
+    if not action:
+        return []
+    timeout = budget.wait_ms()
+    try:
+        if action.get("next"):
+            await page.goto(action["next"], wait_until="domcontentloaded", timeout=timeout)
+            if card_selector:
+                await page.wait_for_selector(card_selector, timeout=timeout)
+        elif card_selector:
+            count = action.get("count", 0)
+            await page.wait_for_function(_MORE_LOADED_JS, arg=[card_selector, count], timeout=min(timeout, 5000))
+        else:
+            await page.wait_for_timeout(min(timeout, 2000))
+    except Exception as e:  # noqa: BLE001 (the first page is enough)
+        logger.info("No second page of results: %s", str(e).splitlines()[0] if str(e) else type(e).__name__)
+        return []
+    return await extract()
 
 
 # --- JSON-LD ----------------------------------------------------------------
@@ -206,17 +361,27 @@ def products_from_json_ld(texts: list[str], store: str, base_url: str) -> list[P
             brand = obj.get("brand")
             if isinstance(brand, dict):
                 brand = brand.get("name")
+            image = first_url(obj.get("image"))
             products.append(
                 Product(
                     store=store,
                     name=name,
                     brand=clean_text(brand) if isinstance(brand, str) else None,
                     price=price,
-                    image_url=first_url(obj.get("image")),
+                    image_url=urljoin(base_url, image) if image else None,
                     product_url=urljoin(base_url, obj.get("url") or "") or base_url,
+                    available=_available(offers),
+                    ean=barcode_of(obj),
+                    sku=identifier_of(obj),
                 )
             )
     return products
+
+
+def _available(offers: object) -> bool:
+    """False when a JSON-LD offer says the product is out of stock."""
+    availability = offers.get("availability") if isinstance(offers, dict) else None
+    return not (isinstance(availability, str) and re.search(r"OutOfStock|SoldOut|Discontinued", availability))
 
 
 async def extract_json_ld(page, store: str, base_url: str) -> list[Product]:
@@ -228,7 +393,30 @@ async def extract_json_ld(page, store: str, base_url: str) -> list[Product]:
 _NAME_KEYS = ("name", "title", "fullTitle", "libelle", "label", "productName", "designation", "displayName")
 _PRICE_KEYS = ("price", "prix", "currentPrice", "salePrice", "sellingPrice", "finalPrice")
 _URL_KEYS = ("canonicalUrl", "url", "productUrl", "link", "href", "slug")
-_IMAGE_KEYS = ("image", "imageUrl", "images", "thumbnail", "media", "picture")
+_IMAGE_KEYS = ("thumbnail", "image", "imageUrl", "images", "media", "picture")
+# Barcode and identifier of a product in JSON-LD and in the APIs of the sites
+_EAN_KEYS = ("ean", "ean13", "gtin", "gtin13", "gtin8", "gtin12", "barcode", "codeEan", "produitEan13", "ians")
+_SKU_KEYS = ("sku", "productId", "productID", "product_id", "articleId", "articleNumber", "erpNumber", "idProduit")
+
+
+def barcode_of(node: dict) -> str | None:
+    """First valid EAN-8 / EAN-13 of a JSON object (keys ``ean``, ``gtin13``, ``barcode``...)."""
+    for key in _EAN_KEYS:
+        values = node.get(key)
+        for value in values if isinstance(values, list) else [values]:
+            ean = valid_ean(value.strip() if isinstance(value, str) else value)
+            if ean:
+                return ean
+    return None
+
+
+def identifier_of(node: dict) -> str | None:
+    """Identifier of the product on the retailer site (``sku``, ``productId``...)."""
+    for key in _SKU_KEYS:
+        value = node.get(key)
+        if isinstance(value, (str, int)) and not isinstance(value, bool) and str(value).strip():
+            return str(value).strip()
+    return None
 
 
 def _walk(data: Any, depth: int = 0) -> Iterator[dict]:
@@ -256,7 +444,12 @@ def _price_value(value: Any) -> float | None:
     return parse_price(value)
 
 
+# Sizes of an image, the lightest first (thumbnails of 56 px, 112 px on a phone)
+_IMAGE_SIZE_KEYS = ("medium", "small", "thumbnail", "thumb", "url", "src", "href", "main", "image", "large")
+
+
 def first_url(value: Any) -> str | None:
+    """The first image address of ``value``, the medium or small size when there are several."""
     if isinstance(value, str):
         return value or None
     if isinstance(value, list):
@@ -265,7 +458,7 @@ def first_url(value: Any) -> str | None:
             if url:
                 return url
     if isinstance(value, dict):
-        for key in ("url", "src", "href", "large", "medium", "main", "image"):
+        for key in _IMAGE_SIZE_KEYS:
             url = first_url(value.get(key))
             if url:
                 return url
@@ -304,6 +497,8 @@ def products_from_json(data: Any, store: str, base_url: str) -> list[Product]:
                         price=price,
                         image_url=urljoin(base_url, image) if image else None,
                         product_url=urljoin(base_url, url) if url else base_url,
+                        ean=barcode_of(node),
+                        sku=identifier_of(node),
                     )
                 )
             return

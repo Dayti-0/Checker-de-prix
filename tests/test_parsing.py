@@ -57,7 +57,7 @@ def test_parse_quantity(text, expected):
         ("0,35 €/100 g", (3.5, "kg")),
         ("Prix au litre : 1,20 €", (1.2, "L")),
         ("6,92 €/Kg", (6.92, "kg")),
-        ("1,23 € la pièce", (1.23, "unité")),
+        ("1,23 € la pièce", (1.23, "pièce")),  # B36: products sold by the piece in "pièce"
         ("2,49 € le kg", (2.49, "kg")),
         ("€/Kg", None),
         (None, None),

@@ -31,6 +31,8 @@ def test_search_farine(page):
     expect(page.get_by_role("searchbox", name="Produit à rechercher")).to_be_visible()
     search(page)
     expect(page).to_have_title("farine – Rechercher · PrixMalin")
+    # P2: « Tout trié » on a phone; one column per retailer in « Par enseigne »
+    page.get_by_role("radio", name="Par enseigne").check()
 
     aldi = page.locator("[data-store=aldi]")
     expect(aldi).to_contain_text("Farine de blé T55")
@@ -50,8 +52,11 @@ def test_search_farine(page):
 def test_add_to_list_and_compare_the_basket(page):
     page.goto(page.base)
     search(page)
+    page.get_by_role("radio", name="Par enseigne").check()
     page.locator("[data-store=lidl]").get_by_role("button", name=re.compile("Ajouter")).first.click()
-    expect(page.get_by_role("status")).to_have_text("Ajouté : Farine de blé T45 (Lidl)")
+    # P2: sheet « Ajouter à ma liste » (exactly this product, by default)
+    page.get_by_role("dialog").get_by_role("button", name="Ajouter").click()
+    expect(page.get_by_role("status")).to_contain_text("Ajouté à « farine »")
 
     page.get_by_role("link", name=re.compile("Ma liste")).click()
     expect(page).to_have_url(re.compile(r"#/liste$"))
