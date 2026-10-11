@@ -116,3 +116,20 @@ def test_state_texts(desktop):
     assert "les recherches continuent sans fenêtre" in js_eval(
         page, ADVANCED, "browserText", {"running": False, "closed_by_user": True}
     )
+
+
+@pytest.mark.parametrize("width", [360, 390])
+@pytest.mark.parametrize("scale", [0.9, 1.6])
+def test_no_horizontal_scroll_on_a_phone(mobile, paused, width, scale):
+    page = mobile
+    page.set_viewport_size({"width": width, "height": 844})
+    page.goto(page.base)
+    page.evaluate(f"() => localStorage.setItem('prixmalin.textScale', '{scale}')")
+    page.goto(f"{page.base}/#/reglages")
+    advanced = section(page)
+    advanced.get_by_text("Dépannage").click()
+    expect(advanced.get_by_role("button", name="Ouvrir Intermarché (fenêtre Chrome)")).to_be_visible()
+    expect(advanced.get_by_role("button", name="Réessayer Intermarché maintenant")).to_be_visible()
+    overflow = page.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+    assert overflow <= 0
+    page.evaluate("() => localStorage.removeItem('prixmalin.textScale')")
