@@ -368,6 +368,16 @@ class CoursesUScraper(BaseScraper):
     def __init__(self) -> None:
         # Store page visited last (it sets the store cookies): url, browser context, time
         self._visit: StoreVisit | None = None
+        # When the site was last opened with « Ouvrir le site » (the store chosen
+        # there is read back after « J'ai terminé »), None once read back
+        self.site_opened_at: float | None = None
+
+    def setup_url(self, store: StoreSelection | None) -> str:
+        """Page shown by « Ouvrir le site » (called by POST /api/browser/setup)."""
+        self.site_opened_at = time.time()
+        # The tab leaves the store page: visit it again before the next search
+        self._visit = None
+        return super().setup_url(store)
 
     # ------------------------------------------------------------ search
 

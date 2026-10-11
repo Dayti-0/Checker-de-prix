@@ -7,6 +7,7 @@ from pydantic_core import PydanticCustomError
 
 __all__ = [
     "AutoPickResult",
+    "CoursesUPrefs",
     "Location",
     "LocationRequest",
     "LocationResponse",
@@ -160,6 +161,14 @@ class AutoPickResult(BaseModel):
     message: str | None = None
     store: StoreOption | None = None
     settings: Settings
+
+
+class CoursesUPrefs(BaseModel):
+    """Preferences ``p4.coursesu`` (backend/services/prefs.py)."""
+
+    # Postal code for which the nearest store was chosen automatically (or the
+    # store removed by the user): no automatic choice at startup for it again
+    auto_done_for: str | None = None
 
 
 class OnboardingState(BaseModel):

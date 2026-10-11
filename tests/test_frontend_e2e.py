@@ -22,6 +22,7 @@ from playwright.sync_api import expect, sync_playwright
 from backend import config, database, main  # noqa: E402
 from backend.models import Location, Product, StoreOption  # noqa: E402
 from backend.services import search, settings  # noqa: E402
+from backend.services import stores as stores_service  # noqa: E402
 from tests.conftest import browser_missing  # noqa: E402
 
 CATALOG = {
@@ -63,9 +64,14 @@ INTERMARCHE_STORES = [
 ]
 
 
-async def fake_browser_run(key, fn, *args, timeout=None):
+async def fake_browser_run(key, fn, *args, timeout=None, priority="interactive"):
     assert fn.__name__ == "find_stores", "only the store finder goes through the browser"
     return INTERMARCHE_STORES
+
+
+async def fake_coursesu_directory(department_name=None):
+    # No Courses U store around (P4: tests/e2e/test_p4_stores.py tests the list)
+    return {"stores": [], "method": "blocs"}
 
 
 async def fake_open_setup(key, url):
@@ -99,6 +105,7 @@ def server(tmp_path_factory):
         mp.setattr(search, "_scrape", fake_scrape)
         mp.setattr(settings, "geocode", fake_geocode)
         mp.setattr(main.browser, "run", fake_browser_run)
+        mp.setattr(stores_service, "fetch_coursesu_directory", fake_coursesu_directory)
         mp.setattr(main.browser, "open_setup", fake_open_setup)
         mp.setattr(main.browser, "end_setup", fake_end_setup)
         database._db = None
@@ -202,16 +209,18 @@ def test_store_required_leads_to_the_settings(page):
 
     column.locator("[data-open-settings]").click()
     expect(page).to_have_url(f"{page.base}/#/reglages?enseigne=intermarche")
-    page.fill("#postal-input", "34970")
-    page.click("#location-form button[type=submit]")
+    page.fill("#location-postal", "34970")
+    page.press("#location-postal", "Enter")
     expect(page.locator("#location-label")).to_have_text("34970 Montpellier")
-    page.click("[data-find-stores]")
-    expect(page.locator(".store-list button")).to_have_count(2)
-    expect(page.locator(".store-list button").first).to_contain_text("Intermarché Hyper Lattes · 0,9 km")
-    page.locator(".store-list button").first.click()
+    # The list of the retailer of the address opens by itself (B52)
+    options = page.locator("[data-retailer=intermarche] .store-option")
+    expect(options).to_have_count(2)
+    expect(options.first).to_contain_text("Intermarché Hyper Lattes")
+    expect(options.first).to_contain_text("≈ 1 km")
+    options.first.click()
     expect(page.locator("#toast")).to_have_text("Magasin Intermarché : Intermarché Hyper Lattes")
-    card = page.locator(".retailer-card[data-retailer=intermarche]")
-    expect(card.locator(".state")).to_have_text("✓ Intermarché Hyper Lattes")
+    card = page.locator("[data-retailer=intermarche]")
+    expect(card.locator(".retailer-detail")).to_have_text("✓ Intermarché Hyper Lattes · ≈ 1 km")
     expect(card).to_contain_text("Route de Montpellier, 34970 Lattes")
 
     # The search was run again in the background with the chosen store
@@ -221,9 +230,10 @@ def test_store_required_leads_to_the_settings(page):
     expect(column.locator(".column-sub")).to_have_text("Intermarché Hyper Lattes")
 
     page.goto(f"{page.base}/#/reglages")
-    page.click("[data-remove-store=intermarche]")
-    expect(page.locator("#toast")).to_have_text("Magasin retiré")
-    expect(card.locator(".state")).to_have_text("Magasin à choisir")
+    page.get_by_role("button", name="Autres actions pour Intermarché").click()
+    page.get_by_role("button", name="Retirer le magasin Intermarché").click()
+    expect(page.locator("#toast")).to_have_text("Magasin Intermarché retiré")
+    expect(card.locator(".pill")).to_have_text("Magasin à choisir")
 
 
 def test_add_to_list_updates_the_nav_badge(page):
@@ -286,27 +296,32 @@ def test_list_compares_the_basket(page):
 def test_settings_page(page):
     page.goto(f"{page.base}/#/reglages")
     expect(page).to_have_title("Réglages · PrixMalin")
-    expect(page.locator(".retailer-card")).to_have_count(5)
-    expect(page.locator(".retailer-card .badge")).to_have_text(LABELS)
-    expect(page.locator(".retailer-card[data-retailer=intermarche] .state")).to_have_text("Magasin à choisir")
+    expect(page.locator(".retailer-row")).to_have_count(5)
+    expect(page.locator(".retailer-row .badge")).to_have_text(LABELS)
+    expect(page.locator("[data-retailer=intermarche] .pill")).to_have_text("Magasin à choisir")
     expect(page.locator("#browser-status")).to_have_text("Le navigateur démarrera à la première recherche.")
 
-    page.fill("#postal-input", "34000")
-    page.click("#location-form button[type=submit]")
+    page.fill("#location-postal", "34000")
+    page.press("#location-postal", "Enter")
     expect(page.locator("#toast")).to_have_text("Localisation enregistrée : Montpellier")
     expect(page.locator("#location-label")).to_have_text("34000 Montpellier")
     expect(page.locator("#location-info")).to_have_text("Localisation : Montpellier")
 
-    page.fill("[data-coursesu-form] input", "https://www.coursesu.com/drive-superu-roujan")
-    page.click("[data-coursesu-form] button")
+    coursesu = page.locator("[data-retailer=coursesu]")
+    coursesu.get_by_role("button", name="Choisir mon magasin Courses U").click()
+    coursesu.get_by_text("Saisir l'adresse à la main").click()
+    coursesu.locator("#coursesu-url").fill("https://www.coursesu.com/drive-superu-roujan")
+    coursesu.get_by_role("button", name="Enregistrer").click()
     expect(page.locator("#toast")).to_have_text("Magasin Courses U : Super U Roujan")
-    expect(page.locator(".retailer-card[data-retailer=coursesu] .state")).to_have_text("✓ Super U Roujan")
-    page.click("[data-remove-store=coursesu]")
-    expect(page.locator(".retailer-card[data-retailer=coursesu] .state")).to_have_text("Magasin à choisir")
+    expect(coursesu.locator(".retailer-detail")).to_have_text("✓ Super U Roujan")
+    page.get_by_role("button", name="Autres actions pour Courses U").click()
+    page.get_by_role("button", name="Retirer le magasin Courses U").click()
+    expect(coursesu.locator(".pill")).to_have_text("Magasin à choisir")
 
     # "Ouvrir le site" shows the banner of the shell until "J'ai terminé"
     expect(page.locator("#setup-banner")).to_be_hidden()
-    page.click(".retailer-card[data-retailer=aldi] [data-setup]")
+    page.get_by_role("button", name="Autres actions pour Aldi").click()
+    page.get_by_role("button", name="Ouvrir le site Aldi").click()
     expect(page.locator("#toast")).to_contain_text("Aldi est ouvert dans la fenêtre du navigateur PrixMalin")
     expect(page.locator("#setup-banner")).to_be_visible()
     page.click("#setup-banner-done")

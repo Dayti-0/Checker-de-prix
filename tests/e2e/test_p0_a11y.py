@@ -35,8 +35,8 @@ def test_views_are_accessible(page):
     postal = page.get_by_role("textbox", name="Code postal")
     postal.fill("34000")
     postal.press("Enter")
-    page.get_by_role("button", name="Trouver les magasins proches").click()
-    expect(page.locator(".store-list button").first).to_be_visible()
+    page.get_by_role("button", name="Choisir mon magasin Intermarché").click()
+    expect(page.locator("[data-retailer=intermarche] .store-option").first).to_be_visible()
     assert_accessible(page, "réglages")
 
     # Location chosen (green chip), more results to show, approximate results

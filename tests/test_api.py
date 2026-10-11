@@ -104,7 +104,7 @@ def test_intermarche_stores_need_location(client, monkeypatch):
     async def geocode(postal_code):
         return [Location(postal_code=postal_code, city="Lattes", lat=43.57, lon=3.9)]
 
-    async def run(key, fn, *args, timeout=None):
+    async def run(key, fn, *args, timeout=None, priority="interactive"):
         return [StoreOption(id="06814", name="Intermarché Hyper Lattes", distance_km=0.9)]
 
     monkeypatch.setattr(settings, "geocode", geocode)

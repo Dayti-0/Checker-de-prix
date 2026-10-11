@@ -4,7 +4,9 @@
   tab, cached ``DIRECTORY_TTL``), placed on the map with the table of French
   towns (geo.api.gouv.fr, cached ``COMMUNES_TTL``), sorted by distance;
 - ``auto_pick_coursesu()``: saves the nearest store when none is chosen (or
-  when the current one was chosen automatically);
+  when the current one was chosen automatically); ``initial=True`` (page
+  loaded) does nothing when it was already done for this postal code, or when
+  the user removed the store (preferences ``p4.coursesu``);
 - ``read_back_coursesu()``: saves the store the user chose on the site.
 
 Placing and sorting are pure functions (``build_commune_index``, ``locate``,
@@ -26,11 +28,12 @@ import httpx
 
 from backend.browser import browser
 from backend.errors import AppError
-from backend.models import AutoPickResult, Location, Settings, StoreOption, StoreSelection
+from backend.models import AutoPickResult, CoursesUPrefs, Location, Settings, StoreOption, StoreSelection
 from backend.repos import stores_cache
 from backend.scrapers import SCRAPERS
 from backend.scrapers.base import BlockedError, ScraperError
 from backend.scrapers.coursesu import MIN_DIRECTORY_STORES, site_store_selection
+from backend.services import prefs
 from backend.services import settings as settings_service
 
 logger = logging.getLogger("prixmalin.stores")
@@ -47,8 +50,13 @@ FAR_KM = 40
 # Postal codes geocoded one by one when the town table cannot be downloaded
 MAX_POSTAL_LOOKUPS = 40
 
+# Preferences of the automatic choice (CoursesUPrefs)
+PREFS_SECTION = "p4.coursesu"
+
 COMMUNES_KEY = "geo:communes"
 DIRECTORY_KEY = "coursesu:directory"
+# Last directory read, whatever its size (names and addresses of the store read back from the site)
+DIRECTORY_LAST_KEY = "coursesu:directory:last"
 POSTAL_KEY = "geo:cp:{}"
 
 NO_LOCATION = "Indiquez d'abord votre code postal."
@@ -242,8 +250,11 @@ async def coursesu_directory(department_name: str | None = None, refresh: bool =
                 return [StoreOption(**s) for s in json.loads(cached[0])]
         result = await fetch_coursesu_directory(department_name)
         stores = [s if isinstance(s, StoreOption) else StoreOption(**s) for s in result.get("stores", [])]
+        dump = json.dumps([s.model_dump() for s in stores])
         if len(stores) >= MIN_DIRECTORY_STORES and result.get("method") != "département":
-            await stores_cache.put(DIRECTORY_KEY, json.dumps([s.model_dump() for s in stores]))
+            await stores_cache.put(DIRECTORY_KEY, dump)
+        if stores:
+            await stores_cache.put(DIRECTORY_LAST_KEY, dump)
         return stores
 
 
@@ -263,8 +274,8 @@ async def nearest_coursesu_stores(
 
 
 async def cached_coursesu_directory() -> list[StoreOption]:
-    """The stores of the last directory read (however old), without reading the site."""
-    cached = await stores_cache.get(DIRECTORY_KEY)
+    """The stores of the last directory read (however old or small), without reading the site."""
+    cached = await stores_cache.get(DIRECTORY_KEY) or await stores_cache.get(DIRECTORY_LAST_KEY)
     return [StoreOption(**s) for s in json.loads(cached[0])] if cached else []
 
 
@@ -275,17 +286,37 @@ def _result(status: str, settings: Settings, message: str | None = None, store=N
     return AutoPickResult(status=status, message=message, store=store, settings=settings)
 
 
-async def auto_pick_coursesu(refresh: bool = False) -> AutoPickResult:
+async def _auto_done_for(postal_code: str | None) -> None:
+    def change(p: CoursesUPrefs) -> None:
+        p.auto_done_for = postal_code
+
+    await prefs.update(PREFS_SECTION, CoursesUPrefs, change)
+
+
+async def forget_coursesu_store() -> None:
+    """The user removed his Courses U store: no automatic choice at startup for this postal code."""
+    current = await settings_service.load_settings()
+    if current.location is not None:
+        await _auto_done_for(current.location.postal_code)
+
+
+async def auto_pick_coursesu(refresh: bool = False, initial: bool = False) -> AutoPickResult:
     """Save the nearest Courses U store unless the user chose one himself.
 
+    ``initial``: asked when a page loads; ``kept`` without reading the site when
+    a store is chosen or when it was already done for this postal code.
     Never raises: the outcome (``status``, French ``message``) is returned.
     """
     current = await settings_service.load_settings()
     chosen = current.stores.get("coursesu")
-    if chosen and not chosen.auto:
+    if chosen and (not chosen.auto or initial):
         return _result("kept", current)
     if current.location is None:
         return _result("no_location", current, NO_LOCATION_AUTO)
+    if initial:
+        done = await prefs.get(PREFS_SECTION, CoursesUPrefs)
+        if done.auto_done_for == current.location.postal_code:
+            return _result("kept", current)
     try:
         stores = await nearest_coursesu_stores(current.location, refresh=refresh, limit=1)
     except BlockedError as e:
@@ -310,22 +341,34 @@ async def auto_pick_coursesu(refresh: bool = False) -> AutoPickResult:
     saved = await settings_service.modify(change)
     if saved.stores.get("coursesu") != selection:
         return _result("kept", saved)
+    await _auto_done_for(current.location.postal_code)
     message = None
     if nearest.distance_km is not None and nearest.distance_km > FAR_KM:
         message = f"Aucun drive Courses U à moins de {FAR_KM} km."
     return _result("chosen", saved, message, nearest)
 
 
-async def read_back_coursesu() -> AutoPickResult:
+async def fetch_site_store() -> dict | None:
+    """What the Courses U pages say about the store chosen there (replaced by the E2E fakes)."""
+    scraper = SCRAPERS["coursesu"]
+    return await browser.run(scraper.key, scraper.read_site_store, timeout=45, priority="interactive")
+
+
+async def read_back_coursesu(opened_only: bool = False) -> AutoPickResult:
     """Save the store the user chose on the Courses U site (after « Ouvrir le site »).
 
+    ``opened_only``: ``none`` at once, without reading the site, unless it was
+    opened with « Ouvrir le site » since the last read-back.
     Never raises: ``none`` when the site shows no store, ``kept`` when it is
     the one already saved.
     """
     current = await settings_service.load_settings()
     scraper = SCRAPERS["coursesu"]
+    if opened_only and getattr(scraper, "site_opened_at", None) is None:
+        return _result("none", current)
+    scraper.site_opened_at = None
     try:
-        info = await browser.run(scraper.key, scraper.read_site_store, timeout=45, priority="interactive")
+        info = await fetch_site_store()
     except BlockedError as e:
         return _result("blocked", current, str(e))
     except TimeoutError:

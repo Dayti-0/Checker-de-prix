@@ -496,6 +496,15 @@ def test_read_back_saves_the_store_chosen_on_the_site(monkeypatch):
     assert run(stores.read_back_coursesu()).status == "kept"
 
 
+def test_read_back_uses_the_last_small_directory(monkeypatch):
+    """A directory too small to be cached for 7 days still names the store read back."""
+    fake_directory(monkeypatch, {"stores": directory_stores(), "method": "liens"})
+    run(stores.coursesu_directory())
+    fake_site_store(monkeypatch, {"link": "https://www.coursesu.com/drive-superu-pezenas"})
+    result = run(stores.read_back_coursesu())
+    assert result.settings.stores["coursesu"].name == "Super U Pézenas"
+
+
 def test_read_back_by_store_id(monkeypatch):
     """No window.storeLink on the page: the id of the storeId cookie is enough."""
     save_directory()
@@ -519,6 +528,47 @@ def test_read_back_without_store_or_with_errors(monkeypatch):
     assert run(stores.read_back_coursesu()).status == "timeout"
     fake_site_store(monkeypatch, RuntimeError("Target closed"))
     assert run(stores.read_back_coursesu()).status == "error"
+
+
+def test_initial_auto_pick_runs_once_per_postal_code(monkeypatch, located):
+    calls = []
+    fake_directory(monkeypatch, {"stores": directory_stores(), "method": "blocs"}, calls)
+    assert run(stores.auto_pick_coursesu(initial=True)).status == "chosen"
+    assert len(calls) == 1
+    # A page loaded again: the automatic store stays, the site is not read again
+    assert run(stores.auto_pick_coursesu(initial=True)).status == "kept"
+    assert len(calls) == 1
+    # The store removed by the user is not chosen again when a page loads...
+    run(stores.forget_coursesu_store())
+    run(settings_service.remove_store("coursesu"))
+    result = run(stores.auto_pick_coursesu(initial=True))
+    assert result.status == "kept" and "coursesu" not in result.settings.stores
+    assert len(calls) == 1
+    # ...but a new postal code (not initial) chooses again
+    assert run(stores.auto_pick_coursesu()).status == "chosen"
+    assert len(calls) == 2
+
+
+def test_initial_auto_pick_retries_after_a_failure(monkeypatch, located):
+    fake_directory(monkeypatch, BlockedError(cu.DIRECTORY_BLOCKED))
+    assert run(stores.auto_pick_coursesu(initial=True)).status == "blocked"
+    fake_directory(monkeypatch, {"stores": directory_stores(), "method": "blocs"})
+    assert run(stores.auto_pick_coursesu(initial=True)).status == "chosen"
+
+
+def test_read_back_only_after_the_site_was_opened(monkeypatch):
+    save_directory()
+    fake_site_store(monkeypatch, {"link": "https://www.coursesu.com/drive-superu-pezenas"})
+    scraper = SCRAPERS["coursesu"]
+    monkeypatch.setattr(scraper, "site_opened_at", None)
+    # Another site was opened: Courses U is not read
+    assert run(stores.read_back_coursesu(opened_only=True)).status == "none"
+    # « Ouvrir le site » on Courses U asks for its page (POST /api/browser/setup)
+    assert scraper.setup_url(None) == cu.BASE_URL + "/"
+    assert scraper.site_opened_at is not None
+    assert run(stores.read_back_coursesu(opened_only=True)).status == "chosen"
+    assert scraper.site_opened_at is None
+    assert run(stores.read_back_coursesu(opened_only=True)).status == "none"
 
 
 # ---------------------------------------------------------------- API
@@ -595,6 +645,15 @@ def test_api_auto_and_from_site(client, located, monkeypatch):
     assert result["settings"]["stores"]["coursesu"]["name"] == "Super U Eysines"
     # The user chose this one: the automatic choice keeps it
     assert client.post("/api/retailers/coursesu/store/auto").json()["status"] == "kept"
+
+
+def test_api_remove_coursesu_store_stops_the_initial_auto_pick(client, located):
+    assert client.post("/api/retailers/coursesu/store/auto?initial=true").json()["status"] == "chosen"
+    assert client.delete("/api/retailers/coursesu/store").status_code == 200
+    result = client.post("/api/retailers/coursesu/store/auto?initial=true").json()
+    assert result["status"] == "kept"
+    assert "coursesu" not in result["settings"]["stores"]
+    assert client.post("/api/retailers/coursesu/store/from-site?opened_only=true").json()["status"] == "none"
 
 
 def test_api_auto_never_fails(client):

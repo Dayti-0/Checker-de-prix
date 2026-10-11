@@ -55,7 +55,9 @@ async def api_intermarche_stores():
         raise HTTPException(400, "Indiquez d'abord votre code postal.")
     scraper = SCRAPERS["intermarche"]
     with guard("Recherche des magasins impossible", timeout_message="Intermarché n'a pas répondu à temps."):
-        return await browser.run(scraper.key, scraper.find_stores, location.lat, location.lon, timeout=45)
+        return await browser.run(
+            scraper.key, scraper.find_stores, location.lat, location.lon, timeout=45, priority="interactive"
+        )
 
 
 @router.get("/retailers/coursesu/stores", response_model=list[StoreOption])
@@ -67,15 +69,21 @@ async def api_coursesu_stores(refresh: bool = False):
 
 
 @router.post("/retailers/coursesu/store/auto", response_model=AutoPickResult)
-async def api_coursesu_auto(refresh: bool = False):
-    """Choose the nearest Courses U store unless the user chose one (always 200)."""
-    return await stores_service.auto_pick_coursesu(refresh=refresh)
+async def api_coursesu_auto(refresh: bool = False, initial: bool = False):
+    """Choose the nearest Courses U store unless the user chose one (always 200).
+
+    ``initial=true`` (page loaded): only once per postal code.
+    """
+    return await stores_service.auto_pick_coursesu(refresh=refresh, initial=initial)
 
 
 @router.post("/retailers/coursesu/store/from-site", response_model=AutoPickResult)
-async def api_coursesu_from_site():
-    """Save the store chosen by the user on the Courses U site (always 200)."""
-    return await stores_service.read_back_coursesu()
+async def api_coursesu_from_site(opened_only: bool = False):
+    """Save the store chosen by the user on the Courses U site (always 200).
+
+    ``opened_only=true``: only when the site was opened with « Ouvrir le site ».
+    """
+    return await stores_service.read_back_coursesu(opened_only=opened_only)
 
 
 @router.put("/retailers/{key}/store", response_model=Settings)
@@ -108,4 +116,6 @@ async def api_set_store(key: str, choice: StoreChoice):
 @router.delete("/retailers/{key}/store", response_model=Settings)
 async def api_remove_store(key: str):
     get_scraper(key)
+    if key == "coursesu":
+        await stores_service.forget_coursesu_store()
     return await settings_service.remove_store(key)

@@ -35,20 +35,22 @@ def test_settings_buttons_work(desktop):
     postal.press("Enter")
     expect(page.get_by_role("status")).to_have_text("Localisation enregistrée : Montpellier")
 
-    page.get_by_role("button", name="Trouver les magasins proches").click()
-    stores = page.locator(".store-list button")
+    page.get_by_role("button", name="Choisir mon magasin Intermarché").click()
+    card = page.locator("[data-retailer=intermarche]")
+    stores = card.locator(".store-option")
     expect(stores).to_have_count(len(fake.INTERMARCHE_STORES))
     assert "GET /api/retailers/intermarche/stores" in seen
     stores.filter(has_text="Intermarché Hyper Lattes").click()
-    card = page.locator("[data-retailer=intermarche]")
     expect(card).to_contain_text("✓ Intermarché Hyper Lattes")
     assert "PUT /api/retailers/intermarche/store" in seen
 
-    card.get_by_role("button", name="Retirer").click()
+    page.get_by_role("button", name="Autres actions pour Intermarché").click()
+    page.get_by_role("button", name="Retirer le magasin Intermarché").click()
     expect(card).to_contain_text("Magasin à choisir")
     assert "DELETE /api/retailers/intermarche/store" in seen
 
-    page.locator("[data-retailer=coursesu]").get_by_role("button", name="Ouvrir le site").click()
+    page.get_by_role("button", name="Autres actions pour Courses U").click()
+    page.get_by_role("button", name="Ouvrir le site Courses U").click()
     expect(page.get_by_role("button", name="J'ai terminé")).to_be_visible()
     assert "POST /api/browser/setup" in seen
     assert page.evaluate(EVERY_BUTTON_IS_TYPED)
