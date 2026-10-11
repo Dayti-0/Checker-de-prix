@@ -431,8 +431,9 @@ function renderResults() {
     // In « Tout trié », the retailers held back (the user reads further down) wait
     const visible = (m) => search.view === "stores" || !search.held.has(m.key);
     const placed = models.map((m) => ({ m, place: visible(m) ? placeOf(m) : "held" }));
+    const found = nothingFound(models, loading);
     // The retailers without the product are not listed again under « Aucun produit »
-    const empties = nothingFound(models, loading).nothing ? [] : placed.filter((x) => x.place === "empty");
+    const empties = found.nothing ? [] : placed.filter((x) => x.place === "empty");
     const bar = [
         ...placed.filter((x) => x.place === "error").map((x) => ({ ...x.m, kind: "error" })),
         ...empties.map((x) => ({ ...x.m, kind: "empty" })),
@@ -441,6 +442,8 @@ function renderResults() {
     const shownRelevant = models.filter(visible).flatMap((m) => (m.state === "ok" ? m.allRelevant : []));
 
     patch($("#summary"), summaryMarkup(summary, { ...view, unavailable }));
+    // « Aucun produit » anywhere: the block says it, the summary would only repeat it
+    $("#summary").hidden = found.nothing && !found.filteredOut;
     // The filters stay in place while the retailers answer; gone when nothing was found
     const withFilters = loading || shownRelevant.length > 0 || search.filters.length > 0;
     patch(

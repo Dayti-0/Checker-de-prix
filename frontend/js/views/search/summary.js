@@ -50,6 +50,13 @@ export function seconds(ms) {
     return `~${Math.max(1, Math.round(ms / 1000))} s`;
 }
 
+// Under the best offer when there is no saving to tell
+function aloneText(summary) {
+    if (summary.lines.filter((l) => l.value != null).length >= 2) return "Même prix dans les enseignes comparées.";
+    if (summary.done < summary.total) return "Le seul prix trouvé pour l'instant.";
+    return summary.criterion === "unit" ? `Le seul prix au ${summary.unit} trouvé.` : "Le seul prix trouvé.";
+}
+
 function bestCard(summary, view) {
     const { best, headline, savings, unit, criterion } = summary;
     if (!best) {
@@ -70,7 +77,7 @@ function bestCard(summary, view) {
             second && html`<span class="best-unit">${second}</span>`
         }</div>
         <p class="what">${what}</p>
-        ${saved ? html`<p class="savings">Jusqu'à ${saved} de moins que l'offre la plus chère.</p>` : html`<p class="savings muted">Le seul prix trouvé pour l'instant.</p>`}
+        ${saved ? html`<p class="savings">Jusqu'à ${saved} de moins que l'offre la plus chère.</p>` : html`<p class="savings muted">${aloneText(summary)}</p>`}
     </div>`;
 }
 
@@ -99,7 +106,7 @@ function lineBody(line, view) {
     return html`<span class="line-price">${value}</span>
         <span class="line-gap${g ? "" : " best"}">${g || "le moins cher"}</span>
         <span class="line-bar" aria-hidden="true"><span class="bar" data-bar="${line.bar}"></span></span>
-        <span class="line-name">${p.name}${fresh && html` <span class="line-fresh">· ${fresh}</span>`}</span>`;
+        <span class="line-name">${p.name}${fresh && html` <span class="line-fresh${result.stale ? " stale" : ""}">· ${fresh}</span>`}</span>`;
 }
 
 // Markup of #summary. view: { results, keys, label(key), usual(key), now, filtered,

@@ -144,6 +144,7 @@ def test_mixed_units_are_never_compared(desktop):
     other = "carrefour" if unit == "kg" else "lidl"
     expect(page.locator(f"[data-summary={other}]")).to_contain_text(f"Pas de prix au {unit}")
     expect(page.get_by_test_id("summary")).not_to_contain_text("de moins que l'offre la plus chère")
+    expect(page.get_by_test_id("best-offer")).to_contain_text(f"Le seul prix au {unit} trouvé.")
 
 
 def test_same_barcode_is_one_line(desktop):
@@ -255,7 +256,8 @@ def test_no_result_is_one_block_with_shorter_searches(desktop):
     # The retailers without the product are not listed a second time in the bar
     expect(page.get_by_test_id("unavailable")).to_contain_text("2 enseignes indisponibles :")
     expect(page.get_by_test_id("unavailable")).not_to_contain_text("sans produit")
-    expect(page.locator("[data-summary=aldi]")).to_contain_text("Aucun produit")
+    # The summary would only repeat it: hidden, the block comes first
+    expect(page.get_by_test_id("summary")).to_be_hidden()
     assert_accessible(page, "aucun produit")
     block.get_by_role("button", name="Ajouter « chocolat noir 100 g » à ma liste quand même").click()
     expect(page.get_by_role("status")).to_contain_text("« chocolat noir 100 g » ajouté à votre liste")
@@ -263,6 +265,10 @@ def test_no_result_is_one_block_with_shorter_searches(desktop):
     block.get_by_role("button", name="Rechercher « chocolat »").click()
     expect(page).to_have_url(re.compile(r"#/recherche\?q=chocolat$"))
     expect(page.get_by_test_id("no-results").get_by_role("heading")).to_have_text("Aucun produit pour « chocolat »")
+    # A search with products shows the summary again
+    search(page, "vinaigre")
+    expect(page.get_by_test_id("summary")).to_be_visible()
+    expect(page.get_by_test_id("no-results")).to_have_count(0)
 
 
 def test_product_rows(desktop):
