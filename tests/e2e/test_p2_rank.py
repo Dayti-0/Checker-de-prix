@@ -143,29 +143,6 @@ def test_summary_gaps_bars_and_savings(page):
     assert js_eval(page, RANK, "gapText", None) == ""
 
 
-def test_result_filters(page):
-    products = [
-        product("aldi", "Vinaigre de cidre bio", 1.19, bio=True, old_price=1.49, store_brand=True),
-        product("carrefour", "Vinaigre balsamique", 1.65, available=False, store_brand=True),
-        product("lidl", "Vinaigre de vin rouge", 2.09, store_brand=False, promo="-20 %"),
-        product("intermarche", "Vinaigre de vin rouge", 2.05, store_brand=None),
-    ]
-    names = lambda active: [p["store"] for p in js_eval(page, RANK, "applyFilters", products, active)]  # noqa: E731
-    assert names(["bio"]) == ["aldi"]
-    assert names(["promo"]) == ["aldi", "lidl"]
-    assert names(["available"]) == ["aldi", "lidl", "intermarche"]
-    assert names(["store_brand"]) == ["aldi", "carrefour"]
-    assert names(["store_brand", "national"]) == ["aldi", "carrefour", "lidl"]  # either brand
-    assert names(["bio", "promo"]) == ["aldi"]
-    assert js_eval(page, RANK, "filterCounts", products) == {
-        "bio": 1,
-        "promo": 2,
-        "available": 3,
-        "store_brand": 2,
-        "national": 1,
-    }
-
-
 def test_group_by_barcode(page):
     ean = "3036810201006"
     ranked = [

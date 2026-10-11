@@ -138,9 +138,7 @@ def test_dark_theme(dark):
     close = page.locator(".column[data-store=carrefour]")
     expect(close).to_contain_text("Indisponible")
     choose_view(page, "Tout trié")
-    page.get_by_role("button", name=re.compile("^Bio")).click()
-    assert_accessible(page, "tout trié filtré, sombre")
-    page.get_by_role("button", name="Retirer les filtres").click()
+    assert_accessible(page, "tout trié, sombre")
     page.get_by_role("button", name=re.compile("^Ajouter Vinaigre de cidre bio")).click()
     expect(page.get_by_role("dialog")).to_be_visible()
     assert_accessible(page, "feuille d'ajout, sombre")
@@ -193,7 +191,7 @@ def test_same_barcode_is_one_line(desktop):
     )
 
 
-def test_result_filters_and_sorts(desktop):
+def test_sorts_without_result_filters(desktop):
     page = desktop
     page.goto(page.base)
     search(page, "vinaigre")
@@ -204,25 +202,12 @@ def test_result_filters_and_sorts(desktop):
     # Unavailable always last, whatever its price
     expect(rows.last).to_contain_text("Indisponible")
     expect(rows.last).to_contain_text("Vinaigre balsamique")
-
-    filters = page.get_by_test_id("result-filters")
-    bio = filters.get_by_role("button", name=re.compile("^Bio"))
-    expect(bio).to_have_attribute("aria-pressed", "false")
-    expect(bio.locator(".chip-count")).to_have_text("1")
-    bio.click()
-    expect(filters.get_by_role("button", name=re.compile("^Bio"))).to_have_attribute("aria-pressed", "true")
-    expect(rows).to_have_count(1)
-    expect(rows).to_contain_text("Vinaigre de cidre bio")
-    expect(page.get_by_test_id("best-offer")).to_contain_text("1,19 €")  # the summary follows the filters
-    expect(page.locator("#live-region")).to_have_text("1 produit affiché")
-    filters.get_by_role("button", name="Retirer les filtres").click()
-    expect(rows).to_have_count(3)
-
-    filters.get_by_role("button", name=re.compile("^En promo")).click()
-    expect(rows).to_have_count(1)
-    expect(rows).to_contain_text("Au lieu de 1,49 €")
-    expect(rows.locator(".old-price")).to_have_text("au lieu de 1,49 €")
-    filters.get_by_role("button", name="Retirer les filtres").click()
+    # The old price of a promotion
+    expect(rows.filter(has_text="Vinaigre de cidre bio").locator(".old-price")).to_have_text("au lieu de 1,49 €")
+    # No filters Bio, En promo, Disponible, marques (removed at the user's request)
+    expect(page.get_by_role("group", name="Filtrer les résultats")).to_have_count(0)
+    for name in ("Bio", "En promo", "Disponible", "Marque distributeur", "Marque nationale"):
+        expect(page.get_by_role("button", name=re.compile(f"^{name}"))).to_have_count(0)
 
     # Sorts: radio group, arrows of the keyboard, remembered on the device
     price = page.get_by_role("radio", name="Prix", exact=True)
@@ -236,25 +221,6 @@ def test_result_filters_and_sorts(desktop):
     page.reload()
     expect(page.get_by_role("radio", name="Promos")).to_be_checked()
     expect(page.get_by_role("radio", name="Tout trié")).to_be_checked()
-
-
-def test_bio_and_promo_on_the_flour(desktop):
-    """B31 on the catalog « farine »: Bio keeps the organic flour only, En promo the promotions only."""
-    page = desktop
-    page.goto(page.base)
-    search(page, "farine")
-    choose_view(page, "Tout trié")
-    filters = page.get_by_test_id("result-filters")
-    rows = main_rows(page)
-    filters.get_by_role("button", name=re.compile("^Bio")).click()
-    expect(rows).to_have_count(1)
-    expect(rows).to_contain_text("Farine de blé T65 bio")
-    filters.get_by_role("button", name=re.compile("^Bio")).click()
-    filters.get_by_role("button", name=re.compile("^En promo")).click()
-    expect(rows).to_have_count(2)  # Carrefour: « 2ème à -50% » and the organic flour (Courses U is blocked)
-    for i in range(2):
-        expect(rows.nth(i).locator(".tag.promo")).to_have_count(1)
-    expect(page.get_by_test_id("best-offer")).to_contain_text("0,85 €")
 
 
 def test_retailers_without_results_are_one_compact_bar(desktop):

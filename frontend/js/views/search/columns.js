@@ -45,8 +45,7 @@ function notice(col, view) {
             <div class="actions">${failureActions(col.key, col.label, result, view.now)}</div></div>`;
     }
     if (!col.relevant.length) {
-        const text = view.filtered && col.allRelevant.length ? "Aucun produit avec ces filtres." : `Aucun produit « ${view.query} » ici.`;
-        return html`<div class="notice" data-key="notice">${text}</div>`;
+        return html`<div class="notice" data-key="notice">Aucun produit « ${view.query} » ici.</div>`;
     }
     return null;
 }
@@ -79,7 +78,7 @@ function okColumn(col, view) {
     </section>`;
 }
 
-// columns: [{ key, label, retailer, result, state, relevant, allRelevant, close }]
+// columns: [{ key, label, retailer, result, state, relevant, close }]
 // of the retailers shown in the grid (the others are in the bar)
 export function columnsMarkup(columns, view) {
     return html`<div class="columns" data-key="columns" data-patch>${columns.map((col) =>

@@ -3,7 +3,6 @@
 // Layout, from top to bottom:
 //   #summary         the best offer and one line per retailer (summary.js, B26)
 //   toolbar          « Tout trié | Par enseigne », sort, « Actualiser » (B25, B30)
-//   #result-filters  Bio, En promo, Disponible, marques (filters.js, B31)
 //   #unavailable     retailers without results, with their actions (parts.js, B27)
 //   #results-body    « Tout trié » (offers.js) or the columns (columns.js),
 //                    or « Aucun produit » (parts.js, B34)
@@ -26,16 +25,13 @@ import { announce, notify } from "../../core/ui.js";
 import { addToMyList, isListed, openAddSheet, removeFromMyList } from "./add-sheet.js";
 import { initAutocomplete } from "./autocomplete.js";
 import { columnsMarkup } from "./columns.js";
-import { resultFiltersMarkup } from "./filters.js";
 import { group } from "./group.js";
 import { readChoice, recordDuration, rememberSearch, saveChoice, usualDuration } from "./memory.js";
 import { offersMarkup } from "./offers.js";
 import { noResults, unavailableBar } from "./parts.js";
 import { patch } from "./patch.js";
 import {
-    applyFilters,
     closeOf,
-    filterCounts,
     gap,
     gapText,
     productKey,
@@ -61,7 +57,6 @@ const search = state.search;
 Object.assign(search, {
     view: readChoice(VIEW_KEY, VIEWS, window.matchMedia(WIDE).matches ? "stores" : "all"),
     sort: readChoice(SORT_KEY, SORTS, "price"),
-    filters: [],
     expanded: {},
     closeOpen: {},
     groupsOpen: {},
@@ -99,7 +94,6 @@ const TEMPLATE = html`
                 <label><input type="radio" name="results-sort" value="relevance"><span>Pertinence</span></label>
             </fieldset>
         </div>
-        <div id="result-filters" class="result-filters"></div>
         <div id="unavailable"></div>
         <div id="results-body" class="results-body"></div>
     </div>`;
@@ -308,16 +302,14 @@ on("list:changed", () => renderResults());
 function retailerModel(key, keys, unit) {
     const r = retailer(key);
     const result = search.results[key] || { status: "loading" };
-    const allRelevant = rank(relevantOf(result), { sort: search.sort, unit, order: keys });
     return {
         key,
         label: r.label,
         retailer: r,
         result,
         state: retailerState(result),
-        allRelevant,
-        relevant: applyFilters(allRelevant, search.filters),
-        close: rankClose(applyFilters(closeOf(result), search.filters), keys),
+        relevant: rank(relevantOf(result), { sort: search.sort, unit, order: keys }),
+        close: rankClose(closeOf(result), keys),
     };
 }
 
@@ -328,10 +320,10 @@ function placeOf(m) {
     if (search.view === "stores") {
         if (m.state === "loading" || m.state === "ok") return "grid";
         if (m.state === "error") return m.result.status === "store_required" && hasProducts ? "grid" : "error";
-        return m.close.length || m.allRelevant.length ? "grid" : "empty";
+        return m.close.length || m.relevant.length ? "grid" : "empty";
     }
     if (m.state === "error") return "error";
-    if (m.state === "none" && !m.allRelevant.length && !m.close.length) return "empty";
+    if (m.state === "none" && !m.relevant.length && !m.close.length) return "empty";
     return "offers";
 }
 
@@ -363,21 +355,17 @@ const SKELETON_ROWS = html`<div class="offers-loading" data-key="loading" aria-h
 )}</div>`;
 
 // « Aucun produit » for the whole search (one block, B34): every retailer
-// answered and none has the product (or none is left by the filters)
+// answered and none has the product
 function nothingFound(models, loading) {
-    const anyRelevant = models.some((m) => m.state === "ok" && m.allRelevant.length);
-    const filteredOut = anyRelevant && !models.some((m) => m.state === "ok" && m.relevant.length);
-    return {
-        nothing: !loading && (!anyRelevant || filteredOut) && models.some((m) => m.state !== "error"),
-        filteredOut,
-    };
+    const anyRelevant = models.some((m) => m.state === "ok" && m.relevant.length);
+    return !loading && !anyRelevant && models.some((m) => m.state !== "error");
 }
 
 function bodyMarkup(models, placed, keys, unit, view, loading) {
-    const { nothing, filteredOut } = nothingFound(models, loading);
+    const nothing = nothingFound(models, loading);
     if (search.view === "stores") {
         const grid = placed.filter((x) => x.place === "grid").map((x) => x.m);
-        return html`${nothing && noResults(search.query, { filtered: filteredOut })}${grid.length > 0 && columnsMarkup(grid, view)}`;
+        return html`${nothing && noResults(search.query)}${grid.length > 0 && columnsMarkup(grid, view)}`;
     }
     const inList = placed.filter((x) => x.place === "offers").map((x) => x.m);
     const offers = rank(
@@ -393,7 +381,7 @@ function bodyMarkup(models, placed, keys, unit, view, loading) {
         .reduce((n, m) => n + m.relevant.length, 0);
     if (nothing) {
         const rest = close.length > 0 && offersMarkup({ groups: [], count: 0, stores: 0, close, pending: 0 }, view);
-        return html`${noResults(search.query, { filtered: filteredOut })}${rest}`;
+        return html`${noResults(search.query)}${rest}`;
     }
     if (!offers.length && loading) return SKELETON_ROWS;
     if (!offers.length && !close.length && !pending) return html``;
@@ -405,7 +393,7 @@ function renderResults() {
     if (!root || !search.query) return;
     const now = Date.now();
     const keys = enabledKeys();
-    const summary = summarize(search.results, keys, { sort: search.sort, filters: search.filters });
+    const summary = summarize(search.results, keys, { sort: search.sort });
     const { unit, criterion } = summary;
     const models = keys.map((k) => retailerModel(k, keys, unit));
     const loading = models.some((m) => m.state === "loading");
@@ -420,7 +408,6 @@ function renderResults() {
         now,
         results: search.results,
         keys,
-        filtered: search.filters.length > 0,
         expanded: search.expanded,
         closeOpen: search.closeOpen,
         groupsOpen: search.groupsOpen,
@@ -440,27 +427,18 @@ function renderResults() {
     // In « Tout trié », the retailers held back (the user reads further down) wait
     const visible = (m) => search.view === "stores" || !search.held.has(m.key);
     const placed = models.map((m) => ({ m, place: visible(m) ? placeOf(m) : "held" }));
-    const found = nothingFound(models, loading);
+    const nothing = nothingFound(models, loading);
     // The retailers without the product are not listed again under « Aucun produit »
-    const empties = found.nothing ? [] : placed.filter((x) => x.place === "empty");
+    const empties = nothing ? [] : placed.filter((x) => x.place === "empty");
     const bar = [
         ...placed.filter((x) => x.place === "error").map((x) => ({ ...x.m, kind: "error" })),
         ...empties.map((x) => ({ ...x.m, kind: "empty" })),
     ];
     const unavailable = models.filter((m) => m.state === "error").length;
-    const shownRelevant = models.filter(visible).flatMap((m) => (m.state === "ok" ? m.allRelevant : []));
 
     patch($("#summary"), summaryMarkup(summary, { ...view, unavailable }));
     // « Aucun produit » anywhere: the block says it, the summary would only repeat it
-    $("#summary").hidden = found.nothing && !found.filteredOut;
-    // The filters stay in place while the retailers answer; gone when nothing was found
-    const withFilters = loading || shownRelevant.length > 0 || search.filters.length > 0;
-    patch(
-        $("#result-filters"),
-        withFilters
-            ? resultFiltersMarkup(filterCounts(shownRelevant), shownRelevant.length, search.filters)
-            : html``,
-    );
+    $("#summary").hidden = nothing;
     patch($("#unavailable"), unavailableBar(bar, now));
     patch($("#results-body"), bodyMarkup(models, placed, keys, unit, view, loading));
     applyBars(root);
@@ -477,15 +455,6 @@ function showHeld() {
     renderResults();
     $("#results-body")?.scrollIntoView({ block: "start" });
     announce("Nouvelles offres affichées");
-}
-
-// « 3 produits affichés » after a change of the filters
-function filtersText() {
-    const count = enabledKeys()
-        .map((k) => search.results[k])
-        .filter((r) => r && r.status === "ok")
-        .reduce((n, r) => n + applyFilters(relevantOf(r), search.filters).length, 0);
-    return plural(count, "produit affiché", "produits affichés");
 }
 
 function onClick(e) {
@@ -518,16 +487,6 @@ function onClick(e) {
         skipStore(key);
     } else if (action === "show-pending") {
         showHeld();
-    } else if (action === "filter") {
-        if (target.getAttribute("aria-disabled") === "true") return;
-        const id = target.dataset.filter;
-        search.filters = search.filters.includes(id) ? search.filters.filter((f) => f !== id) : [...search.filters, id];
-        renderResults();
-        announce(filtersText());
-    } else if (action === "clear-filters") {
-        search.filters = [];
-        renderResults();
-        announce(filtersText());
     } else if (action === "query") {
         emit("search:requested", { query: target.dataset.query });
     } else if (action === "add-query") {
