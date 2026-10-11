@@ -239,3 +239,18 @@ def test_prices_of_a_while_ago_and_old_prices(desktop, monkeypatch):
     expect(notice.get_by_role("button", name="Ouvrir le site Aldi")).to_be_visible()
     expect(aldi.locator(".product")).to_have_count(2)
     expect(page.locator("[data-summary=aldi]")).to_contain_text("ancien prix")
+
+
+def test_a_new_search_is_read_from_its_top(mobile, delays):
+    """The previous search was read further down: the offers of the new one are all shown, none held back."""
+    page = mobile
+    delays.update(STAGGERED)
+    page.goto(page.base)
+    search(page, "huile de tournesols")
+    page.mouse.wheel(0, 900)
+    page.wait_for_function("() => window.scrollY > 300")
+    request_search(page, "vinaigre")
+    wait_done(page)
+    assert page.evaluate("() => window.scrollY") < 80
+    expect(page.get_by_test_id("new-offers")).to_have_count(0)
+    expect(page.locator("[data-testid=offers] .offer-list .product")).to_have_count(3)

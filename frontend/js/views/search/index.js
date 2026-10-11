@@ -149,6 +149,9 @@ function runSearch(query, refresh = false) {
     emit("search:started", { query });
     announce(`Recherche de « ${query} » dans ${plural(keys.length, "enseigne")}…`);
     renderResults();
+    // A new search is read from its top (the previous one was perhaps read
+    // further down: the new offers would otherwise wait, held back)
+    if (root && window.scrollY > 0) window.scrollTo(0, 0);
     for (const key of keys) searchStore(key, token, refresh);
 }
 

@@ -97,7 +97,11 @@ export function productRow(p, options = {}) {
     const isCheapest = cheapest === key;
     const isBestUnit = !isCheapest && bestUnit === key;
     const available = isAvailable(p);
-    const meta = [brandText(p.brand), p.quantity_label].filter(Boolean).join(" · ");
+    // Brand · quantity (the quantity never alone at the start of a line)
+    const brand = brandText(p.brand);
+    const meta = p.quantity_label
+        ? html`${brand}<span class="nowrap">${brand ? " · " : ""}${p.quantity_label}</span>`
+        : brand;
     const label = productLabel(p);
     const classes = ["product", isCheapest || isBestUnit ? "best" : "", available ? "" : "unavailable"]
         .filter(Boolean)
@@ -107,8 +111,9 @@ export function productRow(p, options = {}) {
         : html`<button class="add-btn" type="button" data-action="add" data-product="${key}" data-focus="add:${key}" aria-label="Ajouter ${label} à ma liste" title="Ajouter à ma liste"${available ? "" : " disabled"}>${icon("plus")}</button>`;
     return html`<li class="${classes}" data-key="${key}" data-patch>
             ${thumb(p)}
-            <div class="info" data-key="info">${showStore && html`<span class="row-store">${retailerBadge(p.store)}</span>`}${nameOf(p)}${
-                meta && html`<div class="meta">${meta}</div>`
+            <div class="info" data-key="info">${nameOf(p)}${
+                (meta || showStore) &&
+                html`<div class="meta">${showStore && html`<span class="row-store">${retailerBadge(p.store)}</span>`}${meta}</div>`
             }<div class="tags">${tags(p, isCheapest, isBestUnit)}</div></div>
             <div class="pricing" data-key="pricing">${priceOf(p, sort)}${gap && html`<span class="gap">${gap}</span>`}</div>
             <div class="row-actions" data-key="actions">${addButton}${renderActions(p)}</div>

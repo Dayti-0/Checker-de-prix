@@ -26,7 +26,8 @@ export function closeBlock(id, products, open, rowOptions) {
     </div>`;
 }
 
-// Buttons of a retailer without results: « Choisir », « Ouvrir le site », « Réessayer »
+// Buttons of a retailer without results: « Choisir » (magasin à choisir), or
+// « Ouvrir le site » (vérification requise) and « Réessayer »
 export function failureActions(key, label, result, now = Date.now()) {
     const actions = [];
     const status = result.stale ? result.problem : result.status;
@@ -41,7 +42,8 @@ export function failureActions(key, label, result, now = Date.now()) {
             html`<button class="btn-primary small" type="button" data-setup="${key}" data-focus="setup:${key}" aria-label="Ouvrir le site ${label}">Ouvrir le site</button>`,
         );
     }
-    if (!hardBlock && !result.stale) {
+    // « Magasin à choisir »: « Choisir » only (searching again changes nothing before)
+    if (!hardBlock && !result.stale && status !== "store_required") {
         actions.push(
             html`<button class="btn-ghost small" type="button" data-action="retry" data-store-key="${key}" data-focus="retry:${key}" aria-label="Réessayer ${label}">Réessayer</button>`,
         );

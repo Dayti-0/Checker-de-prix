@@ -144,3 +144,19 @@ def test_mobile_dark_theme_is_accessible(chromium, server, request):
             next(gen)
         except StopIteration:
             pass
+
+
+def test_five_best_offers_in_the_first_two_screens(mobile):
+    """B25: on a phone of 390 px, the 5 best offers are in the first two screens (two retailers unavailable)."""
+    page = mobile
+    page.goto(page.base)
+    search(page, "huile de tournesols")
+    expect(page.get_by_role("radio", name="Tout trié")).to_be_checked()
+    rows = page.locator("[data-testid=offers] .offer-list > li")
+    expect(rows).to_have_count(6)
+    bottom = rows.nth(4).evaluate("el => el.getBoundingClientRect().bottom + window.scrollY")
+    assert bottom <= 2 * page.viewport_size["height"], bottom
+    # « Magasin à choisir »: « Choisir » only, « Vérification requise »: « Ouvrir le site » and « Réessayer »
+    bar = page.get_by_test_id("unavailable")
+    expect(bar.locator("[data-store=intermarche]").get_by_role("button")).to_have_text(["Choisir"])
+    expect(bar.locator("[data-store=coursesu]").get_by_role("button")).to_have_text(["Ouvrir le site", "Réessayer"])

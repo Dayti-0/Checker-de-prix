@@ -47,8 +47,8 @@
 .product.unavailable .thumb { opacity: .55; }
 
 .info { grid-area: info; min-width: 0; }
-.row-store { display: block; margin-bottom: var(--space-1); }
-.row-store .badge { font-size: var(--text-80); padding: .05rem .5rem; }
+.row-store { display: inline-block; margin-right: var(--space-2); vertical-align: .05em; }
+.row-store .badge { font-size: var(--text-80); padding: .05rem .5rem; line-height: 1.3; }
 .name {
     display: -webkit-box;
     -webkit-line-clamp: 2;
@@ -65,6 +65,7 @@ a.name:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radi
 .name .nowrap { white-space: nowrap; }
 .name .icon { width: .8em; height: .8em; margin-left: .25em; color: var(--muted); vertical-align: -.05em; }
 .meta { font-size: var(--text-85); color: var(--muted); margin-top: .1rem; overflow-wrap: anywhere; }
+.meta .nowrap { white-space: nowrap; }
 .tags { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: var(--space-1); }
 .tags:empty { display: none; }
 .tag {
@@ -132,7 +133,7 @@ a.name:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radi
     flex-wrap: wrap;
     align-items: baseline;
     justify-content: space-between;
-    gap: var(--space-1) var(--space-4);
+    gap: 0 var(--space-4);
     padding: var(--space-4) var(--space-5);
     border-bottom: 1px solid var(--border);
 }
@@ -262,9 +263,10 @@ a.name:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radi
     .column-mini, .mini-actions button, .notice .actions button { min-height: 2.75rem; }
 }
 @media (max-width: 759px) {
-    .retailers-bar { flex-direction: column; align-items: stretch; gap: var(--space-3); padding: var(--space-3) var(--space-4); }
-    .column-mini { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; }
-    .mini-actions { grid-column: 1 / -1; }
+    .retailers-bar { flex-direction: column; align-items: stretch; gap: var(--space-2); padding: var(--space-3) var(--space-4); }
+    /* Badge, reason and buttons on one line when they fit, else the buttons under them */
+    .column-mini { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
+    .mini-actions { margin-left: auto; }
 }
 
 /* --- « Produits proches » (folded) --- */
@@ -320,7 +322,8 @@ a.name:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radi
 @keyframes shimmer { to { background-position: -200% 0; } }
 
 @media (max-width: 520px) {
-    .product { padding: var(--space-4); column-gap: var(--space-3); }
+    .product { padding: var(--space-3) var(--space-4); column-gap: var(--space-3); }
+    .offers-head { padding: var(--space-3) var(--space-4); }
     .same-product { padding-left: var(--space-4); }
     .price { font-size: var(--text-120); }
 }
