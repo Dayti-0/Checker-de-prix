@@ -121,10 +121,17 @@ export const FAR_KM = 40;
 // status: "idle" | "loading" | "done"; result: answer of /store/auto
 export const autoPick = { status: "idle", result: null };
 
+// A location saved while a choice runs (town chosen right after the postal
+// code): the choice is made again once the running one ends
+let queued = false;
+
 // Chooses the nearest Courses U store unless the user chose one himself.
 // initial: when a page loads (only once per postal code, see the backend)
 export async function autoPickCoursesU({ refresh = false, initial = false } = {}) {
-    if (autoPick.status === "loading") return autoPick.result;
+    if (autoPick.status === "loading") {
+        if (!initial) queued = true;
+        return autoPick.result;
+    }
     autoPick.status = "loading";
     emit("coursesu:auto");
     const query = [refresh && "refresh=true", initial && "initial=true"].filter(Boolean).join("&");
@@ -144,6 +151,10 @@ export async function autoPickCoursesU({ refresh = false, initial = false } = {}
     } finally {
         autoPick.status = "done";
         emit("coursesu:auto");
+    }
+    if (queued) {
+        queued = false;
+        if (needsAutoPick()) return autoPickCoursesU();
     }
     return autoPick.result;
 }

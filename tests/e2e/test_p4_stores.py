@@ -4,6 +4,7 @@ The Courses U directory, the town table and the store shown by the site are
 the SYNTHETIC fakes of tests/e2e/catalog_p4.py.
 """
 
+import asyncio
 import json
 import re
 
@@ -106,6 +107,34 @@ def test_postal_code_then_nearest_courses_u_store(desktop):
     assert stores["coursesu"]["url"] == "https://www.coursesu.com/drive-superu-roujan"
     assert stores["coursesu"]["auto"] is False
     expected_http_error(page, 422)
+
+
+def test_town_chosen_while_the_nearest_store_is_searched(desktop, monkeypatch):
+    """The town is chosen while the first automatic choice runs: it is made again for that town."""
+    from backend.api import retailers as retailers_api
+    from backend.services import stores as stores_service
+
+    real = stores_service.auto_pick_coursesu
+    calls = []
+
+    async def slow(**kwargs):
+        result = await real(**kwargs)
+        calls.append(result.settings.location.city)
+        if len(calls) == 1:  # the answer of the first choice reaches the page late
+            await asyncio.sleep(1.5)
+        return result
+
+    monkeypatch.setattr(retailers_api.stores_service, "auto_pick_coursesu", slow)
+    page = settings_page(desktop)
+    save_postal(page, "34480")
+    towns = page.get_by_role("radiogroup", name="Votre commune")
+    towns.get_by_role("radio", name="Laurens").click()
+    coursesu = row(page, "coursesu")
+    expect(coursesu).to_contain_text("Choisi automatiquement : Super U Roujan (≈ 10 km)")
+    settings = page.request.get(f"{page.base}/api/settings").json()
+    assert settings["location"]["city"] == "Laurens"
+    assert calls == ["Magalas", "Laurens"]
+    assert settings["stores"]["coursesu"]["distance_km"] == 9.9
 
 
 def test_town_choice_with_the_keyboard(desktop):
