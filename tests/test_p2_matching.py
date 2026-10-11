@@ -236,3 +236,36 @@ def test_prepare_products_keeps_close_products_out_of_the_main_list():
     assert [p.match_reason for p in prepared] == [None, None, "complement", "unrelated"]
     assert all(p.match_score >= RELEVANT_SCORE for p in prepared[:2])
     assert all(p.match_score < RELEVANT_SCORE for p in prepared[2:])
+
+
+# Real names that must stay in the main list (the filter must not hide them)
+@pytest.mark.parametrize(
+    "query, name",
+    [
+        ("poulet", "Escalopes de poulet"),
+        ("poulet", "Filet de poulet"),
+        ("thon", "Steak de thon"),
+        ("boeuf", "Steak haché pur bœuf"),
+        ("café", "Café en grains"),
+        ("café", "Capsules compatibles Nespresso café"),
+        ("beurre", "Plaquette de beurre doux"),
+        ("sucre", "Morceaux de sucre"),
+        ("oeufs", "6 oeufs de poules élevées en plein air"),
+        ("jambon", "Tranches de jambon blanc"),
+        ("saumon", "Pavé de saumon"),
+        ("chocolat", "Tablette de chocolat noir"),
+        ("sel", "Gros sel de mer"),
+        ("jus d'orange", "100% pur jus d'orange"),
+        ("huile de tournesol", "Huile de tournesol LESIEUR la bouteille de 1L"),
+        ("huile de tournesol", "Huile pour friture tournesol"),
+        ("pâte à crêpes", "Pâte à crêpes"),
+        ("lait", "Lait UHT 1/2 écrémé"),
+        ("eau", "Eau minérale naturelle plate"),
+        ("pâtes", "Pâtes Spaghetti n°5"),
+        ("riz", "Riz long grain"),
+        ("tomates", "Tomates grappe"),
+        ("crème fraîche", "Crème fraîche épaisse 30% MG"),
+    ],
+)
+def test_real_names_stay_relevant(query, name):
+    assert Matcher(query).match(name).relevant

@@ -107,7 +107,9 @@ QUALIFIERS = frozenset(
 
 # Foods that are a product on their own (rule 3): « Thon » in « Thon huile de
 # tournesol », « Sauce » in « Sauce tomate ». A short list, to complete when a
-# search shows another product first.
+# search shows another product first. Not the cuts and shapes of a food
+# (escalope, steak, filet, pavé, miettes, tranches...): « Escalopes de poulet »
+# are chicken.
 PRODUCT_NOUNS = """
 abricot agneau ail amande ananas anchois artichaut asperge aubergine avocat
 baguette banane barre beignet betterave beurre biere biscotte biscuit blini
@@ -117,7 +119,7 @@ cassoulet cereale champignon chips chocolat chorizo chou chouquette cidre
 citron clementine colin compote comte concentre concombre confiserie confiture
 cookie cornichon coulis courgette couscous crabe creme crepe crevette
 croissant croque croquette crouton dessert dinde echalote emmental endive
-entremets epinard escalope farine fenouil feta flan fraise framboise frite
+entremets epinard farine fenouil feta flan fraise framboise frite
 fromage fruit galette gateau gaufre gelee glace gnocchi gratin hachis hareng
 haricot huile jambon jus ketchup kiwi lait lardon lasagne legume lentille levure
 limonade madeleine mais mangue maquereau margarine mayonnaise melon merguez
@@ -126,7 +128,7 @@ noisette noix nougat nugget oeuf oignon olive omelette orange pain palet
 pamplemousse parmentier pastis pate peche pesto pizza poire poireau pois poisson
 poivre poivron pomme porc potage poulet praline pruneau puree quiche quinoa
 radis raisin ratatouille ravioli rillette riz salade sandwich sardine sauce
-saucisse saucisson saumon sel semoule sirop soda soupe steak sucre surimi taboule
+saucisse saucisson saumon sel semoule sirop soda soupe sucre surimi taboule
 tarte tartelette terrine the thon tisane tomate tortilla truite vanille veau
 veloute viande vin vinaigre vinaigrette wrap yaourt
 """.split()
