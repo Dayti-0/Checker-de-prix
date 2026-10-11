@@ -116,8 +116,16 @@ def test_switching_the_window_during_a_search_does_not_break_it(screen, tmp_path
 # --- B43: protected start ------------------------------------------------------------
 
 
-def test_a_search_that_gives_up_does_not_stop_the_start(tmp_path):
+def test_a_search_that_gives_up_does_not_stop_the_start(tmp_path, monkeypatch):
     manager = BrowserManager(tmp_path / "profile")
+    original = manager._launch_channel
+
+    async def slow_launch(*args, **kwargs):
+        # A slow PC: the start outlives the search that asked for it, whatever the machine
+        await asyncio.sleep(2)
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(manager, "_launch_channel", slow_launch)
     try:
         with pytest.raises(asyncio.TimeoutError):
             asyncio.run(manager.run("aldi", _url, timeout=0.8))
