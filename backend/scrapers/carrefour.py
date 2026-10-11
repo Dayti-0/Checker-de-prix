@@ -11,7 +11,7 @@ from backend.scrapers.common import (
     wait_for_clearance,
 )
 from backend.scrapers.extract import extract_cards, extract_json_ld, first_url, products_from_json
-from backend.scrapers.parsing import clean_text, parse_price
+from backend.scrapers.parsing import PIECE, clean_text, parse_price
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ JSON_HEADERS = {
     "x-requested-with": "XMLHttpRequest",
 }
 
-_UNITS = {"KG": "kg", "L": "L", "LITRE": "L", "U": "unité", "UNITE": "unité", "PIECE": "unité"}
+_UNITS = {"KG": "kg", "L": "L", "LITRE": "L", "U": PIECE, "UNITE": PIECE, "PIECE": PIECE}
 
 
 def _offer_attributes(offers: object) -> dict | None:

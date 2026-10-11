@@ -233,10 +233,11 @@ def test_search_store_signature():
 
 
 def test_match_score_is_the_relevance():
+    # P2 (B35): match_score goes from 0 to 1 and the product is the one searched
+    # (relevance 1) exactly when it reaches matching.RELEVANT_SCORE
     assert matching.match_score("Farine de blé T45", "farine") == 1.0
-    assert matching.match_score("Huile de tournesol", "huile d'olive") == matching.relevance(
-        "Huile de tournesol", "huile d'olive"
-    )
+    assert matching.relevance("Huile de tournesol", "huile d'olive") == 0.5
+    assert 0 < matching.match_score("Huile de tournesol", "huile d'olive") < matching.RELEVANT_SCORE
 
 
 def test_every_scraper_has_a_source():

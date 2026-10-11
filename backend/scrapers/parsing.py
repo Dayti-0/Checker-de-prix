@@ -141,6 +141,10 @@ _COUNT_NOUNS = {
     "portions": "portion",
     "tranche": "tranche",
     "tranches": "tranche",
+    "pot": "pot",
+    "pots": "pot",
+    "yaourt": "yaourt",
+    "yaourts": "yaourt",
     "pièce": PIECE,
     "pièces": PIECE,
     "piece": PIECE,
@@ -152,6 +156,10 @@ _COUNT_NOUNS = {
 }
 _COUNT_NOUN_RE = "(" + "|".join(sorted(map(re.escape, _COUNT_NOUNS), key=len, reverse=True)) + ")"
 _COUNT_WITH_NOUN = re.compile(rf"(?<![\w.,])(\d+)\s*{_COUNT_NOUN_RE}(?![\wà-ÿ])", re.I)
+# "3 x 4 yaourts", "2 x 6 œufs"
+_COUNT_TIMES_NOUN = re.compile(rf"(?<![\w.,])(\d+)\s*[x×]\s*(\d+)\s*{_COUNT_NOUN_RE}(?![\wà-ÿ])", re.I)
+# "Lot de 6", "pack de 4" without any contents
+_LOT_OF = re.compile(r"\b(?:lot|pack)\s+(?:de\s+)?(\d+)(?![\d.,])", re.I)
 _COUNT_X = re.compile(r"(?<![\w.,])[x×]\s*(\d+)(?![\d.,])|(?<![\w.,])(\d+)\s*[x×](?![\w\d])", re.I)
 _ANY_COUNT_NOUN = re.compile(rf"(?<![\wà-ÿ]){_COUNT_NOUN_RE}(?![\wà-ÿ])", re.I)
 
@@ -198,17 +206,25 @@ def _measured_pack(text: str) -> Pack | None:
     return None
 
 
+def _count_label(text: str) -> str | None:
+    """What is counted in ``text`` ("œuf" in "Oeufs frais x12"), None when it does not say."""
+    noun = _ANY_COUNT_NOUN.search(text)
+    label = _COUNT_NOUNS[noun.group(1).lower()] if noun else None
+    return None if label == PIECE else label
+
+
 def _counted_pack(text: str) -> Pack | None:
+    m = _COUNT_TIMES_NOUN.search(text)
+    if m:
+        return Pack(int(m.group(1)) * int(m.group(2)), 1.0, PIECE, _count_label(m.group(3)))
     m = _COUNT_WITH_NOUN.search(text)
     if m:
-        return Pack(int(m.group(1)), 1.0, PIECE, _COUNT_NOUNS[m.group(2).lower()])
-    m = _COUNT_X.search(text)
+        return Pack(int(m.group(1)), 1.0, PIECE, _count_label(m.group(2)))
+    m = _COUNT_X.search(text) or _LOT_OF.search(text)
     if m:
-        noun = _ANY_COUNT_NOUN.search(text)
-        label = _COUNT_NOUNS[noun.group(1).lower()] if noun else PIECE
-        return Pack(int(m.group(1) or m.group(2)), 1.0, PIECE, label)
+        return Pack(int(next(g for g in m.groups() if g)), 1.0, PIECE, _count_label(text))
     if _PER_PIECE.search(text):
-        return Pack(1, 1.0, PIECE, PIECE)
+        return Pack(1, 1.0, PIECE)
     return None
 
 
@@ -240,7 +256,16 @@ def parse_quantity(text: str | None) -> tuple[float, str] | None:
     return (round(pack.total, 6), pack.unit) if pack else None
 
 
-_QUANTITY_PATTERNS = (_MULTI_BEFORE, _MULTI_AFTER, _CONTAINER, _LITRE_SPLIT, _SINGLE, _COUNT_WITH_NOUN, _COUNT_X)
+_QUANTITY_PATTERNS = (
+    _MULTI_BEFORE,
+    _MULTI_AFTER,
+    _CONTAINER,
+    _LITRE_SPLIT,
+    _SINGLE,
+    _COUNT_TIMES_NOUN,
+    _COUNT_WITH_NOUN,
+    _COUNT_X,
+)
 
 
 def quantity_spans(text: str) -> list[tuple[int, int]]:
@@ -267,10 +292,12 @@ UNIT_PRICE_FRAGMENT = re.compile(
 # Denominator of a price per unit: "/ 500 g", "le kg", "au litre", "100 g", "la pièce"
 _DENOMINATOR = re.compile(
     r"(?<![\w.,])(?:(\d+(?:[.,]\d+)?)\s*)?"
-    r"(kgs?|kilos?|grs?|g|litres?|liter|l|cl|ml|pi[eè]ces?|unit[eé]s?|pce|u)(?![a-zà-ÿ])",
+    rf"(kgs?|kilos?|grs?|g|litres?|liter|l|cl|ml|pi[eè]ces?|unit[eé]s?|pce|u|{_COUNT_NOUN_RE[1:-1]})(?![a-zà-ÿ])",
     re.I,
 )
-_PIECE_WORDS = {"pièce", "pièces", "piece", "pieces", "unité", "unités", "unite", "unites", "pce", "u"}
+_PIECE_WORDS = {"pièce", "pièces", "piece", "pieces", "unité", "unités", "unite", "unites", "pce", "u"} | set(
+    _COUNT_NOUNS
+)
 # A price written as such: with € or with cents
 _PRICE_IN_TEXT = re.compile(
     r"(?<![\d.,])\d{1,5}(?:\s*[.,]\s*\d{1,2})?\s*€|(?<![\d.,])\d{1,5}\s*[.,]\s*\d{1,2}(?![\d.,])|€\s*\d{1,5}(?:[.,]\d{1,2})?"
@@ -326,7 +353,18 @@ def parse_unit_price(label: str | None) -> tuple[float, str] | None:
 # Above this ratio between the price per unit shown by the site and the one
 # computed from the price and the contents, the site's value is not trusted
 UNIT_PRICE_GUARD = 3.0
-_UNIT_NAMES = {"unité": PIECE, "unite": PIECE, "u": PIECE, "piece": PIECE, "pièce": PIECE, "l": "L", "kg": "kg"}
+_UNIT_NAMES = {
+    "unité": PIECE,
+    "unite": PIECE,
+    "u": PIECE,
+    "pce": PIECE,
+    "piece": PIECE,
+    "pièce": PIECE,
+    "l": "L",
+    "litre": "L",
+    "kg": "kg",
+    "kilo": "kg",
+}
 
 
 def finalize_product(product: Product) -> Product:
@@ -341,6 +379,8 @@ def finalize_product(product: Product) -> Product:
         parsed = parse_unit_price(product.unit_price_label)
         if parsed:
             product.unit_price, product.unit = parsed
+    if product.unit == PIECE and product.count_label is None and product.unit_price_label:
+        product.count_label = _count_label(product.unit_price_label)  # "0,25 €/œuf"
     pack = parse_pack(product.quantity_label) or parse_pack(product.name)
     if pack is None:
         return product

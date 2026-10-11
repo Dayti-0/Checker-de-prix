@@ -50,8 +50,14 @@ class Product(BaseModel):
     # the keywords found, at most 0.99); 0 = unrelated
     relevance: float = 1.0
     # How well the product matches the query, from 0 to 1: services/matching.py
-    # (sort by relevance, product chosen in the basket)
+    # (sort by relevance, product chosen in the basket). The product is the one
+    # searched exactly when match_score >= matching.RELEVANT_SCORE (relevance 1)
     match_score: float = 1.0
+    # Why the product is not the one searched (None when it is): "missing"
+    # (words missing), "complement" (« Thon à l'huile de tournesol » for « huile
+    # de tournesol »), "other_product" (« Sauce tomate » for « tomate »),
+    # "compound" (« Eau de javel » for « eau »), "excluded", "unrelated"
+    match_reason: str | None = None
     # Price before a promotion, when the site shows it (struck out)
     old_price: float | None = None
     # Sold by the piece: what one piece is ("œuf", "rouleau"...), for "€/œuf"
@@ -70,7 +76,9 @@ class Product(BaseModel):
     def _cut_name(cls, value: object) -> object:
         return _cut(value, NAME_MAX)
 
-    @field_validator("unit", "unit_price_label", "quantity_label", "ean", "sku", "count_label", mode="before")
+    @field_validator(
+        "unit", "unit_price_label", "quantity_label", "ean", "sku", "count_label", "match_reason", mode="before"
+    )
     @classmethod
     def _cut_label(cls, value: object) -> object:
         return _cut(value, LABEL_MAX)
