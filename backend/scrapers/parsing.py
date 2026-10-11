@@ -109,6 +109,8 @@ _LITRE_SPLIT = re.compile(r"(?<![\d.,])(\d+)\s?l(\d{1,2})(?![\w.,])", re.I)
 # "+ 1 offert", "+ 2 offertes" (more items) and "+ 20 % gratuit" (more contents)
 _FREE_ITEMS = re.compile(r"\+\s*(\d+)\s*(?:offert|gratuit)(?:e|s|es)?\b(?!\s*%)", re.I)
 _FREE_SHARE = re.compile(r"\+\s*(\d+(?:[.,]\d+)?)\s*%", re.I)
+# "+ 50cl offerts", "+ 250 g gratuits" (more contents, in kg or L)
+_FREE_AMOUNT = re.compile(rf"\+\s*{_NUM_RE}\s*{_UNIT_RE}\s*(?:offert|gratuit)(?:e|s|es)?(?![a-zà-ÿ])", re.I)
 # Sold by weight or by piece: "le kg", "au kg", "la pièce"
 _PER_KG = re.compile(r"(?<![a-z])(?:le|au|par|du)\s+(?:kg|kilo)(?![a-z])", re.I)
 _PER_PIECE = re.compile(r"(?<![a-z])(?:la|à la|a la|par)\s+pi[eè]ce(?![a-z])", re.I)
@@ -228,19 +230,34 @@ def _counted_pack(text: str) -> Pack | None:
     return None
 
 
+def _with_bonus(pack: Pack, bonus: Pack) -> Pack:
+    """``pack`` with contents offered: one more item when it is the size of one, else more in each."""
+    if bonus.unit != pack.unit:
+        return pack
+    if pack.count > 1 and abs(bonus.size - pack.size) < 1e-9:
+        return Pack(pack.count + 1, pack.size, pack.unit, pack.count_label)
+    return Pack(pack.count, pack.size + bonus.size / pack.count, pack.unit, pack.count_label)
+
+
 def parse_pack(text: str | None) -> Pack | None:
     """Contents of a product from its label or its name.
 
     '6x1L5' -> 6 x 1,5 L ; 'Lot de 3 bouteilles de 1L' -> 3 x 1 L ; '2 x 1 L + 1 offert'
-    -> 3 x 1 L ; '1L + 20% gratuit' -> 1 x 1,2 L ; 'Oeufs x12' -> 12 pièces (œuf).
+    -> 3 x 1 L ; '1L + 20% gratuit' -> 1 x 1,2 L ; '1L + 50cl offerts' -> 1 x 1,5 L ;
+    'Oeufs x12' -> 12 pièces (œuf).
     """
     text = clean_text(text)
     if not text:
         return None
     text = _LITRE_SPLIT.sub(r"\1,\2 l", text)
+    bonus = _FREE_AMOUNT.search(text)
+    if bonus:
+        text = text[: bonus.start()] + " " + text[bonus.end() :]
     pack = _measured_pack(text) or _counted_pack(text)
     if pack is None or pack.count <= 0 or pack.size <= 0:
         return None
+    if bonus:
+        pack = _with_bonus(pack, _measured(1, bonus.group(1), bonus.group(2)))
     free = _FREE_ITEMS.search(text)
     if free:
         pack = Pack(pack.count + int(free.group(1)), pack.size, pack.unit, pack.count_label)

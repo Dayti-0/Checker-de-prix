@@ -59,6 +59,24 @@ def test_contents(text, expected):
 
 
 @pytest.mark.parametrize(
+    "text, expected",
+    [
+        # Contents offered in kg or L, not only items or a share
+        ("Huile de tournesol 1L + 50cl offerts", (1.5, "L")),
+        ("Coca 1,5L + 50cl gratuit", (2.0, "L")),
+        ("Huile 1L + 50 cl offerte", (1.5, "L")),
+        ("Lessive 2 kg + 250 g offerts", (2.25, "kg")),
+        ("6 x 1L + 1L offert", (7.0, "L")),
+        ("Eau 6x1,5L + 50cl offerts", (9.5, "L")),
+        # Another family of unit: nothing added
+        ("Café 250g + 50cl offerts", (0.25, "kg")),
+    ],
+)
+def test_contents_offered(text, expected):
+    assert parse_quantity(text) == expected
+
+
+@pytest.mark.parametrize(
     "text, label",
     [
         ("Oeufs x12", "œuf"),
