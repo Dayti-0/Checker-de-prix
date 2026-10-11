@@ -70,4 +70,5 @@ def serve_thumbnails(page, seen=None):
 
 
 def no_horizontal_scroll(page):
-    return page.evaluate("() => document.documentElement.scrollWidth <= window.innerWidth")
+    """No content wider than the screen (clientWidth: a phone may zoom out, innerWidth then grows)."""
+    return page.evaluate("() => document.documentElement.scrollWidth <= document.documentElement.clientWidth")
