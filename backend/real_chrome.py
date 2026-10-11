@@ -29,6 +29,7 @@ Everything here runs on the browser thread (backend/browser.py).
 """
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -198,6 +199,14 @@ def on_site(url: str, domain: str) -> bool:
     return host == domain or host.endswith("." + domain)
 
 
+def _mark_seen(task: asyncio.Task) -> None:
+    """Retrieve the error of a start nobody waits for any more (no « never retrieved » warning)."""
+    if not task.cancelled():
+        error = task.exception()
+        if error is not None:
+            logger.debug("Dedicated Chrome start failed: %s", error)
+
+
 def _wait_process(proc: subprocess.Popen, timeout: float = 5) -> None:
     try:
         proc.wait(timeout)
@@ -242,7 +251,8 @@ class RealChrome:
         self._page = None
         self._proc: subprocess.Popen | None = None
         self._reused_name: str | None = None
-        self._lock: asyncio.Lock | None = None
+        # Start (or reuse) of Chrome under way, shared by the calls that need it
+        self._start_task: asyncio.Task | None = None
         self._closing = False
 
     @property
@@ -262,11 +272,10 @@ class RealChrome:
         The page is loaded only when it is not on the site yet, or when
         ``reload`` (the site asked for a check that only a fresh page shows).
         """
-        started = not self.running
         await self._ensure(minimized=False)
         page = await self._pick_page()
-        if not started:
-            await self._restore_window(page)
+        # Also a window started (minimized) for a search that was still starting
+        await self._restore_window(page)
         if reload or not on_site(page.url, self.domain):
             await page.goto(url, wait_until="domcontentloaded", timeout=45000)
         await page.bring_to_front()
@@ -277,6 +286,11 @@ class RealChrome:
         """Close the window (when PrixMalin stops)."""
         self._closing = True
         try:
+            task = self._start_task
+            if task is not None and not task.done():
+                # Let a start under way end (the window and its connection are then closed)
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(asyncio.shield(task), 20)
             if self._browser is not None and self._browser.is_connected():
                 try:
                     session = await self._browser.new_browser_cdp_session()
@@ -309,20 +323,30 @@ class RealChrome:
     # --- start or reuse Chrome ----------------------------------------------
 
     async def _ensure(self, *, minimized: bool) -> None:
+        """Start or reuse Chrome, in a task of its own shared by the calls that need it.
+
+        A search that gives up meanwhile (client gone, time limit) never stops
+        the start halfway: the window started for it is still minimized, and
+        its connection kept for the next search (B43).
+        """
         if self.running:
             return
-        if self._lock is None:
-            self._lock = asyncio.Lock()
-        async with self._lock:
-            if self.running:
-                return
-            try:
-                await self._connect(minimized)
-            except ChromeUnavailable as e:
-                self.error = str(e)
-                raise
-            self.error = None
-            self.closed_by_user = False
+        task = self._start_task
+        if task is None or task.done():
+            task = self._start_task = asyncio.get_running_loop().create_task(self._start_once(minimized))
+            task.add_done_callback(_mark_seen)
+        await asyncio.shield(task)
+
+    async def _start_once(self, minimized: bool) -> None:
+        if self.running:
+            return
+        try:
+            await self._connect(minimized)
+        except ChromeUnavailable as e:
+            self.error = str(e)
+            raise
+        self.error = None
+        self.closed_by_user = False
 
     async def _connect(self, minimized: bool) -> None:
         profile = self.profile_dir

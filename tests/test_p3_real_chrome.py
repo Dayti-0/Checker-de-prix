@@ -626,3 +626,55 @@ def test_window_started_for_a_search_goes_to_the_taskbar(tmp_path, monkeypatch):
             assert "minimized" not in states  # started by « Ouvrir le site »: a normal window
         finally:
             asyncio.run(visible.shutdown())
+
+
+def test_a_search_given_up_while_chrome_starts_still_minimizes_it(tmp_path, monkeypatch):
+    """The start of the window goes on when the search that asked for it is cancelled (B43)."""
+    import threading
+
+    from backend.real_chrome import RealChrome
+    from tests.p3_chrome import chrome_path, display
+
+    path = chrome_path()
+    if path is None:
+        browser_missing("Chromium introuvable pour la fenêtre Intermarché")
+    states = []
+    spawned = threading.Event()
+    original_state, original_wait = RealChrome._set_window_state, RealChrome._wait_endpoint
+
+    async def spy(self, page, state, only_from=None):
+        states.append(state)
+        await original_state(self, page, state, only_from)
+
+    async def wait_endpoint(self, port, proc):
+        endpoint = await original_wait(self, port, proc)
+        spawned.set()  # Chrome is running, PrixMalin is about to connect to it
+        await asyncio.sleep(0.3)
+        return endpoint
+
+    monkeypatch.setattr(RealChrome, "_set_window_state", spy)
+    monkeypatch.setattr(RealChrome, "_wait_endpoint", wait_endpoint)
+    monkeypatch.setattr(config, "CHROME_PATH", path)
+    monkeypatch.setattr(config, "CHROME_EXTRA_ARGS", sandbox_args())
+    monkeypatch.setattr(config, "REAL_CHROME_STORES", ("intermarche",))
+
+    async def scenario(manager):
+        first = asyncio.create_task(manager.run("intermarche", _blank, timeout=60))
+        # Chrome is started on the browser thread: wait for it from here
+        assert await asyncio.to_thread(spawned.wait, 40)
+        first.cancel()  # the client went away while Chrome was starting
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        return await manager.run("intermarche", _blank, timeout=60)
+
+    with display() as available:
+        if not available:
+            browser_missing("pas d'écran pour la fenêtre Intermarché (installez Xvfb)")
+        manager = BrowserManager(tmp_path / "profile", real_chrome_dir=tmp_path)
+        try:
+            assert asyncio.run(scenario(manager)) == "about:blank"
+            real = manager._real["intermarche"]
+            assert states == ["minimized"]  # minimized although its search was given up
+            assert real._proc is not None and real.running  # one Chrome, still connected
+        finally:
+            asyncio.run(manager.shutdown())
