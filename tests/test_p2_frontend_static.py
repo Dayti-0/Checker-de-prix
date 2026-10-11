@@ -49,8 +49,25 @@ def test_french_plurals_without_parentheses(path):
 def test_common_products_for_the_suggestions():
     import json
 
-    foods = json.loads((FRONTEND / "data" / "aliments.json").read_text(encoding="utf-8"))
+    foods = json.loads((FRONTEND / "js" / "views" / "search" / "aliments.json").read_text(encoding="utf-8"))
     assert 280 <= len(foods) <= 320
     assert len({f.lower() for f in foods}) == len(foods)
     assert all(isinstance(f, str) and f.strip() == f and f for f in foods)
     assert {"Œufs", "Pâtes", "Crème fraîche", "Huile de tournesol", "Échalotes"} <= set(foods)
+
+
+def test_files_of_the_search_are_not_ignored_by_git():
+    # The rule « data/ » of .gitignore (database, profile) once hid frontend/data/aliments.json
+    import shutil
+    import subprocess
+
+    git = shutil.which("git")
+    if not git:
+        pytest.skip("git absent")
+    root = FRONTEND.parent
+    files = [str(p.relative_to(root)) for p in (FRONTEND / "js" / "views" / "search").iterdir()]
+    command = [git, "check-ignore", "--no-index", *files]
+    found = subprocess.run(command, cwd=root, capture_output=True, text=True)  # noqa: S603 (fixed command)
+    if found.returncode == 128:
+        pytest.skip("not a git checkout")
+    assert found.stdout.strip() == ""

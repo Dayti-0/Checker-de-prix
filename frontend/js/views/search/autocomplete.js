@@ -1,7 +1,7 @@
 // Suggestions while typing in the search field #q (B33).
 //
 // Sources: the recent searches of this device, the lines of « Ma liste » and
-// /static/data/aliments.json (common products, read the first time the field
+// aliments.json next to this module (common products, read the first time the field
 // gets the focus). Ranking (suggest(), pure): the suggestions that start with
 // the text typed first, then those with a word starting with it, then the
 // others containing it; in each group the most frequent first.
@@ -21,7 +21,7 @@ import { forgetSearch, recentSearches } from "./memory.js";
 export const LIMIT = 8;
 // The last recent searches come first among equals
 const RECENT_BONUS = 8;
-const FOODS_URL = "/static/data/aliments.json";
+const FOODS_URL = new URL("./aliments.json", import.meta.url).href;
 
 // "Crème fraîche " → "creme fraiche"
 export function normalize(text) {
