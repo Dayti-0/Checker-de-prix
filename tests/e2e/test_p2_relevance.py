@@ -27,7 +27,7 @@ def test_food_in_oil_is_never_the_oil(desktop, query):
     results = {r["store"]: r for r in response["results"]}
     assert {k: [p["name"] for p in main_list(r)] for k, r in results.items()} == {
         "aldi": ["Huile de tournesol", "Huile de tournesol bio"],
-        "lidl": ["Huile de tournesol"],
+        "lidl": ["Huile de tournesol", "Lesieur Huile de tournesol"],  # the brand first is still the oil
         "carrefour": ["Huile de tournesol", "Huile de tournesol"],  # Carrefour Classic' then Lesieur
     }
     close = [p for r in results.values() for p in r["products"] if 0 < p["relevance"] < 1]

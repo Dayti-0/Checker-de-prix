@@ -24,8 +24,13 @@ def test_views_are_accessible(page):
     box.press("Enter")
     expect(page.locator("[data-store] .spinner")).to_have_count(0)
     assert_accessible(page, "résultats")
+    # P2: « Tout trié » on a phone, the columns of « Par enseigne » elsewhere
+    page.get_by_role("radio", name="Par enseigne").check()
+    assert_accessible(page, "résultats par enseigne")
 
     page.locator("[data-store=lidl]").get_by_role("button", name=re.compile("Ajouter")).first.click()
+    assert_accessible(page, "feuille « Ajouter à ma liste »")
+    page.get_by_role("dialog").get_by_role("button", name="Ajouter").click()
     page.get_by_role("link", name=re.compile("Ma liste")).click()
     page.get_by_role("button", name="Comparer mon panier").click()
     expect(page.get_by_text("Panier le moins cher")).to_be_visible()
@@ -47,7 +52,7 @@ def test_views_are_accessible(page):
     expect(page.locator("[data-store] .spinner")).to_have_count(0)
     expect(page.locator("#location-label")).to_have_text("34000 Montpellier")
     assert_accessible(page, "résultats approchants")
-    page.locator("[data-store=aldi]").get_by_role("button", name=re.compile("Voir")).click()
+    page.locator("[data-store=aldi]").get_by_role("button", name=re.compile("Produits proches")).click()
     assert_accessible(page, "résultats dépliés")
     # A retailer unticked in the filters
     page.locator("#store-filters label").filter(has_text="Courses U").click()

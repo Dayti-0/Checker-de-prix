@@ -7,7 +7,10 @@
   (B38), organic with a promotion and an old price, unavailable;
 - « crème fraîche »: prices per litre and per kilo mixed (B26);
 - « tomate »: « Sauce tomate basilic » is a sauce (close product), « Tomates
-  pelées » are tomatoes.
+  pelées » are tomatoes;
+- « pois chiches »: products with thumbnails (https://images.prixmalin.test/,
+  answered by the tests with page.route: never asked by the other tests);
+- « œufs »: sold by the piece (« €/œuf »).
 
 The names avoid the words searched by the other E2E tests (farine, blé, eau,
 lait, pirate).
@@ -15,6 +18,9 @@ lait, pirate).
 
 # Same product in three retailers (valid EAN-13)
 MAILLE_EAN = "3036810201006"
+
+# Thumbnails of « pois chiches » (fake host, answered by page.route in the tests)
+IMAGE_HOST = "https://images.prixmalin.test"
 
 PRODUCTS = {
     "aldi": [
@@ -31,6 +37,13 @@ PRODUCTS = {
             "ean": "3560070880010",
         },
         {"name": "Sauce tomate basilic", "brand": "Cucina", "price": 0.89, "quantity_label": "400 g"},
+        {
+            "name": "Pois chiches",
+            "brand": "Cucina",
+            "price": 0.79,
+            "quantity_label": "400 g",
+            "image_url": f"{IMAGE_HOST}/aldi-pois-chiches.png",
+        },
     ],
     "lidl": [
         {"name": "Mayonnaise à l'huile de tournesol", "brand": "Kania", "price": 1.09, "quantity_label": "500 ml"},
@@ -51,6 +64,15 @@ PRODUCTS = {
             "unit_price_label": "7,25 €/kg",
         },
         {"name": "Tomates pelées", "brand": "Baresa", "price": 0.85, "quantity_label": "400 g"},
+        {"name": "Lesieur Huile de tournesol", "price": 2.59, "quantity_label": "1 L"},
+        {
+            "name": "Pois chiches cuits",
+            "brand": "Freshona",
+            "price": 0.69,
+            "quantity_label": "400 g",
+            "image_url": f"{IMAGE_HOST}/lidl-pois-chiches.png",
+        },
+        {"name": "Œufs frais de plein air x12", "brand": "Lidl", "price": 3.19, "quantity_label": "x12"},
     ],
     "carrefour": [
         {
@@ -81,6 +103,13 @@ PRODUCTS = {
             "price": 0.92,
             "quantity_label": "20cl",
             "unit_price_label": "4,60 € / L",
+        },
+        {
+            "name": "Pois chiches bio",
+            "brand": "CARREFOUR BIO",
+            "price": 1.29,
+            "quantity_label": "400g",
+            "image_url": f"{IMAGE_HOST}/carrefour-pois-chiches.png",
         },
     ],
     "intermarche": [

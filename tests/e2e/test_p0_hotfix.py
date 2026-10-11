@@ -67,6 +67,8 @@ def test_every_button_outside_a_form_is_a_plain_button(desktop):
     expect(page.locator("[data-store] .spinner")).to_have_count(0)
     assert page.evaluate(EVERY_BUTTON_IS_TYPED)
     page.locator("[data-store=lidl]").get_by_role("button", name=re.compile("Ajouter")).first.click()
+    page.get_by_role("dialog").get_by_role("button", name="Ajouter").click()  # P2: sheet « Ajouter à ma liste »
+    assert page.evaluate(EVERY_BUTTON_IS_TYPED)
     page.get_by_role("link", name=re.compile("Ma liste")).click()
     page.get_by_role("button", name="Comparer mon panier").click()
     expect(page.get_by_text("Panier le moins cher")).to_be_visible()
@@ -88,6 +90,9 @@ def test_hostile_texts_are_shown_as_text(desktop):
 
     # The product goes into the list and the basket: still plain text
     aldi.get_by_role("button", name=re.compile("Ajouter")).first.click()
+    sheet = page.get_by_role("dialog")
+    expect(sheet.get_by_text(XSS_NAME)).to_be_visible()  # P2: sheet « Ajouter à ma liste »
+    sheet.get_by_role("button", name="Ajouter").click()
     page.get_by_role("link", name=re.compile("Ma liste")).click()
     expect(page.get_by_text(f"Aldi : {XSS_NAME} (1,00 €)")).to_be_visible()
     page.get_by_role("button", name="Comparer mon panier").click()
