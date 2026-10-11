@@ -335,7 +335,9 @@ async def page_fetch(
     return FetchResult(result["status"], result["contentType"], result["text"], result["url"])
 
 
-_SNAPSHOT_NAME = r"^{key}-(\d{{8}}-\d{{6}})-[a-z_]+\.(html|png|json)$"
+# Files of a snapshot (page, screenshot, raw answers of save_debug_text): all rotated
+SNAPSHOT_SUFFIXES = (".html", ".png", ".json", ".txt")
+_SNAPSHOT_NAME = r"^{key}-(\d{{8}}-\d{{6}})-[a-z_]+\.(" + "|".join(x[1:] for x in SNAPSHOT_SUFFIXES) + ")$"
 
 
 def snapshot_path(key: str, status: str = "empty", when: datetime | None = None) -> Path:
@@ -386,7 +388,13 @@ async def save_debug_snapshot(page, key: str, status: str = "empty", *, screensh
 
 
 def save_debug_text(key: str, status: str, text: str, suffix: str = ".json") -> Path | None:
-    """Keep a raw answer of a site (JSON of unexpected shape...) next to the snapshots."""
+    """Keep a raw answer of a site (JSON of unexpected shape...) next to the snapshots.
+
+    ``suffix``: one of SNAPSHOT_SUFFIXES (else ``.txt``), so the file is rotated
+    with the snapshots of ``key``.
+    """
+    if suffix not in SNAPSHOT_SUFFIXES:
+        suffix = ".txt"
     try:
         path = snapshot_path(key, status).with_suffix(suffix)
         path.parent.mkdir(parents=True, exist_ok=True)

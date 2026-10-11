@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import re
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -58,6 +59,22 @@ def test_raw_answer_kept_with_the_snapshots(tmp_path):
     assert path.parent == tmp_path / "debug"
     assert path.suffix == ".json" and "-json" in path.name
     assert path.read_text() == '{"erreur": "maintenance"}'
+
+
+def test_raw_answers_are_rotated_too(tmp_path, monkeypatch):
+    from backend.scrapers import common
+
+    original = common.snapshot_path
+    start = datetime(2026, 10, 3, 14, 0, 0)
+    for i in range(8):
+        when = start + timedelta(seconds=i)
+        monkeypatch.setattr(common, "snapshot_path", lambda k, s="empty", when=when: original(k, s, when))
+        suffix = (".txt", ".json", ".log")[i % 3]  # an unreadable answer is kept as .txt
+        save_debug_text("intermarche", "error", "x" * 10, suffix)
+    files = sorted(p.name for p in (tmp_path / "debug").iterdir())
+    assert len(files) == 5
+    assert files[0] == "intermarche-20261003-140003-error.txt"
+    assert {Path(name).suffix for name in files} == {".txt", ".json"}
 
 
 # --- detect_block in a real Chromium (fake pages) -------------------------------
