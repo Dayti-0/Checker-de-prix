@@ -22,7 +22,14 @@ from backend.scrapers import SCRAPERS
 from backend.services import settings as settings_service
 from backend.services import stores as stores_service
 
-PRODUCTS: dict = {}
+# Search « lait » of the trial step of the assistant (#/bienvenue)
+PRODUCTS = {
+    "aldi": [{"name": "Lait demi-écrémé UHT", "brand": "LAITERIE", "price": 0.95, "quantity_label": "1 L"}],
+    "lidl": [{"name": "Lait demi-écrémé", "brand": "Milbona", "price": 0.99, "quantity_label": "1 L"}],
+    "carrefour": [{"name": "Lait demi-écrémé", "brand": "CARREFOUR", "price": 1.05, "quantity_label": "1L"}],
+    "intermarche": [{"name": "Lait demi-écrémé", "brand": "Pâturages", "price": 1.02, "quantity_label": "1 L"}],
+    "coursesu": [{"name": "Lait demi-écrémé U", "brand": "U", "price": 1.04, "quantity_label": "1 L"}],
+}
 
 
 def _store(store_id, name, slug, address, services=("Drive",)):

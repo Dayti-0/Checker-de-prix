@@ -10,10 +10,12 @@
 //   openSite() of views/status/shared.js);
 // - on a phone « J'ai terminé » stays at the bottom of the screen (css/stores.css);
 // - starts the watch of the stores (automatic choice of the Courses U store,
-//   store chosen on the site read back after « J'ai terminé »).
+//   store chosen on the site read back after « J'ai terminé ») and opens the
+//   first-launch assistant (#/bienvenue) when nothing is set yet.
 
 import { api } from "../core/api.js";
 import { endSetup, on, setBrowser, state } from "../core/store.js";
+import { checkOnboarding } from "../views/onboarding/index.js";
 import { openSite, watchStores } from "../views/status/shared.js";
 
 export const enabled = true;
@@ -82,4 +84,9 @@ export function init() {
     on("browser:changed", render);
     watchStores();
     render();
+    // Once the first view is shown (the router is started)
+    const off = on("route:changed", () => {
+        off();
+        checkOnboarding();
+    });
 }

@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from backend import main
 from backend.errors import AppError
 from backend.models import Location, LocationRequest, OnboardingUpdate, Settings, StoreSelection
+from backend.scrapers import SCRAPERS
 from backend.services import settings as settings_service
 from tests.conftest import run
 
@@ -372,3 +373,21 @@ def test_show_browser_setting(client, monkeypatch):
     assert client.patch("/api/settings", json={"show_browser": True}).json()["show_browser"] is True
     assert client.patch("/api/settings", json={}).json()["show_browser"] is True
     assert shown == [True]
+
+
+def test_browser_status_says_where_the_page_is_shown(monkeypatch):
+    """B53: the banner and « Ouvrir le site » differ on the PC and on a phone (is_local)."""
+
+    async def open_setup(key, url):
+        main.browser.setup_mode = True
+
+    monkeypatch.setattr(main.browser, "open_setup", open_setup)
+    monkeypatch.setattr(main.browser, "setup_mode", False)
+    monkeypatch.setattr(SCRAPERS["coursesu"], "site_opened_at", None)
+    with TestClient(main.app, client=("192.168.1.20", 50000)) as phone:
+        status = phone.get("/api/browser").json()
+        assert status["is_local"] is False
+        opened = phone.post("/api/browser/setup", json={"store": "coursesu"}).json()
+        assert (opened["setup_mode"], opened["is_local"]) == (True, False)
+    with TestClient(main.app, client=("127.0.0.1", 50000)) as pc:
+        assert pc.get("/api/browser").json()["is_local"] is True
