@@ -15,7 +15,7 @@
     column-gap: var(--space-4);
     row-gap: var(--space-1);
     align-items: start;
-    padding: var(--space-4) var(--space-5);
+    padding: var(--space-3) var(--space-5);
     border-bottom: 1px solid var(--border);
 }
 .products > .product:last-child, .offer-group:last-child { border-bottom: 0; }
@@ -250,7 +250,7 @@ a.name:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radi
     border: 1px solid var(--border);
 }
 .unavailable-title { margin: 0; font-weight: 700; font-size: var(--text-90); }
-.column-mini { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); min-height: 2.75rem; min-width: 0; }
+.column-mini { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); min-height: 2.25rem; min-width: 0; }
 .column-mini .badge { font-size: var(--text-85); padding: .15rem .6rem; }
 .mini-status { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); font-size: var(--text-90); }
 .mini-status .column-status { color: inherit; font-size: inherit; }
@@ -259,7 +259,7 @@ a.name:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radi
 .mini-actions button { min-height: 2.25rem; }
 .mini-actions button:focus-visible, .notice .actions button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 @media (pointer: coarse) {
-    .mini-actions button, .notice .actions button { min-height: 2.75rem; }
+    .column-mini, .mini-actions button, .notice .actions button { min-height: 2.75rem; }
 }
 @media (max-width: 759px) {
     .unavailable { flex-direction: column; align-items: stretch; gap: var(--space-3); padding: var(--space-3) var(--space-4); }

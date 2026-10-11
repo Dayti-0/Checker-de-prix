@@ -19,7 +19,7 @@ const SKELETON = html`<div class="skeleton" aria-hidden="true"><div class="s-img
 function head(col, view, status) {
     const count = col.state === "loading" ? "recherche en cours" : plural(col.relevant.length, "produit");
     return html`<div class="column-head" data-key="head">
-        <h2 class="column-title">${retailerBadge(col.key, col.label)}<span class="visually-hidden">, ${count}</span></h2>
+        <h2 class="column-title" aria-label="${col.label}, ${count}">${retailerBadge(col.key, col.label)}</h2>
         <span class="column-status">${status}</span>
     </div>`;
 }
