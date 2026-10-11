@@ -118,10 +118,11 @@ function close() {
 }
 
 function place() {
-    // Right under the field, as wide as it
+    // Right under the field, from its left edge to the right edge of the form
+    const form = listbox.parentElement;
     listbox.style.top = `${input.offsetTop + input.offsetHeight + 4}px`;
     listbox.style.left = `${input.offsetLeft}px`;
-    listbox.style.width = `${input.offsetWidth}px`;
+    listbox.style.width = `${Math.max(input.offsetWidth, form.clientWidth - input.offsetLeft)}px`;
 }
 
 function highlight(value, typed) {

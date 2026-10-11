@@ -8,7 +8,7 @@
 //   (core/store.js: setEnabled). The last ticked retailer cannot be unticked.
 // - Filters of the results (resultFiltersMarkup): chips Bio, En promo,
 //   Disponible, Marque distributeur, Marque nationale, with the number of
-//   products each one keeps; only those that would change something are shown.
+//   products each one keeps; those that would change nothing are disabled.
 
 import { attr, html, setHtml } from "../../core/html.js";
 import { icon } from "../../core/icons.js";
@@ -79,17 +79,18 @@ export function mountStoreFilters(el) {
 }
 
 // Chips of the result filters. counts: filterCounts() of the relevant
-// products, total: their number, active: ids of the active filters
+// products, total: their number, active: ids of the active filters. Every
+// chip is always there (the page does not move when the retailers answer); a
+// chip that would change nothing is disabled.
 export function resultFiltersMarkup(counts, total, active) {
     const on = new Set(active);
-    const shown = RESULT_FILTERS.filter((f) => on.has(f.id) || (counts[f.id] > 0 && counts[f.id] < total));
-    if (!shown.length) return html``;
     return html`<div class="result-filters-row" data-key="row" data-patch role="group" aria-label="Filtrer les résultats" data-testid="result-filters">
-        ${shown.map(
-            (f) => html`<button class="filter-chip${on.has(f.id) ? " on" : ""}" type="button" data-key="${f.id}" data-action="filter" data-filter="${f.id}" data-focus="filter:${f.id}" aria-pressed="${on.has(f.id) ? "true" : "false"}">
+        ${RESULT_FILTERS.map((f) => {
+            const useless = !on.has(f.id) && (counts[f.id] === 0 || counts[f.id] === total);
+            return html`<button class="filter-chip${on.has(f.id) ? " on" : ""}" type="button" data-key="${f.id}" data-action="filter" data-filter="${f.id}" data-focus="filter:${f.id}" aria-pressed="${on.has(f.id) ? "true" : "false"}"${useless ? " disabled" : ""}>
                 ${icon(on.has(f.id) ? "check" : "plus")}<span>${f.label}</span><span class="chip-count">${counts[f.id]}</span>
-            </button>`,
-        )}
+            </button>`;
+        })}
         ${
             on.size > 0 &&
             html`<button class="filter-clear" type="button" data-key="clear" data-action="clear-filters" data-focus="clear-filters">${icon("x")}Retirer les filtres</button>`

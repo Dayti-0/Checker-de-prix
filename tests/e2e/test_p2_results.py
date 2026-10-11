@@ -252,7 +252,10 @@ def test_no_result_is_one_block_with_shorter_searches(desktop):
     expect(block.get_by_role("button", name=re.compile("^Rechercher"))).to_have_text(
         ["chocolat noir", "chocolat", "noir"]
     )
-    expect(page.get_by_test_id("unavailable")).to_contain_text("3 sans produit")
+    # The retailers without the product are not listed a second time in the bar
+    expect(page.get_by_test_id("unavailable")).to_contain_text("2 enseignes indisponibles :")
+    expect(page.get_by_test_id("unavailable")).not_to_contain_text("sans produit")
+    expect(page.locator("[data-summary=aldi]")).to_contain_text("Aucun produit")
     assert_accessible(page, "aucun produit")
     block.get_by_role("button", name="Ajouter « chocolat noir 100 g » à ma liste quand même").click()
     expect(page.get_by_role("status")).to_contain_text("« chocolat noir 100 g » ajouté à votre liste")

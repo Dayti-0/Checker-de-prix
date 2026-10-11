@@ -350,10 +350,19 @@ const SKELETON_ROWS = html`<div class="offers-loading" data-key="loading" aria-h
         html`<div class="skeleton"><div class="s-img"></div><div><div class="s-line"></div><div class="s-line short"></div></div></div>`,
 )}</div>`;
 
-function bodyMarkup(models, placed, keys, unit, view, loading) {
+// « Aucun produit » for the whole search (one block, B34): every retailer
+// answered and none has the product (or none is left by the filters)
+function nothingFound(models, loading) {
     const anyRelevant = models.some((m) => m.state === "ok" && m.allRelevant.length);
     const filteredOut = anyRelevant && !models.some((m) => m.state === "ok" && m.relevant.length);
-    const nothing = !loading && (!anyRelevant || filteredOut) && models.some((m) => m.state !== "error");
+    return {
+        nothing: !loading && (!anyRelevant || filteredOut) && models.some((m) => m.state !== "error"),
+        filteredOut,
+    };
+}
+
+function bodyMarkup(models, placed, keys, unit, view, loading) {
+    const { nothing, filteredOut } = nothingFound(models, loading);
     if (search.view === "stores") {
         const grid = placed.filter((x) => x.place === "grid").map((x) => x.m);
         return html`${nothing && noResults(search.query, { filtered: filteredOut })}${grid.length > 0 && columnsMarkup(grid, view)}`;
@@ -419,15 +428,24 @@ function renderResults() {
     // In « Tout trié », the retailers held back (the user reads further down) wait
     const visible = (m) => search.view === "stores" || !search.held.has(m.key);
     const placed = models.map((m) => ({ m, place: visible(m) ? placeOf(m) : "held" }));
+    // The retailers without the product are not listed again under « Aucun produit »
+    const empties = nothingFound(models, loading).nothing ? [] : placed.filter((x) => x.place === "empty");
     const bar = [
         ...placed.filter((x) => x.place === "error").map((x) => ({ ...x.m, kind: "error" })),
-        ...placed.filter((x) => x.place === "empty").map((x) => ({ ...x.m, kind: "empty" })),
+        ...empties.map((x) => ({ ...x.m, kind: "empty" })),
     ];
     const unavailable = models.filter((m) => m.state === "error").length;
     const shownRelevant = models.filter(visible).flatMap((m) => (m.state === "ok" ? m.allRelevant : []));
 
     patch($("#summary"), summaryMarkup(summary, { ...view, unavailable }));
-    patch($("#result-filters"), resultFiltersMarkup(filterCounts(shownRelevant), shownRelevant.length, search.filters));
+    // The filters stay in place while the retailers answer; gone when nothing was found
+    const withFilters = loading || shownRelevant.length > 0 || search.filters.length > 0;
+    patch(
+        $("#result-filters"),
+        withFilters
+            ? resultFiltersMarkup(filterCounts(shownRelevant), shownRelevant.length, search.filters)
+            : html``,
+    );
     patch($("#unavailable"), unavailableBar(bar, now));
     patch($("#results-body"), bodyMarkup(models, placed, keys, unit, view, loading));
     applyBars(root);

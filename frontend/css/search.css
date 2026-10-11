@@ -51,7 +51,8 @@
 .suggestion-option .icon { color: var(--muted); }
 .suggestion-option mark { background: none; color: inherit; font-weight: 700; }
 .suggestion-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
-.suggestion-source { color: var(--muted); font-size: var(--text-80); white-space: nowrap; }
+.suggestion-option > .icon { flex: none; }
+.suggestion-source { flex: none; color: var(--muted); font-size: var(--text-80); white-space: nowrap; }
 .suggestion-option:hover,
 .suggestion-option[aria-selected="true"] { background: var(--best-bg); }
 .suggestion-option[aria-selected="true"] { box-shadow: inset 3px 0 0 var(--primary); }
@@ -193,17 +194,18 @@
 .line-action { grid-column: 2; grid-row: 2; justify-self: end; min-height: 2.25rem; }
 .summary-progress, .summary-foot { margin: var(--space-2) 0 0; font-size: var(--text-85); color: var(--muted); }
 
-/* One row per retailer */
-@container (min-width: 22rem) {
+/* One row per retailer, columns aligned from one retailer to the next (subgrid) */
+@container (min-width: 19rem) {
+    .summary-lines { grid-template-columns: max-content max-content minmax(1rem, 1fr) max-content; column-gap: var(--space-3); }
     .summary-line {
-        grid-template-columns: 6.25rem 4.75rem minmax(1.5rem, 1fr) auto;
+        grid-column: 1 / -1;
+        grid-template-columns: subgrid;
         grid-template-areas: "store price bar gap";
         row-gap: 0;
         min-height: 2.6rem;
         padding: var(--space-1) 0;
     }
     .line-gap { white-space: nowrap; text-align: left; }
-    .line-price.none { grid-area: price; }
     .line-wait { grid-column: 2 / -1; grid-row: 1; }
     .line-reason { grid-column: 3 / -1; grid-row: 1; }
     .line-wait.slow { grid-column: 2 / 4; }
@@ -211,11 +213,8 @@
 }
 /* … with the name of the product */
 @container (min-width: 36rem) {
-    .summary-line {
-        grid-template-columns: 7rem 5.25rem minmax(3rem, 1fr) 8rem minmax(0, 1.3fr);
-        grid-template-areas: "store price bar gap name";
-        column-gap: var(--space-4);
-    }
+    .summary-lines { grid-template-columns: max-content max-content minmax(3rem, 1fr) max-content minmax(0, 1.3fr); column-gap: var(--space-5); }
+    .summary-line { grid-template-areas: "store price bar gap name"; }
     .line-name { display: block; }
     .line-wait.slow { grid-column: 2 / 5; }
     .line-action { grid-column: 5; }
@@ -314,6 +313,7 @@
 .filter-chip.on .icon { color: var(--best-text); }
 .chip-count { min-width: 1.4rem; padding: 0 var(--space-2); border-radius: var(--radius-pill); background: var(--surface-2); color: var(--muted); font-size: var(--text-80); text-align: center; font-variant-numeric: tabular-nums; }
 .filter-chip.on .chip-count { background: var(--surface); color: var(--best-text); }
+.filter-chip:disabled { color: var(--muted); background: var(--surface-2); cursor: default; }
 .filter-clear { border-style: dashed; color: var(--muted); }
 .filter-chip:focus-visible, .filter-clear:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
@@ -408,7 +408,7 @@
 .recent-card { margin: var(--space-6) auto 0; max-width: 46rem; }
 .recent-title { display: inline-flex; align-items: center; gap: var(--space-2); margin: 0 0 var(--space-3); font-size: var(--text-100); color: var(--muted); }
 .recent-card .suggestions { margin: 0; }
-.recent-card .suggestion { min-height: 2.75rem; }
+.recent-card .suggestion { min-height: 2.75rem; color: var(--text); }
 .recent-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-3); }
 .recent-chip { display: inline-flex; align-items: stretch; border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface); }
 .recent-chip .suggestion { border: 0; background: none; padding: 0 var(--space-3) 0 var(--space-6); }
