@@ -64,3 +64,29 @@ def test_home_card_texts(desktop):
     assert [s["key"] for s in steps] == ["location", "intermarche"]
     assert steps[1]["href"] == "#/reglages?enseigne=intermarche"
     assert js_eval(page, setup, "missingSteps", {"location": {"postal_code": "34320"}}, retailers[:1]) == []
+
+
+def test_stores_proposed_by_the_assistant(desktop):
+    page = desktop
+    page.goto(page.base)
+    onboarding = "/static/js/views/onboarding/index.js"
+    url = "https://www.coursesu.com/drive-superu-{}".format
+    nearest = [{"id": str(i), "name": f"Super U {i}", "url": url(i), "distance_km": i * 5.0} for i in range(1, 9)]
+    # No store yet: the 3 nearest, the nearest checked
+    proposed = js_eval(page, onboarding, "proposedStores", nearest, None)
+    assert [s["id"] for s in proposed["stores"]] == ["1", "2", "3"] and proposed["choice"] == 0
+    # The store chosen is among them: it is checked
+    proposed = js_eval(page, onboarding, "proposedStores", nearest, {"url": url(2), "auto": False})
+    assert proposed["choice"] == 1 and proposed["stores"][1]["current"]
+    # Further than the 3 nearest: added first with what the list knows of it
+    proposed = js_eval(page, onboarding, "proposedStores", nearest, {"url": url(6), "name": "U 6"})
+    assert [s["id"] for s in proposed["stores"]] == ["6", "1", "2", "3"] and proposed["choice"] == 0
+    assert proposed["stores"][0]["distance_km"] == 30.0 and proposed["stores"][0]["current"]
+    # Not in the list at all (address pasted by hand)
+    far = {"id": None, "name": "Super U Eysines", "url": url("eysines"), "distance_km": None}
+    proposed = js_eval(page, onboarding, "proposedStores", nearest, far)
+    assert proposed["stores"][0]["name"] == "Super U Eysines" and proposed["stores"][0]["id"] == ""
+    # Intermarché: compared by store number
+    shops = [{"id": "06814", "name": "Lattes"}, {"id": "08012", "name": "Montpellier"}]
+    assert js_eval(page, onboarding, "proposedStores", shops, {"id": "08012"})["choice"] == 1
+    assert js_eval(page, onboarding, "proposedStores", [], None) == {"stores": [], "choice": ""}

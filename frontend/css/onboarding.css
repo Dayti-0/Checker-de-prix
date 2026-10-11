@@ -1,10 +1,26 @@
 /* Premier lancement (P4: js/views/onboarding/) and the home card
    « Finissez la configuration » (js/views/home/cards/setup.js). */
 
-.onboarding { max-width: 46rem; margin: 0 auto; }
+/* Container: the step indicator follows the width in rem, so the text size too */
+.onboarding { max-width: 46rem; margin: 0 auto; container-type: inline-size; }
 
 .onb-steps { display: flex; gap: var(--space-3); list-style: none; margin: 0 0 var(--space-6); padding: 0; counter-reset: none; }
 .onb-steps li { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: var(--space-2); color: var(--muted); font-size: var(--text-90); }
+.onb-step-label { min-width: 0; overflow-wrap: break-word; }
+/* Narrow (phone, large text): only the current step keeps its name, the
+   others show their number (their names stay for screen readers) */
+@container (max-width: 22rem) {
+    .onb-steps li { flex: none; }
+    .onb-steps li.current { flex: 0 1 auto; }
+    .onb-steps li:not(.current) .onb-step-label {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+    }
+}
 .onb-steps li.current { color: var(--text); font-weight: 700; }
 .onb-steps li.done { color: var(--best-text); }
 .onb-step-number {
@@ -58,6 +74,15 @@
 .onb-store input:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .onb-store-text { min-width: 0; overflow-wrap: anywhere; }
 .onb-store-address { display: block; color: var(--muted); font-size: var(--text-90); }
+.onb-store-tag {
+    display: inline-block;
+    padding: .05rem .5rem;
+    border-radius: var(--radius-pill);
+    background: var(--best-bg);
+    color: var(--best-text);
+    font-size: var(--text-80);
+    font-weight: 700;
+}
 
 .onb-trial { list-style: none; margin: var(--space-5) 0; padding: 0; display: grid; gap: var(--space-2); }
 .onb-trial-row {

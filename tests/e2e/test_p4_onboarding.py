@@ -13,6 +13,25 @@ from tests.e2e.axe import assert_accessible
 OVERFLOW = "() => document.documentElement.scrollWidth - Math.round(window.visualViewport.width)"
 
 
+# Parts of the step indicator (numbers, names) drawn over one another or
+# beyond the list (the names hidden on a narrow screen measure 1 px)
+STEP_OVERLAPS = """() => {
+    const list = document.querySelector(".onb-steps").getBoundingClientRect();
+    const parts = [...document.querySelectorAll(".onb-steps li > *")]
+        .map((el) => [el.textContent.trim(), el.getBoundingClientRect()])
+        .filter(([, r]) => r.width > 1);
+    const out = [];
+    parts.forEach(([name, r], i) => {
+        if (r.left < list.left - 1 || r.right > list.right + 1) out.push(`${name} dépasse`);
+        for (const [other, o] of parts.slice(i + 1)) {
+            const apart = r.right <= o.left || o.right <= r.left || r.bottom <= o.top || o.bottom <= r.top;
+            if (!apart) out.push(`${name} / ${other}`);
+        }
+    });
+    return out;
+}"""
+
+
 @pytest.fixture
 def first_launch(monkeypatch):
     """The assistant opens by itself, as on a real first launch (off in the other tests)."""
@@ -119,6 +138,44 @@ def test_skip_back_and_fix(mobile):
     expect(step_title(page)).to_have_text("Étape 2 sur 3 : vos magasins")
 
 
+def test_assistant_started_again_keeps_the_stores_chosen(desktop):
+    """Started again from Réglages, the assistant never replaces a store chosen by the user."""
+    page = desktop
+    page.request.post(f"{page.base}/api/settings/location", data={"postal_code": "34480"})
+    page.request.put(
+        f"{page.base}/api/retailers/coursesu/store", data={"url": "https://www.coursesu.com/drive-superu-eysines"}
+    )
+    page.request.put(
+        f"{page.base}/api/retailers/intermarche/store", data={"id": "06814", "name": "Intermarché Hyper Lattes"}
+    )
+    page.goto(f"{page.base}/#/reglages")
+    page.get_by_role("link", name="Relancer l'assistant de premier lancement").click()
+    page.get_by_role("button", name="Continuer").click()
+    coursesu = page.get_by_role("group", name=re.compile("Magasin Courses U"))
+    intermarche = page.get_by_role("group", name=re.compile("Magasin Intermarché"))
+    # The store chosen, far from the nearest ones, is proposed first and checked
+    expect(coursesu.get_by_role("radio")).to_have_count(5)
+    expect(coursesu.get_by_role("radio", name=re.compile("Super U Eysines"))).to_be_checked()
+    expect(coursesu.locator(".onb-store").first).to_contain_text("Magasin actuel")
+    expect(intermarche.get_by_role("radio", name=re.compile("Intermarché Hyper Lattes"))).to_be_checked()
+    expect(page.locator(".onb-card")).to_contain_text("Un magasin déjà choisi reste coché")
+    assert_accessible(page, "assistant relancé, étape 2")
+    page.get_by_role("button", name="Enregistrer et continuer").click()
+    expect(step_title(page)).to_have_text("Étape 3 sur 3 : essai")
+    stores = page.request.get(f"{page.base}/api/settings").json()["stores"]
+    assert stores["coursesu"]["url"] == "https://www.coursesu.com/drive-superu-eysines"
+    assert stores["coursesu"]["auto"] is False
+    assert stores["intermarche"]["id"] == "06814"
+
+    # Another store taken in the list replaces it
+    page.get_by_role("button", name="Retour").click()
+    coursesu.get_by_role("radio", name=re.compile("Super U Roujan")).check()
+    page.get_by_role("button", name="Enregistrer et continuer").click()
+    expect(step_title(page)).to_have_text("Étape 3 sur 3 : essai")
+    stores = page.request.get(f"{page.base}/api/settings").json()["stores"]
+    assert stores["coursesu"]["name"] == "Super U Roujan"
+
+
 def test_home_card_while_the_setup_is_incomplete(desktop):
     page = desktop
     page.goto(page.base)
@@ -168,6 +225,7 @@ def test_no_horizontal_scroll_in_the_new_views(chromium, server, width):
         page.get_by_role("button", name="Continuer").click()
         expect(page.locator(".onb-store input")).to_have_count(8)
         overflows["assistant, magasins"] = page.evaluate(OVERFLOW)
+        overlaps = page.evaluate(STEP_OVERLAPS)
         page.get_by_role("button", name="Enregistrer et continuer").click()
         expect(page.locator(".onb-trial .spinner")).to_have_count(0)
         overflows["assistant, essai"] = page.evaluate(OVERFLOW)
@@ -177,4 +235,5 @@ def test_no_horizontal_scroll_in_the_new_views(chromium, server, width):
         errors = list(page.errors)
         context.close()
         assert all(v <= 0 for v in overflows.values()), f"{width} px, échelle {scale} : {overflows}"
+        assert overlaps == [], f"{width} px, échelle {scale} : étapes qui se chevauchent {overlaps}"
         assert errors == []

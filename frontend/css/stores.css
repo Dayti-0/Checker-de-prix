@@ -59,7 +59,8 @@
 
 /* --- Enseignes: one row per retailer --- */
 
-.retailer-rows { display: grid; }
+/* Query container: the menu « ⋯ » is never wider than the rows (cqw) */
+.retailer-rows { display: grid; container-type: inline-size; }
 .retailer-row { padding: var(--space-5) 0; border-bottom: 1px solid var(--border); min-width: 0; }
 .retailer-row:first-child { padding-top: 0; }
 .retailer-row:last-child { border-bottom: 0; }
@@ -103,8 +104,12 @@
     right: 0;
     top: calc(100% + var(--space-1));
     z-index: 20;
-    min-width: 15rem;
+    /* Anchored on the right of its button, which ends the row: as wide as the
+       row at most, so that it never starts left of the screen (large text) */
+    min-width: min(15rem, calc(100vw - 2rem));
     max-width: calc(100vw - 2rem);
+    min-width: min(15rem, 100cqw);
+    max-width: 100cqw;
     padding: var(--space-1);
     background: var(--surface);
     border: 1px solid var(--border);
@@ -124,7 +129,10 @@
     text-align: left;
     text-decoration: none;
     font-size: var(--text-95);
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
+.retailer-menu > button svg, .retailer-menu > a svg { flex: none; }
 .retailer-menu > button:hover, .retailer-menu > a:hover { background: var(--surface-2); }
 .retailer-menu > .danger { color: var(--danger-text); }
 

@@ -4,7 +4,9 @@
 // startup by features/setup-banner.js); can be started again from Réglages.
 // Three steps:
 //   1. postal code, then town (the form of Réglages › Localisation);
-//   2. the 3 nearest Intermarché and Courses U stores, the nearest chosen;
+//   2. the 3 nearest Intermarché and Courses U stores, the nearest chosen
+//      (a store already chosen stays proposed and checked: started again from
+//      Réglages, the assistant never replaces it by itself);
 //   3. a trial search « lait » showing the state of each retailer and how to
 //      fix it.
 // Then back to the home page. The end is saved in the preferences
@@ -62,7 +64,7 @@ function stepper() {
         (label, i) =>
             html`<li class="${i + 1 === step ? "current" : i + 1 < step ? "done" : ""}"${i + 1 === step ? html` aria-current="step"` : ""}>
                 <span class="onb-step-number" aria-hidden="true">${i + 1 < step ? icon("check") : String(i + 1)}</span>
-                <span>${label}</span>
+                <span class="onb-step-label">${label}</span>
             </li>`,
     )}</ol>`;
 }
@@ -95,7 +97,8 @@ function storeChoices(key) {
             const distance = distanceText(s);
             return html`<label class="onb-store">
                 <input type="radio" name="onb-${key}" value="${i}"${list.choice === i ? html` checked` : ""}>
-                <span class="onb-store-text"><strong>${s.name}</strong>${distance && html` <span class="muted">· ${distance}</span>`}
+                <span class="onb-store-text"><strong>${s.name || "Magasin choisi"}</strong>${distance && html` <span class="muted">· ${distance}</span>`}
+                    ${s.current && html` <span class="onb-store-tag">Magasin actuel</span>`}
                     ${s.address && html`<span class="onb-store-address">${s.address}</span>`}</span>
             </label>`;
         })}
@@ -159,7 +162,12 @@ function stepBody() {
             return html`<p class="notice warn">Sans code postal, PrixMalin ne peut pas proposer de magasins. Revenez à l'étape précédente ou choisissez-les plus tard dans les réglages.</p>
                 ${nav({ next: "Continuer" })}`;
         }
-        return html`<p>Les prix d'Intermarché et de Courses U dépendent du magasin. Voici les plus proches de ${state.settings.location.city || state.settings.location.postal_code} : le plus proche est déjà choisi.</p>
+        const place = state.settings.location.city || state.settings.location.postal_code;
+        const kept = STORE_KEYS.some((key) => state.settings.stores && state.settings.stores[key]);
+        const intro = kept
+            ? `Voici les plus proches de ${place}. Un magasin déjà choisi reste coché ; sinon le plus proche est proposé.`
+            : `Voici les plus proches de ${place} : le plus proche est déjà choisi.`;
+        return html`<p>Les prix d'Intermarché et de Courses U dépendent du magasin. ${intro}</p>
             <div class="onb-store-lists">${STORE_KEYS.map(storeChoices)}</div>
             ${nav({ skip: "Passer", next: "Enregistrer et continuer" })}`;
     }
@@ -225,21 +233,39 @@ async function loadLists() {
                 return;
             }
             try {
-                const stores = (await api(`/api/retailers/${key}/stores`, { timeout: 120000 })).slice(0, PROPOSED);
+                const nearest = await api(`/api/retailers/${key}/stores`, { timeout: 120000 });
                 const current = state.settings.stores && state.settings.stores[key];
-                const chosen = current ? stores.findIndex((s) => (current.url ? s.url === current.url : s.id === current.id)) : -1;
-                lists[key] = {
-                    status: "done",
-                    stores,
-                    postal: location.postal_code,
-                    choice: stores.length ? Math.max(0, chosen) : "",
-                };
+                const { stores, choice } = proposedStores(nearest, current);
+                lists[key] = { status: "done", stores, postal: location.postal_code, choice };
             } catch (err) {
                 lists[key] = { status: "error", stores: [], choice: "", error: err.message };
             }
             if (step === 2) drawLists();
         }),
     );
+}
+
+function sameStore(a, b) {
+    if (!a || !b) return false;
+    return a.url || b.url ? a.url === b.url : Boolean(a.id) && a.id === b.id;
+}
+
+// Stores proposed at step 2: the PROPOSED nearest, and the store chosen
+// already (`current`) when it is not among them, first. `choice`: index of the
+// store checked (the current one, else the nearest), "" without store.
+export function proposedStores(nearest, current) {
+    let stores = (nearest || []).slice(0, PROPOSED);
+    const index = stores.findIndex((s) => sameStore(s, current));
+    if (index >= 0) {
+        stores = stores.map((s, i) => (i === index ? { ...s, current: true } : s));
+        return { stores, choice: index };
+    }
+    if (current) {
+        const known = (nearest || []).find((s) => sameStore(s, current));
+        const store = { ...current, ...(known || {}), id: (known || current).id || "", current: true };
+        return { stores: [store, ...stores], choice: 0 };
+    }
+    return { stores, choice: stores.length ? 0 : "" };
 }
 
 // Step 2: only the lists change (the focus stays where it is)
@@ -262,7 +288,8 @@ async function saveStores() {
         if (!list || list.status !== "done" || list.choice === "") continue;
         const store = list.stores[list.choice];
         const current = state.settings.stores && state.settings.stores[key];
-        if (current && !current.auto && (current.url ? current.url === store.url : current.id === store.id)) continue;
+        // The store already chosen stays as it is (chosen automatically or not)
+        if (sameStore(store, current)) continue;
         const body = { id: store.id || null, name: store.name, address: store.address || null };
         if (store.url) body.url = store.url;
         if (store.distance_km != null) body.distance_km = store.distance_km;
@@ -270,6 +297,8 @@ async function saveStores() {
         saved += 1;
     }
     if (saved) {
+        // Back at this step, the lists are read again (« Magasin actuel » moves)
+        lists = {};
         await loadSettings();
         emit("results:stale");
     }

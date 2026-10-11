@@ -18,6 +18,16 @@ from tests.e2e.axe import assert_accessible
 OVERFLOW = "() => document.documentElement.scrollWidth - Math.round(window.visualViewport.width)"
 
 
+# [left, right] of the menu « ⋯ » of a retailer and of each of its entries
+MENU_BOXES = """(key) => {
+    const menu = document.querySelector(`#menu-${key}`);
+    return [menu, ...menu.children].map((el) => {
+        const r = el.getBoundingClientRect();
+        return [Math.floor(r.left), Math.ceil(r.right)];
+    });
+}"""
+
+
 def settings_page(page):
     page.goto(f"{page.base}/#/reglages")
     expect(page.get_by_role("heading", name="Réglages")).to_be_visible()
@@ -257,8 +267,13 @@ def test_no_horizontal_scroll(chromium, server, width):
         expect(coursesu.locator(".store-option")).to_have_count(8)
         open_menu(page, "Courses U")
         overflow = page.evaluate(OVERFLOW)
+        # The menu « ⋯ » is absolutely positioned: no scrollbar shows when it goes
+        # beyond the screen, its entries are measured
+        boxes = page.evaluate(MENU_BOXES, "coursesu")
         context.close()
         assert overflow <= 0, f"{width} px, échelle {scale} : {overflow} px de trop"
+        outside = [b for b in boxes if b[0] < 0 or b[1] > width]
+        assert boxes and not outside, f"{width} px, échelle {scale} : menu hors de l'écran {outside}"
         assert page.errors == []
 
 
