@@ -531,7 +531,9 @@ function onClick(e) {
     } else if (action === "query") {
         emit("search:requested", { query: target.dataset.query });
     } else if (action === "add-query") {
-        addToMyList({ query: search.query, quantity: 1 }).catch((err) => notify(err.message, { type: "error" }));
+        addToMyList({ query: search.query, quantity: 1, absolute: false }).catch((err) =>
+            notify(err.message, { type: "error" }),
+        );
     }
 }
 

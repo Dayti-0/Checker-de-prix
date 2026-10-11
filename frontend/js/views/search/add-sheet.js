@@ -19,7 +19,20 @@ import { notify } from "../../core/ui.js";
 import { retailerBadge } from "../../components/retailer-badge.js";
 import { brandText } from "./product-row.js";
 
-const same = (a, b) => String(a).trim().toLocaleLowerCase("fr") === String(b).trim().toLocaleLowerCase("fr");
+// Key of a search in the list, the same as the server (matching.query_key):
+// « Crème fraîche » = « creme fraiche », « jus d’orange » = « jus d'orange »
+export function listKey(text) {
+    const words = String(text || "")
+        .toLowerCase()
+        .replace(/œ/g, "oe")
+        .replace(/æ/g, "ae")
+        .normalize("NFKD")
+        .replace(/\p{M}/gu, "")
+        .match(/[a-z0-9]+/g);
+    return words ? words.join(" ") : "";
+}
+
+const same = (a, b) => listKey(a) === listKey(b);
 
 function sameProduct(a, b) {
     if (!a || !b || a.store !== b.store) return false;
@@ -27,7 +40,7 @@ function sameProduct(a, b) {
     return a.name === b.name && a.price === b.price;
 }
 
-// Line of the list for a search (same text, case and spaces ignored)
+// Line of the list for a search (same words, case, accents and punctuation ignored)
 export function lineFor(query, list = state.list) {
     return (list || []).find((item) => same(item.query, query)) || null;
 }
@@ -103,13 +116,18 @@ function undoer(query, before, after, store) {
 }
 
 // Saves the choice of the sheet. Returns the message shown.
+// `quantity` is the quantity of the line (the sheet shows it), or one more
+// with `absolute: false` (« Ajouter … à ma liste quand même »).
 // `saved` runs once the list is saved, before the message (the sheet closes)
-export async function addToMyList({ query, product = null, quantity = 1, saved = null }) {
-    const before = copy(lineFor(query));
+export async function addToMyList({ query, product = null, quantity = 1, absolute = true, saved = null }) {
+    const list = copy(state.list) || [];
+    let item = await api("/api/list", { method: "POST", body: { query, quantity, product } });
+    // The line as it was: the server may have merged the search into a line
+    // written differently (« creme fraiche » into « Crème fraîche »)
+    const before = list.find((line) => line.id === item.id) || null;
     const replaced = product && before && before.picks[product.store];
     const replacedOther = replaced && !sameProduct(replaced, product) ? replaced : null;
-    let item = await api("/api/list", { method: "POST", body: { query, quantity, product } });
-    if (item.quantity !== quantity) {
+    if (absolute && item.quantity !== quantity) {
         item = await api(`/api/list/${item.id}`, { method: "PATCH", body: { quantity } });
     }
     await loadList();

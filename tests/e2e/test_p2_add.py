@@ -156,3 +156,60 @@ def test_on_a_phone_the_message_hides_no_main_action(mobile, view):
         target_box = target.bounding_box()
         if target_box:
             assert not boxes_overlap(toast.bounding_box(), target_box)
+
+
+def test_list_key_is_the_key_of_the_server(desktop):
+    from backend.services.matching import query_key
+    from tests.e2e.helpers import js_eval
+
+    page = desktop
+    page.goto(page.base)
+    for text in ["Crème fraîche", "creme  fraiche ", "Jus d’orange", "jus d'orange", "Œufs x12", "CAFÉ-moulu"]:
+        assert js_eval(page, "/static/js/views/search/add-sheet.js", "listKey", text) == query_key(text)
+
+
+def test_a_line_written_differently_keeps_its_quantity_and_undo_keeps_it(desktop):
+    page = desktop
+    page.goto(page.base)
+    # « Crème fraîche », 3, the product of Carrefour
+    search(page, "Crème fraîche")
+    page.get_by_role("button", name=re.compile(r"^Ajouter Crème fraîche épaisse .*\(Carrefour")).click()
+    sheet = page.get_by_role("dialog")
+    sheet.get_by_role("spinbutton", name="Quantité").fill("3")
+    sheet.get_by_role("button", name="Ajouter").click()
+    expect(sheet).to_be_hidden()
+
+    # The same search without accents: the line is found, its quantity kept
+    search(page, "creme fraiche")
+    page.get_by_role("button", name=re.compile(r"^Ajouter Crème fraîche épaisse .*\(Lidl")).click()
+    expect(sheet.get_by_role("spinbutton", name="Quantité")).to_have_value("3")
+    expect(sheet.locator("#sheet-note")).to_have_text("« Crème fraîche » est déjà dans votre liste (quantité 3).")
+    sheet.get_by_role("button", name="Enregistrer").click()
+    expect(page.get_by_role("status")).to_contain_text("Ajouté à « Crème fraîche »")
+    [item] = list_items(page)
+    assert (item["query"], item["quantity"], sorted(item["picks"])) == ("Crème fraîche", 3, ["carrefour", "lidl"])
+
+    # « Annuler » takes the product of Lidl back, never the whole line
+    page.get_by_role("status").get_by_role("button", name="Annuler").click()
+    expect(page.get_by_role("status")).to_have_text("Ajout annulé")
+    [item] = list_items(page)
+    assert (item["query"], item["quantity"], sorted(item["picks"])) == ("Crème fraîche", 3, ["carrefour"])
+
+
+def test_add_anyway_adds_one_to_a_line_written_differently(desktop):
+    page = desktop
+    page.goto(page.base)
+    created = page.request.post(f"{page.base}/api/list", data={"query": "Crème de marrons", "quantity": 2})
+    assert created.ok
+    page.reload()
+    search(page, "creme de marrons")
+    page.get_by_test_id("no-results").get_by_role(
+        "button", name="Ajouter « creme de marrons » à ma liste quand même"
+    ).click()
+    expect(page.get_by_role("status")).to_contain_text("« Crème de marrons » : quantité 3")
+    [item] = list_items(page)
+    assert (item["query"], item["quantity"]) == ("Crème de marrons", 3)
+    page.get_by_role("status").get_by_role("button", name="Annuler").click()
+    expect(page.get_by_role("status")).to_have_text("Ajout annulé")
+    [item] = list_items(page)
+    assert (item["query"], item["quantity"]) == ("Crème de marrons", 2)
