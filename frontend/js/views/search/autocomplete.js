@@ -140,11 +140,12 @@ function render() {
     setHtml(
         listbox,
         html`${items.map(
-            (s, i) => html`<li role="option" id="q-opt-${i}" class="suggestion-option" aria-selected="${i === active ? "true" : "false"}" data-index="${i}">
-                <span class="suggestion-icon">${icon(s.source === "recent" ? "clock" : s.source === "list" ? "list" : "search")}</span>
-                <span class="suggestion-text">${highlight(s.value, typed)}</span>
-                ${SOURCE_TEXT[s.source] && html`<span class="suggestion-source">${SOURCE_TEXT[s.source]}</span>`}
-            </li>`,
+            (s, i) =>
+                html`<li role="option" id="q-opt-${i}" class="suggestion-option" aria-selected="${i === active ? "true" : "false"}" data-index="${i}">${icon(
+                    s.source === "recent" ? "clock" : s.source === "list" ? "list" : "search",
+                )}<span class="suggestion-text">${highlight(s.value, typed)}</span>${
+                    SOURCE_TEXT[s.source] && html`<span class="suggestion-source">${SOURCE_TEXT[s.source]}</span>`
+                }</li>`,
         )}`,
     );
     if (active >= 0) {
