@@ -129,8 +129,8 @@ def test_screen_readers_hear_that_the_list_opens(desktop):
     box = field(page)
     box.click()
     box.press_sequentially("vinaig")
+    expect(options(page).first).to_be_visible()  # the list of foods may arrive after the typing
     count = options(page).count()
-    assert count > 0
     live = page.locator("#live-region")
     expect(live).to_have_text(re.compile(r"^\d+ suggestions?, flèches haut et bas pour choisir$"))
     words = "suggestions" if count > 1 else "suggestion"
