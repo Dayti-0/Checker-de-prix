@@ -23,23 +23,32 @@ import { announce, confirmDialog, notify } from "../../core/ui.js";
 export const health = { list: null, error: null };
 
 let pending = null;
+let rerun = null;
 
-// Loads the state of every retailer (one request at a time)
+// Loads the state of every retailer (one request at a time). Asked while a
+// request runs, whose answer may predate the change: asked again after it.
 export function loadHealth() {
-    if (!pending) {
-        pending = api("/api/status/retailers")
-            .then((list) => {
-                health.list = list;
-                health.error = null;
-            })
-            .catch((err) => {
-                health.error = err.message;
-            })
-            .finally(() => {
-                pending = null;
-                emit("status:changed");
+    if (pending) {
+        if (!rerun) {
+            rerun = pending.then(() => {
+                rerun = null;
+                return loadHealth();
             });
+        }
+        return rerun;
     }
+    pending = api("/api/status/retailers")
+        .then((list) => {
+            health.list = list;
+            health.error = null;
+        })
+        .catch((err) => {
+            health.error = err.message;
+        })
+        .finally(() => {
+            pending = null;
+            emit("status:changed");
+        });
     return pending;
 }
 
