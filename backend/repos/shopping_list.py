@@ -139,8 +139,9 @@ async def insert_item(
     excluded: list[str] | tuple = (),
     checked: bool = False,
     checked_at: float | None = None,
+    created_at: float | None = None,
 ) -> int:
-    """Insert a line (with ``item_id`` to put a deleted line back); returns its id."""
+    """Insert a line (with ``item_id`` and ``created_at`` to put a deleted line back); returns its id."""
     async with writing(db) as tx:
         cursor = await tx.execute(
             "INSERT INTO shopping_list (id, query, query_key, quantity, picks_json, target, category, note, compare,"
@@ -158,7 +159,7 @@ async def insert_item(
                 json.dumps(sorted(set(excluded))),
                 1 if checked else 0,
                 checked_at,
-                time.time(),
+                time.time() if created_at is None else created_at,
             ),
         )
         await _bump(tx)
@@ -209,6 +210,39 @@ async def uncheck_all(*, db: aiosqlite.Connection | None = None) -> None:
     async with writing(db) as tx:
         await tx.execute("UPDATE shopping_list SET checked = 0, checked_at = NULL")
         await _bump(tx)
+
+
+# --- Deleted lines (« Annuler ») -------------------------------------------------
+
+
+async def trash_items(items: list[dict], now: float, max_age: float, *, db: aiosqlite.Connection) -> None:
+    """Keep the deleted lines ``items`` (as read by list_items) for « Annuler »; forget
+    those deleted more than ``max_age`` seconds ago. In the transaction ``db``."""
+    await db.execute("DELETE FROM list_trash WHERE deleted_at < ?", (now - max_age,))
+    for item in items:
+        await db.execute(
+            "INSERT OR REPLACE INTO list_trash (id, item_json, deleted_at) VALUES (?, ?, ?)",
+            (item["id"], json.dumps(item), now),
+        )
+
+
+async def trashed_items(ids: list[int], since: float) -> list[dict]:
+    """The lines ``ids`` deleted after ``since`` (in the order of ``ids``)."""
+    if not ids:
+        return []
+    db = await get_db()
+    marks = ", ".join("?" for _ in ids)
+    cursor = await db.execute(
+        f"SELECT id, item_json FROM list_trash WHERE deleted_at >= ? AND id IN ({marks})",  # noqa: S608
+        (since, *ids),
+    )
+    rows = {row["id"]: _json(row["item_json"], {}) for row in await cursor.fetchall()}
+    return [rows[i] for i in ids if rows.get(i)]
+
+
+async def untrash(ids: list[int], *, db: aiosqlite.Connection) -> None:
+    for item_id in ids:
+        await db.execute("DELETE FROM list_trash WHERE id = ?", (item_id,))
 
 
 # --- Usual items ---------------------------------------------------------------

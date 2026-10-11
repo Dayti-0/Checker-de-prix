@@ -20,6 +20,7 @@ from backend.models import (
     ListVersion,
     ParsedLine,
     ParseRequest,
+    RestoreRequest,
     Template,
     TemplateApply,
     TemplateCreate,
@@ -78,10 +79,13 @@ async def api_list_bulk(request: BulkRequest):
     return await shopping_list.bulk_add(request.items)
 
 
-@router.post("/list/restore", response_model=ListItem)
-async def api_list_restore(item: ListItem):
-    """« Annuler » after a deletion: the line comes back as it was."""
-    return await shopping_list.restore_item(item)
+@router.post("/list/restore", response_model=list[ListItem])
+async def api_list_restore(request: RestoreRequest):
+    """« Annuler » after a deletion (or « Vider la liste »): the lines come back as the
+    server kept them ({id} or {ids}); returns the list. 404 ``restore_expired`` when too late."""
+    if not request.all_ids():
+        raise HTTPException(422, "Aucun article à rétablir")
+    return await shopping_list.restore_items(request.all_ids())
 
 
 @router.post("/list/checks", response_model=list[ListItem])

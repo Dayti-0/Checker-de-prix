@@ -54,7 +54,7 @@ PRODUCTS = {
 }
 
 # Tables of P5 emptied before each test (the list itself: tests/e2e/server.reset_data)
-TABLES = ("list_history", "templates", "basket_last")
+TABLES = ("list_history", "templates", "basket_last", "list_trash")
 
 
 def reset_p5() -> None:

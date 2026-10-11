@@ -119,10 +119,24 @@ UNITS = ("kg", "L", PIECE)
 # ---------------------------------------------------------------------------
 
 
+# Unit names typed by hand, as parse_quantity reads them (« 500 grammes » → « 500 g »)
+_UNIT_WORDS = (
+    (r"kilogrammes?|kilos?", "kg"),
+    (r"grammes?|gr", "g"),
+    (r"centilitres?", "cl"),
+    (r"millilitres?", "ml"),
+    (r"litres?", "L"),
+)
+
+
 def parse_target(text: str | None) -> tuple[float, str] | None:
-    """Quantity wanted: « 1 kg » → (1.0, "kg"), « 6 L » → (6.0, "L"), « 12 » → (12.0, "pièce")."""
+    """Quantity wanted: « 1 kg » → (1.0, "kg"), « 6 L » → (6.0, "L"), « 12 » → (12.0, "pièce"),
+    « 500 grammes » → (0.5, "kg"), « 1/2 litre » → (0.5, "L")."""
     if not text or not text.strip():
         return None
+    text = re.sub(r"(?<![\d/])1/2(?![\d/])|½", "0,5", text)
+    for words, unit in _UNIT_WORDS:
+        text = re.sub(rf"(\d)\s*(?:{words})(?![a-zà-ÿ])", rf"\1 {unit}", text, flags=re.I)
     quantity = parse_quantity(text)
     if quantity and quantity[0] > 0:
         return quantity

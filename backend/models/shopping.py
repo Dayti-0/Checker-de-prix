@@ -30,6 +30,7 @@ __all__ = [
     "PickIssue",
     "Plan",
     "PlanStore",
+    "RestoreRequest",
     "StoreAction",
     "StoreBasket",
     "Template",
@@ -44,6 +45,8 @@ TARGET_MAX = 40
 NOTE_MAX = 200
 CATEGORY_MAX = 60
 TEMPLATE_NAME_MAX = 60
+# Longest shopping list (services/shopping_list.MAX_ITEMS)
+MAX_ITEMS = 300
 
 # found: a product is counted; not_found: the retailer answered but has nothing
 # suitable; unchecked: the retailer could not be searched (store to choose,
@@ -188,6 +191,19 @@ class ParsedLine(BaseModel):
 
 class BulkRequest(BaseModel):
     items: list[ListItemCreate] = Field(max_length=300)
+
+
+class RestoreRequest(BaseModel):
+    """« Annuler » after a deletion: the ids of the deleted lines (``id`` or ``ids``).
+
+    The server puts back the lines it kept; anything else sent is ignored.
+    """
+
+    id: int | None = None
+    ids: list[int] = Field(default=[], max_length=MAX_ITEMS)
+
+    def all_ids(self) -> list[int]:
+        return ([self.id] if self.id is not None else []) + list(self.ids)
 
 
 class FinishRequest(BaseModel):

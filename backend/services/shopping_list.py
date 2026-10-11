@@ -324,53 +324,90 @@ async def finish(mode: str) -> list[ListItem]:
     return await get_list()
 
 
+# --- Delete, « Annuler » (B66) ------------------------------------------------------
+
+# How long a deleted line can be put back (the page offers it for 6 s): the lines
+# are kept by the server (table list_trash) and the page sends only their ids, so a
+# line comes back exactly as it was saved (choices and their verified prices, ticks,
+# date of addition), never as the page describes it.
+TRASH_SECONDS = 15 * 60
+
+
 async def delete_item(item_id: int) -> bool:
-    return await repo.delete_item(item_id)
-
-
-async def restore_item(item: ListItem) -> ListItem:
-    """Put back a deleted line as it was (same id, choices, target, ticks…)."""
-    category = _check_category(item.category) if item.category_set else None
+    """Delete a line (kept a while for « Annuler »)."""
     async with transaction() as db:
-        existing = await repo.get_by_key(repo.list_key(item.query))
-        if existing is not None:
-            # Added again meanwhile: the line takes back its choices and settings
-            current = _to_item(existing)
-            await repo.update_fields(
-                current.id,
-                db=db,
-                quantity=item.quantity,
-                picks=_dump({**current.picks, **item.picks}),
-                target=item.target,
-                note=item.note,
-                compare=item.compare,
-                excluded=item.excluded,
-                category=category,
-            )
-            item_id = current.id
-        else:
-            if await repo.count_items() >= MAX_ITEMS:
-                raise _full()
-            taken = await repo.get_item(item.id)
-            item_id = await repo.insert_item(
-                item.query,
-                item.quantity,
-                _dump(item.picks),
-                db=db,
-                item_id=None if taken else item.id,
-                target=item.target,
-                category=category,
-                note=item.note,
-                compare=item.compare,
-                excluded=item.excluded,
-                checked=item.checked,
-                checked_at=item.checked_at,
-            )
-    return await get_item(item_id)
+        raw = await repo.get_item(item_id)
+        if raw is None:
+            return False
+        await repo.delete_item(item_id, db=db)
+        await repo.trash_items([raw], time.time(), TRASH_SECONDS, db=db)
+    return True
 
 
 async def clear() -> None:
-    await repo.clear_items()
+    """Empty the list (its lines are kept a while for « Annuler »)."""
+    async with transaction() as db:
+        rows = await repo.list_items()
+        await repo.clear_items(db=db)
+        await repo.trash_items(rows, time.time(), TRASH_SECONDS, db=db)
+
+
+async def _restore_row(db, raw: dict) -> None:
+    """Put back the deleted line ``raw`` in the transaction ``db``."""
+    existing = await repo.get_by_key(repo.list_key(raw["query"]))
+    if existing is not None:
+        # Added again meanwhile: the line takes back its choices and settings
+        await repo.update_fields(
+            existing["id"],
+            db=db,
+            quantity=raw["quantity"],
+            picks={**raw["picks"], **existing["picks"]},
+            target=raw["target"],
+            note=raw["note"],
+            compare=raw["compare"],
+            excluded=raw["excluded"],
+            category=raw["category"],
+        )
+        return
+    if await repo.count_items() >= MAX_ITEMS:
+        raise _full()
+    taken = await repo.get_item(raw["id"])
+    await repo.insert_item(
+        raw["query"],
+        raw["quantity"],
+        raw["picks"],
+        db=db,
+        item_id=None if taken else raw["id"],
+        target=raw["target"],
+        category=raw["category"],
+        note=raw["note"],
+        compare=raw["compare"],
+        excluded=raw["excluded"],
+        checked=raw["checked"],
+        checked_at=raw["checked_at"],
+        created_at=raw["created_at"],
+    )
+
+
+async def restore_items(ids: list[int]) -> list[ListItem]:
+    """« Annuler » after a deletion: the lines ``ids`` come back as they were; returns the list.
+
+    AppError 404 ``restore_expired`` when none of them can be put back any more.
+    """
+    wanted = list(dict.fromkeys(ids))
+    async with transaction() as db:
+        rows = await repo.trashed_items(wanted, time.time() - TRASH_SECONDS)
+        if not rows:
+            message = (
+                "Cet article ne peut plus être rétabli."
+                if len(wanted) < 2
+                else "Ces articles ne peuvent plus être rétablis."
+            )
+            raise AppError(message, 404, "restore_expired")
+        for raw in rows:
+            await _restore_row(db, raw)
+        await repo.untrash([raw["id"] for raw in rows], db=db)
+    return await get_list()
 
 
 async def usual_items() -> list[UsualItem]:
@@ -384,40 +421,76 @@ async def forget_usual(query: str) -> bool:
 # --- Pasted lists (B67) -------------------------------------------------------------
 
 _BULLET = re.compile(r"^(?:[-–—•·*▪◦●○■□✓✔☐☑☒>+]+|\[\s*[xX✓✔]?\s*\]|\(\s*\)|\d{1,3}[.)](?=\s))\s*")
-_UNIT = r"(?:kg|kilos?|grammes?|gr|g|litres?|l|cl|ml)"
+# Units of a size, longest names first (« kilogrammes » before « kilo » before « kg »)
+_UNIT = r"(?:kilogrammes?|kilos?|kg|grammes?|gr|g|centilitres?|millilitres?|litres?|cl|ml|l)"
+_UNIT_NAMES = (
+    (r"kilogrammes?|kilos?|kg", "kg"),
+    (r"grammes?|gr|g", "g"),
+    (r"centilitres?|cl", "cl"),
+    (r"millilitres?|ml", "ml"),
+    (r"litres?|l", "L"),
+)
 _SIZE = rf"(?:\d+\s*[x×]\s*)?\d+(?:[.,]\d+)?\s*{_UNIT}(?:\s*[x×]\s*\d+)?"
+_SIZE_ONLY = re.compile(rf"^\(?\s*({_SIZE})\s*\)?$", re.I)
 _PREFIX_SIZE = re.compile(rf"^({_SIZE})(?![a-zà-ÿ])\s*(?:de\s+|d['’]\s*)?(.+)$", re.I)
 _PREFIX_TIMES = re.compile(r"^(\d{1,2})\s*[x×*]\s*(.+)$", re.I)
 _PREFIX_NUMBER = re.compile(r"^(\d{1,3})\s+(.+)$")
 _SUFFIX_SIZE = re.compile(rf"^(.+?)\s*[,:(-]?\s*({_SIZE})\s*\)?$", re.I)
 _SUFFIX_TIMES = re.compile(r"^(.+?)\s*[x×*]\s*(\d{1,3})$", re.I)
 _SUFFIX_COUNT = re.compile(r"^(.+?)\s*(?:\((\d{1,2})\)|[:=]\s*(\d{1,2}))$")
+# Products counted by the piece: « 12 œufs » is twelve eggs (a target), not twelve boxes
 _COUNTABLE = re.compile(
-    r"(?:oeufs?|œufs?|rouleaux?|yaourts?|yoghourts?|capsules?|dosettes?|sachets?|couches?|lingettes?|"
-    r"tranches?|pots?|briques?|canettes?|bouteilles?|pastilles?|lavages?|pi[eè]ces?)\b",
+    r"(?:oeufs?|œufs?|rouleaux?|yaourts?|yoghourts?|capsules?|dosettes?|couches?|lingettes?|"
+    r"tranches?|pastilles?|lavages?|pi[eè]ces?)\b",
     re.I,
 )
+# Pieces of a product: « 10 rouleaux de papier toilette » is ten rolls (a target) of « papier toilette »
+_PIECES = re.compile(r"^(?:rouleaux|rouleau|tranches?|pi[eè]ces?|unit[eé]s?)\s+(?:de\s+|d['’]\s*)?(.+)$", re.I)
+_SUFFIX_PIECES = re.compile(r"^(.+?)\s+(\d{1,3})\s*(?:rouleaux|rouleau|tranches?|pi[eè]ces?|unit[eé]s?)$", re.I)
+# Packaging: « 2 paquets de pâtes » and « chocolat 2 tablettes » are two packs
+_PACKAGING = (
+    r"(?:paquets?|bo[iî]tes?|packs?|sachets?|bouteilles?|briques?|pots?|barquettes?|tubes?|flacons?|"
+    r"bocal|bocaux|conserves?|filets?|lots?|canettes?|bidons?|sacs?|tablettes?|plaquettes?|bottes?|"
+    r"cartons?|berlingots?)"
+)
+_CONTAINER = re.compile(rf"^{_PACKAGING}\s+(?:de\s+|d['’]\s*)(.+)$", re.I)
+_SUFFIX_CONTAINER = re.compile(rf"^(.+?)\s+(\d{{1,2}})\s*{_PACKAGING}$", re.I)
+_FRACTIONS = ((re.compile(r"(?<![\d/])1/2(?![\d/])|½"), "0,5"), (re.compile(r"(?<![\d/])1/4(?![\d/])|¼"), "0,25"))
 _SPLIT = re.compile(r";|,(?!\d)\s*|\s+\+\s+")
 
 
 def _size_text(text: str) -> str:
-    """« 1kg » → « 1 kg », « 6x1,5L » → « 6 x 1,5 L »."""
+    """« 1kg » → « 1 kg », « 6x1,5L » → « 6 x 1,5 L », « 500 grammes » → « 500 g »."""
     text = re.sub(r"\s+", " ", text.strip())
     text = re.sub(r"(\d)\s*([x×])\s*(\d)", r"\1 x \3", text)
-    text = re.sub(rf"(\d)\s*({_UNIT})\b", r"\1 \2", text, flags=re.I)
-    return re.sub(r"\b(l|litres?)\b", "L", text, flags=re.I)
+    for names, unit in _UNIT_NAMES:
+        text = re.sub(rf"(\d)\s*(?:{names})(?![a-zà-ÿ])", rf"\1 {unit}", text, flags=re.I)
+    return text
 
 
 def _countable(text: str) -> bool:
     return bool(_COUNTABLE.match(text.strip()))
 
 
-def _parse_piece(text: str) -> ParsedLine | None:
+def _clean_piece(text: str) -> str:
     text = re.sub(r"\s+", " ", text).strip(" \t.;,:")
     previous = None
     while text != previous:  # « - [ ] beurre »
         previous = text
         text = _BULLET.sub("", text).strip()
+    for pattern, value in _FRACTIONS:
+        text = pattern.sub(value, text)
+    return text
+
+
+def size_only(text: str) -> str | None:
+    """« 500g » alone (after a comma: « pâtes, 500g »): the size, else None."""
+    m = _SIZE_ONLY.match(_clean_piece(text))
+    return _size_text(m.group(1)) if m else None
+
+
+def _parse_piece(text: str) -> ParsedLine | None:
+    text = _clean_piece(text)
     if not text:
         return None
     quantity, target = 1, None
@@ -427,13 +500,25 @@ def _parse_piece(text: str) -> ParsedLine | None:
     elif m := _PREFIX_TIMES.match(text):
         quantity, text = int(m.group(1)), m.group(2)
     elif m := _PREFIX_NUMBER.match(text):
-        # « 12 œufs »: twelve eggs; « 2 lait »: two packs
-        if _countable(m.group(2)):
+        rest = m.group(2)
+        if container := _CONTAINER.match(rest):  # « 2 paquets de pâtes »: two packs
+            quantity, text = int(m.group(1)), container.group(1)
+        elif pieces := _PIECES.match(rest):  # « 10 rouleaux de papier toilette »: ten rolls
+            target, text = m.group(1), pieces.group(1)
+        elif _countable(rest):  # « 12 œufs »: twelve eggs
+            target, text = m.group(1), rest
+        else:  # « 2 lait »: two packs
+            quantity, text = int(m.group(1)), rest
+    if container := _CONTAINER.match(text):  # « paquet de pâtes »
+        text = container.group(1)
+        if target is None and (m := _PREFIX_NUMBER.match(text)):  # « pack de 6 bières »
             target, text = m.group(1), m.group(2)
-        else:
-            quantity, text = int(m.group(1)), m.group(2)
     if target is None and (m := _SUFFIX_SIZE.match(text)):
         text, target = m.group(1), _size_text(m.group(2))
+    if target is None and (m := _SUFFIX_PIECES.match(text)):  # « jambon 4 tranches »
+        text, target = m.group(1), m.group(2)
+    if m := _SUFFIX_CONTAINER.match(text):  # « chocolat noir 2 tablettes »
+        text, quantity = m.group(1), int(m.group(2))
     if m := _SUFFIX_TIMES.match(text):
         text, count = m.group(1), int(m.group(2))
         if target is None and _countable(text):
@@ -441,7 +526,11 @@ def _parse_piece(text: str) -> ParsedLine | None:
         else:
             quantity = count
     if m := _SUFFIX_COUNT.match(text):
-        text, quantity = m.group(1), int(m.group(2) or m.group(3))
+        text, count = m.group(1), int(m.group(2) or m.group(3))
+        if target is None and _countable(text):  # « œufs (12) »
+            target = str(count)
+        else:
+            quantity = count
     query = text.strip(" \t.;,:-–—")[:120].strip()
     if not query or not re.search(r"[^\W\d_]", query):
         return None
@@ -450,11 +539,18 @@ def _parse_piece(text: str) -> ParsedLine | None:
 
 def parse_list_text(text: str) -> list[ParsedLine]:
     """Items of a pasted list (pure): « 2 lait demi-écrémé », « farine 1kg », « - beurre »,
-    « • œufs x12 », « 3x yaourts »… (one item per line, or separated by « ; », « , » or « + »).
+    « • œufs x12 », « 3x yaourts », « 2 paquets de pâtes »… (one item per line, or separated
+    by « ; », « , » or « + »; a size alone after a comma belongs to the item before it).
     The same item twice is merged (quantities added)."""
     found: dict[str, ParsedLine] = {}
     for line in (text or "").splitlines():
+        last: ParsedLine | None = None
         for piece in _SPLIT.split(line):
+            size = size_only(piece)
+            if size is not None:
+                if last is not None and last.target is None:
+                    last.target = size
+                continue
             parsed = _parse_piece(piece)
             key = repo.list_key(parsed.query) if parsed else ""
             if not key:
@@ -462,8 +558,9 @@ def parse_list_text(text: str) -> list[ParsedLine]:
             if key in found:
                 found[key].quantity = min(99, found[key].quantity + parsed.quantity)
                 found[key].target = found[key].target or parsed.target
+                last = found[key]
             elif len(found) < MAX_ITEMS:
-                found[key] = parsed
+                found[key] = last = parsed
     return list(found.values())
 
 

@@ -50,6 +50,23 @@ from tests.conftest import run
         ("thé : 2", [("thé", 2, None)]),
         ("pommes, poires ; bananes", [("pommes", 1, None), ("poires", 1, None), ("bananes", 1, None)]),
         ("lait + pain", [("lait", 1, None), ("pain", 1, None)]),
+        # Packaging: so many packs of the product
+        ("2 paquets de pâtes", [("pâtes", 2, None)]),
+        ("3 boîtes de thon", [("thon", 3, None)]),
+        ("chocolat noir 2 tablettes", [("chocolat noir", 2, None)]),
+        ("paquet de riz", [("riz", 1, None)]),
+        ("pack de 6 bières", [("bières", 1, "6")]),
+        # Pieces: a target counted by the piece
+        ("10 rouleaux de papier toilette", [("papier toilette", 1, "10")]),
+        ("jambon 4 tranches", [("jambon", 1, "4")]),
+        ("Oeufs (12)", [("Oeufs", 1, "12")]),
+        # Unit names and fractions, a size alone after a comma
+        ("2 kilos de pommes", [("pommes", 1, "2 kg")]),
+        ("500 grammes de beurre", [("beurre", 1, "500 g")]),
+        ("lessive 2,5 litres", [("lessive", 1, "2,5 L")]),
+        ("1/2 litre de crème", [("crème", 1, "0,5 L")]),
+        ("pâtes, 500g", [("pâtes", 1, "500 g")]),
+        ("500g, pâtes", [("pâtes", 1, None)]),
         ("  \n- \n•\n123\n", []),
     ],
 )

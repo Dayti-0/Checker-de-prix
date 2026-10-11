@@ -527,8 +527,9 @@ def test_restore_ticks_and_finish(client, sites):
     client.patch(f"/api/list/{flour['id']}", json={"exclude_store": "aldi"})
     deleted = next(i for i in client.get("/api/list").json() if i["id"] == flour["id"])
     client.delete(f"/api/list/{flour['id']}")
-    restored = client.post("/api/list/restore", json=deleted).json()
-    assert restored == {**deleted, "created_at": restored["created_at"]}
+    assert client.get("/api/list").json() == []
+    restored = client.post("/api/list/restore", json={"id": flour["id"]}).json()
+    assert restored == [deleted]  # exactly as it was: same id, target, « pas disponible ici », date
     sugar = add(client, "sucre")
     now = time.time()
     checks = [
@@ -544,3 +545,52 @@ def test_restore_ticks_and_finish(client, sites):
     client.post("/api/list/checks", json={"checks": [{"id": sugar["id"], "checked": True}]})
     items = client.post("/api/list/finish", json={"mode": "remove"}).json()
     assert [i["query"] for i in items] == ["farine"]
+
+
+def test_undo_puts_back_what_the_server_kept(client, sites):
+    """« Annuler » sends ids only: a price or a product described by the page is never taken."""
+    sugar = add(client, "sucre")
+    picked = client.patch(
+        f"/api/list/{sugar['id']}",
+        json={"set_pick": {"store": "lidl", "name": "Sucre en poudre", "price": 0.99, "product_url": url("lidl", "x")}},
+    ).json()
+    assert picked["picks"]["lidl"]["verified"] is False  # never read by PrixMalin
+    client.delete(f"/api/list/{sugar['id']}")
+    forged = {**picked, "quantity": 9, "picks": {"lidl": {**picked["picks"]["lidl"], "price": 0.01, "verified": True}}}
+    items = client.post("/api/list/restore", json=forged).json()
+    assert items == [picked]
+    # Only once: the line has left the server's trash
+    again = client.post("/api/list/restore", json={"id": sugar["id"]})
+    assert (again.status_code, again.json()["code"]) == (404, "restore_expired")
+    assert again.json()["detail"] == "Cet article ne peut plus être rétabli."
+    assert client.post("/api/list/restore", json={}).status_code == 422
+
+
+def test_undo_after_emptying_the_list(client, sites):
+    items = [add(client, q) for q in ("sucre", "farine", "beurre")]
+    before = client.get("/api/list").json()
+    assert client.delete("/api/list").status_code == 204
+    add(client, "farine", quantity=3)  # added again meanwhile: one line, its settings come back
+    restored = client.post("/api/list/restore", json={"ids": [i["id"] for i in items]}).json()
+    assert [i["query"] for i in restored] == ["sucre", "beurre", "farine"]
+    by_query = {i["query"]: i for i in restored}
+    assert by_query["sucre"] == next(i for i in before if i["query"] == "sucre")
+    assert by_query["farine"]["quantity"] == 1
+    gone = client.post("/api/list/restore", json={"ids": [items[0]["id"], 12345]})
+    assert gone.json()["detail"] == "Ces articles ne peuvent plus être rétablis."
+
+
+def test_undo_window(client, sites, monkeypatch):
+    from backend.services import shopping_list
+
+    sugar = add(client, "sucre")
+    later = time.time() + shopping_list.TRASH_SECONDS + 1
+    client.delete(f"/api/list/{sugar['id']}")
+    monkeypatch.setattr(shopping_list.time, "time", lambda: later)
+    assert client.post("/api/list/restore", json={"id": sugar["id"]}).status_code == 404
+    # The lines deleted long ago are forgotten at the next deletion
+    flour = add(client, "farine")
+    client.delete(f"/api/list/{flour['id']}")
+    with sqlite3.connect(config.DB_PATH) as db:
+        assert [r[0] for r in db.execute("SELECT id FROM list_trash")] == [flour["id"]]
+    db.close()
