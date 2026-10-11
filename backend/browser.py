@@ -26,7 +26,11 @@ goes back to the shared browser for every retailer).
   in the queue; ``timeout`` only covers the work (starting the browser included);
 - spaced out: ``MIN_REQUEST_INTERVAL_SECONDS`` (``REQUEST_INTERVAL_SECONDS`` for
   Intermarché) plus 0 to 0.5 s;
-- none at all to a retailer paused after a hard block (services/circuit.py);
+- none at all to a retailer paused after a hard block (services/circuit.py):
+  the pause starts on the browser loop as soon as the site refused a call, so
+  the calls already waiting for the same tab send nothing either; nor do the
+  ones that were waiting when the site asked for an anti-robot check (they
+  fail at once with that check, B41/B47);
 - cancelled on the browser loop when the caller is (client of the API gone).
 
 Starting, relaunching and stopping the browser run in their own task: a caller
@@ -52,7 +56,13 @@ from backend import config
 from backend.errors import short_error
 from backend.models import BrowserStatus, RetailerWindow
 from backend.scrapers.base import BaseScraper, BlockedError, HardBlockError, StoreRequiredError
-from backend.scrapers.common import detect_block, hard_block_message, is_timeout_error, save_debug_snapshot
+from backend.scrapers.common import (
+    blocked_message,
+    detect_block,
+    hard_block_message,
+    is_timeout_error,
+    save_debug_snapshot,
+)
 from backend.services.circuit import HardBlocks
 
 logger = logging.getLogger("prixmalin.browser")
@@ -248,6 +258,14 @@ class BrowserManager:
         self._real: dict[str, Any] = {}  # dedicated windows (RealChrome) by retailer
         # What happened on the browser loop and must be saved by the caller side
         self._pending: list[tuple] = []
+        # Anti-robot checks and refusals seen on the site of each retailer (and
+        # the message of the last one): a call that waited for the tab while
+        # one came up makes no request
+        self._checks: dict[str, int] = {}
+        self._check_message: dict[str, str] = {}
+        # Retailer whose window the user closed during « Ouvrir le site », until
+        # « J'ai terminé » (the banner may still be shown)
+        self._closed_setup: str | None = None
 
     # ------------------------------------------------------------------
     # Public API (call from any event loop)
@@ -283,11 +301,13 @@ class BrowserManager:
         try:
             return await self._submit(key, fn, args, timeout, priority)
         except HardBlockError as e:
+            await self.flush()  # the pause started on the browser loop: saved now
             await self._record_hard_block(key, e)
             raise
         except BlockedError as e:
-            await self.hard_blocks.blocked(key)
-            e.recorded = True
+            if not e.recorded:
+                await self.hard_blocks.blocked(key)
+                e.recorded = True
             real = self._real.get(key)
             if real is not None:
                 real.challenge_pending = True  # « Ouvrir le site » loads the page again
@@ -300,14 +320,17 @@ class BrowserManager:
             await self._check_hard_block(key)
         kind = await self._call(self._protected, self._open_setup, key, url, timeout=90)
         if kind == "hard_block" and key:
-            await self._record_hard_block(key, HardBlockError(label=self._label(key)), raise_it=True)
+            await self.flush()  # the pause started on the browser loop: saved now
+            await self._check_hard_block(key)
 
     async def end_setup(self) -> str | None:
         """« J'ai terminé »: back to the invisible browser; returns the retailer that was shown."""
         await self.flush()
+        await self.hard_blocks.load()
         store, kind = await self._call(self._protected, self._end_setup, timeout=config.QUEUE_TIMEOUT_SECONDS + 60)
         if kind == "hard_block" and store:
-            await self._record_hard_block(store, HardBlockError(label=self._label(store)), raise_it=True)
+            await self.flush()  # the pause started on the browser loop: saved now
+            await self._check_hard_block(store)
         return store
 
     async def set_show_browser(self, show: bool) -> None:
@@ -384,14 +407,12 @@ class BrowserManager:
             label = self._label(key)
             raise HardBlockError(hard_block_message(label, until), retry_after=until, label=label)
 
-    async def _record_hard_block(self, key: str, error: HardBlockError, raise_it: bool = False) -> None:
-        """Start the pause of ``key`` after a hard block seen on its site (message with its end)."""
+    async def _record_hard_block(self, key: str, error: HardBlockError) -> None:
+        """Start the pause of ``key`` when the browser loop did not (message with its end)."""
         if error.retry_after is None:
             record = await self.hard_blocks.hard_block(key)
             error.retry_after = record.until
             error.args = (hard_block_message(error.label or self._label(key), record.until),)
-        if raise_it:
-            raise error
 
     async def _save_event(self, event: tuple) -> None:
         from backend.repos import cache
@@ -406,6 +427,8 @@ class BrowserManager:
                 await cache.clear_cache(f"{store}|")
         elif kind == "window_closed":
             await cache.clear_cache(f"{data[0]}|")
+        elif kind == "hard_block":
+            await self.hard_blocks.save(data[0])
 
     async def _submit(self, key: str, fn, args: tuple, timeout: float | None, priority: str) -> Any:
         self._ensure_thread()
@@ -476,21 +499,68 @@ class BrowserManager:
         priority: str = "interactive",
     ) -> Any:
         slot = self._slot(key)
+        checks = self._checks.get(key, 0)
         await slot.acquire(PRIORITIES.index(priority), config.QUEUE_TIMEOUT_SECONDS)
         try:
+            # The call before this one may have been refused by the site
+            self._refuse_after_block(key, checks)
             await self._pace(key)
             try:
-                if timeout is None:
-                    return await self._work(key, fn, args)
-                return await asyncio.wait_for(self._work(key, fn, args), timeout)
+                try:
+                    if timeout is None:
+                        return await self._work(key, fn, args)
+                    return await asyncio.wait_for(self._work(key, fn, args), timeout)
+                finally:
+                    self._last_request[key] = time.monotonic()
             except Exception as e:
+                if isinstance(e, BlockedError):
+                    self._note_block(key, e)
                 status = snapshot_status(fn, e)
                 if status:
                     await self._snapshot(key, status)
                 raise
         finally:
-            self._last_request[key] = time.monotonic()
             slot.release()
+
+    def _paused_until(self, key: str) -> float | None:
+        until = self.hard_blocks.record(key).until
+        return until if until > time.time() else None
+
+    def _refuse_if_paused(self, key: str) -> None:
+        """HardBlockError while ``key`` is paused after a hard block (no request at all)."""
+        until = self._paused_until(key)
+        if until:
+            label = self._label(key)
+            raise HardBlockError(hard_block_message(label, until), retry_after=until, label=label)
+
+    def _refuse_after_block(self, key: str, checks: int) -> None:
+        """Stop a call that waited for the tab while the site refused another one.
+
+        ``checks``: anti-robot checks seen on the site of ``key`` when the call
+        joined the queue. A pause after a hard block raises HardBlockError; a
+        check that came up meanwhile raises the same BlockedError (already
+        recorded): one more automated call would only show the site a robot.
+        """
+        self._refuse_if_paused(key)
+        if self._checks.get(key, 0) != checks:
+            error = BlockedError(self._check_message.get(key) or blocked_message(self._label(key)))
+            error.recorded = True
+            raise error
+
+    def _note_block(self, key: str, error: BlockedError) -> None:
+        """The site of ``key`` refused a call or asked for a check (on the browser loop, at once).
+
+        A hard block starts its pause here, before the next call waiting for
+        the tab goes; the caller side saves it (``flush``).
+        """
+        if isinstance(error, HardBlockError) and error.retry_after is None:
+            record = self.hard_blocks.start(key)
+            label = error.label or self._label(key)
+            error.retry_after, error.label = record.until, label
+            error.args = (hard_block_message(label, record.until),)
+            self._pending.append(("hard_block", key))
+        self._checks[key] = self._checks.get(key, 0) + 1
+        self._check_message[key] = str(error)
 
     async def _snapshot(self, key: str, status: str) -> None:
         """Keep the page of a search that failed (data/debug, B48)."""
@@ -730,6 +800,7 @@ class BrowserManager:
         self._pending.append(("closed", self.show_browser, store))
         self.show_browser = False
         if self._shared_setup:
+            self._closed_setup = self.setup_store
             self._shared_setup = False
             self.setup_mode = False
             self.setup_store = None
@@ -790,6 +861,7 @@ class BrowserManager:
 
     def _on_window_closed(self, key: str) -> None:
         if self.setup_store == key:
+            self._closed_setup = key
             self.setup_mode = False
             self.setup_store = None
             self._pending.append(("window_closed", key))
@@ -800,6 +872,9 @@ class BrowserManager:
         """Show ``url``; returns the kind of anti-robot page shown by a dedicated window."""
         if self.is_dedicated(key):
             return await self._open_dedicated(key, url)
+        if key:
+            self._refuse_if_paused(key)
+        self._closed_setup = None
         self._shared_setup = True
         self.setup_mode = True
         self.setup_store = key or "_setup"
@@ -815,6 +890,8 @@ class BrowserManager:
         slot = self._slot(tab)
         await slot.acquire(0, config.QUEUE_TIMEOUT_SECONDS)
         try:
+            if key:
+                self._refuse_if_paused(key)  # refused while this waited for the tab
             page = await self._get_page(tab)
             await page.goto(url, wait_until="domcontentloaded", timeout=45000)
             await page.bring_to_front()
@@ -829,6 +906,9 @@ class BrowserManager:
         slot = self._slot(key)
         await slot.acquire(0, config.QUEUE_TIMEOUT_SECONDS)
         try:
+            # Also refused while this waited for the tab: nothing is loaded
+            self._refuse_if_paused(key)
+            self._closed_setup = None
             self.setup_mode = True
             self.setup_store = key
             try:
@@ -842,16 +922,21 @@ class BrowserManager:
                 # Nothing to validate: the site refuses the connection for a while
                 self.setup_mode = False
                 self.setup_store = None
+                self._note_block(key, HardBlockError(label=self._label(key)))
+            elif kind == "captcha":
+                # The searches waiting for the window would only meet the check again
+                self._note_block(key, BlockedError(blocked_message(self._label(key))))
             return kind
         finally:
             self._last_request[key] = time.monotonic()
             slot.release()
 
     async def _end_setup(self) -> tuple[str | None, str | None]:
-        store = self.setup_store
+        # The retailer shown, also when the user already closed its window
+        store = self.setup_store or self._closed_setup
         was_shared = self._shared_setup
         self._shared_setup = self.setup_mode = False
-        self.setup_store = None
+        self.setup_store = self._closed_setup = None
         kind = None
         if was_shared and self._context is not None:
             await self._ensure_context()  # back to the invisible browser
@@ -862,6 +947,8 @@ class BrowserManager:
                 # What the window shows now (no request to the site)
                 kind = await detect_block(page)
                 real.challenge_pending = kind == "captcha"
+                if kind == "hard_block" and not self._paused_until(store):
+                    self._note_block(store, HardBlockError(label=self._label(store)))
         return store, kind
 
     async def _shutdown(self) -> None:

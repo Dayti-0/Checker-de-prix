@@ -363,6 +363,39 @@ def test_hard_block_page_in_the_tab(itm):
     clear_blocks(itm)
 
 
+def test_open_waiting_behind_a_hard_block_loads_nothing(itm):
+    """« Ouvrir le site » asked while a search is refused: no page of the site is loaded."""
+    clear_blocks(itm)
+    loads = []
+
+    async def prepare(page):
+        await fresh(page)
+        await page.goto("about:blank")
+
+    run(itm, prepare)
+
+    async def refused(page):
+        await page.route(HOME, lambda route: (loads.append(route.request.url), route.abort())[1])
+        await asyncio.sleep(0.5)  # the API answers 403 t=bv after a while
+        raise HardBlockError("bloqué", label="Intermarché")
+
+    async def scenario():
+        search = asyncio.create_task(itm.run("intermarche", refused, timeout=30))
+        await asyncio.sleep(0.2)
+        with pytest.raises(HardBlockError) as opened:
+            await itm.open_setup("intermarche", HOME)
+        with pytest.raises(HardBlockError) as searched:
+            await search
+        return opened.value, searched.value
+
+    opened, searched = asyncio.run(scenario())
+    assert loads == []
+    assert opened.retry_after == searched.retry_after
+    assert itm.hard_blocks.record("intermarche").seconds == 30 * 60  # not doubled
+    assert itm.status().setup_mode is False
+    clear_blocks(itm)
+
+
 def test_store_finder(itm):
     async def scenario(page):
         await fresh(page)
@@ -502,6 +535,28 @@ def test_window_closed_by_the_user_opens_again_at_the_next_search(itm):
     assert run(itm, _blank) == "about:blank"
     assert real.running is True
     assert itm.status().windows[0].closed_by_user is False
+
+
+def test_done_after_the_user_closed_the_window(itm):
+    """« J'ai terminé » pressed after closing the window still names the retailer shown."""
+    clear_blocks(itm)
+    run(itm, fresh)
+    asyncio.run(itm.open_setup("intermarche", HOME))
+    real = itm._real["intermarche"]
+
+    async def close_window(page):
+        session = await real._browser.new_browser_cdp_session()
+        await session.send("Browser.close")
+
+    run(itm, close_window)
+    for _ in range(50):
+        if not real.running:
+            break
+        time.sleep(0.1)
+    assert itm.status().setup_mode is False
+    assert asyncio.run(itm.end_setup()) == "intermarche"
+    assert asyncio.run(itm.end_setup()) is None  # pressed twice: nothing shown any more
+    assert real.running is False  # « J'ai terminé » does not start Chrome again
 
 
 def test_window_kept_when_prixmalin_restarts(itm, tmp_path):

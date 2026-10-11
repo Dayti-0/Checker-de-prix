@@ -82,6 +82,9 @@ def test_window_closed_by_the_user(screen, tmp_path):
         # Only the results of the retailer that was open are forgotten
         assert await cache.get_entry("aldi|||farine") is None
         assert await cache.get_entry("lidl|||farine") is not None
+        # « J'ai terminé » pressed afterwards (the banner was still shown) names Aldi
+        assert await manager.end_setup() == "aldi"
+        assert await manager.end_setup() is None
         await manager.shutdown()
 
     run(scenario())
@@ -292,3 +295,50 @@ def test_unblock_api(monkeypatch):
         after = client.delete("/api/browser/blocks/intermarche").json()
         assert after["blocked_until"] == {}
         assert client.delete("/api/browser/blocks/inconnue").status_code == 404
+
+
+def test_done_resets_only_the_retailer_shown(monkeypatch):
+    """« J'ai terminé » forgets the results and the circuit of the retailer shown, nothing else."""
+    from backend import main
+    from backend.browser import browser
+    from backend.services import search
+
+    shown = []
+
+    async def fake_end():
+        return shown.pop(0)
+
+    monkeypatch.setattr(browser, "end_setup", fake_end)
+    monkeypatch.setattr(browser, "setup_store", None)
+    keys = ("aldi|-|farine", "lidl|-|farine", "intermarche|06814|farine")
+
+    async def seed():
+        for key in keys:
+            await cache.set_cached(key, [{"store": key.split("|")[0], "name": "Farine", "price": 1.0}])
+        for store in ("aldi", "lidl", "intermarche"):
+            search._circuit.update(store, "", "blocked", "vérification")
+
+    async def left():
+        kept = {key: await cache.get_entry(key) is not None for key in keys}
+        circuits = {store: search._circuit.get(store, "") is not None for store in ("aldi", "lidl", "intermarche")}
+        return kept, circuits
+
+    with TestClient(main.app) as client:
+
+        def done(store):
+            shown.append(store)
+            assert client.post("/api/browser/setup/done").status_code == 200
+            return client.portal.call(left)
+
+        client.portal.call(seed)
+        # Nothing shown any more (pressed twice, window already acknowledged): nothing reset
+        kept, circuits = done(None)
+        assert all(kept.values()) and all(circuits.values())
+        kept, circuits = done("aldi")
+        assert kept == {"aldi|-|farine": False, "lidl|-|farine": True, "intermarche|06814|farine": True}
+        assert circuits == {"aldi": False, "lidl": True, "intermarche": True}
+        # The browser opened without a retailer: never the Intermarché window's state
+        monkeypatch.setattr(config, "REAL_CHROME_STORES", ("intermarche",))
+        kept, circuits = done("_setup")
+        assert kept == {"aldi|-|farine": False, "lidl|-|farine": False, "intermarche|06814|farine": True}
+        assert circuits == {"aldi": False, "lidl": False, "intermarche": True}

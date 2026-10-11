@@ -93,12 +93,28 @@ class HardBlocks:
         until = self.record(key).until
         return until if until > now else None
 
-    async def hard_block(self, key: str, now: float | None = None) -> BlockRecord:
-        """The site of ``key`` refused the connection: start (or lengthen) its pause."""
-        await self.load()
+    def start(self, key: str, now: float | None = None) -> BlockRecord:
+        """The site of ``key`` refused the connection: start (or lengthen) its pause, in memory.
+
+        Called on the browser loop as soon as the answer is read, before the
+        next call waiting for the same tab goes: that call sees the pause and
+        sends nothing. ``save`` then keeps the record in the database.
+        """
         record = next_hard_block(self._records.get(key), time.time() if now is None else now)
+        self._records[key] = record
         logger.warning("%s refused the connection: no call before %s s from now", key, int(record.seconds))
-        return await self._save(key, record)
+        return record
+
+    async def hard_block(self, key: str, now: float | None = None) -> BlockRecord:
+        """The site of ``key`` refused the connection: start (or lengthen) its pause and save it."""
+        await self.load()
+        return await self._save(key, self.start(key, now))
+
+    async def save(self, key: str) -> None:
+        """Keep in the database the record of ``key`` held in memory (after ``start``)."""
+        record = self._records.get(key)
+        if record is not None:
+            await self._save(key, record)
 
     async def blocked(self, key: str, now: float | None = None) -> None:
         """The site of ``key`` asked for an anti-robot check (remembered 24 h by the warm-up)."""

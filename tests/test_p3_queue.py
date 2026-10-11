@@ -8,7 +8,8 @@ import pytest
 from backend import config
 from backend.browser import BrowserManager, QueueTimeout, browser
 from backend.models import Product
-from backend.services import search
+from backend.scrapers.base import BlockedError, HardBlockError
+from backend.services import circuit, search
 from tests.conftest import run
 
 
@@ -229,3 +230,109 @@ def test_client_gone_frees_the_tab_quickly(monkeypatch, tmp_path):
         asyncio.run(browser.shutdown())
     assert result is None and started
     assert delay < 1.0  # the tab is free again in less than a second
+
+
+# --- a refusal of the site stops the calls already waiting (B41, B47) ------------------
+
+
+def test_calls_waiting_behind_a_hard_block_send_nothing(manager):
+    calls = []
+
+    async def site_call(page, query):
+        calls.append(query)
+        await asyncio.sleep(0.2)  # the API answers 403 t=bv after a while
+        raise HardBlockError("bloqué", label="Intermarché")
+
+    async def scenario():
+        runs = (manager.run("intermarche", site_call, f"q{i}", timeout=10) for i in range(5))
+        return await asyncio.gather(*runs, return_exceptions=True)
+
+    errors = asyncio.run(scenario())
+    assert calls == ["q0"]
+    assert all(isinstance(e, HardBlockError) for e in errors)
+    record = manager.hard_blocks.record("intermarche")
+    assert record.seconds == 30 * 60  # one block: not doubled by the waiting calls
+    assert {e.retry_after for e in errors} == {record.until}
+    assert all("ne réessaiera pas avant" in str(e) for e in errors)
+
+
+def test_calls_waiting_behind_a_check_send_nothing(manager):
+    calls = []
+
+    async def site_call(page, query):
+        calls.append(query)
+        await asyncio.sleep(0.2)
+        raise BlockedError("Intermarché demande une vérification")
+
+    async def scenario():
+        runs = (manager.run("intermarche", site_call, f"q{i}", timeout=10) for i in range(4))
+        errors = await asyncio.gather(*runs, return_exceptions=True)
+        # A call asked after the check is known goes (the circuit of search decides)
+        with pytest.raises(BlockedError):
+            await manager.run("intermarche", site_call, "after", timeout=10)
+        return errors
+
+    errors = asyncio.run(scenario())
+    assert calls == ["q0", "after"]
+    assert all(type(e) is BlockedError for e in errors)
+    assert {str(e) for e in errors} == {"Intermarché demande une vérification"}
+    assert manager.hard_blocks.active() == {}
+
+
+def test_other_retailers_go_on_after_a_hard_block(manager):
+    calls = []
+
+    async def refused(page):
+        calls.append("intermarche")
+        await asyncio.sleep(0.2)
+        raise HardBlockError("bloqué")
+
+    async def fine(page, key):
+        calls.append(key)
+        return key
+
+    async def scenario():
+        first = asyncio.create_task(manager.run("intermarche", refused, timeout=10))
+        await asyncio.sleep(0.05)
+        other = await manager.run("lidl", fine, "lidl", timeout=10)
+        with pytest.raises(HardBlockError):
+            await first
+        return other
+
+    assert asyncio.run(scenario()) == "lidl"
+    assert calls == ["intermarche", "lidl"]
+
+
+def test_two_intermarche_searches_in_a_row_make_one_call(monkeypatch):
+    from backend.models import StoreSelection
+    from backend.scrapers import SCRAPERS
+    from backend.scrapers.intermarche import check_answer
+    from backend.services import settings as settings_service
+
+    api_calls = []
+
+    async def tab(key):
+        return Tab()
+
+    async def search_api(page, query, store):
+        api_calls.append(query)  # one POST to the API of intermarche.com
+        await asyncio.sleep(0.3)
+        check_answer(403, '{"url":"https://geo.captcha-delivery.com/captcha/?initialCid=x&cid=y&t=bv"}')
+
+    monkeypatch.setattr(browser, "_get_page", tab)
+    monkeypatch.setattr(SCRAPERS["intermarche"], "search", search_api)
+
+    async def scenario():
+        await settings_service.set_store("intermarche", StoreSelection(id="06814", name="Lattes"))
+        results = await asyncio.gather(*(search.search_store("intermarche", q) for q in ("farine", "huile")))
+        saved = await circuit.HardBlocks(persist=True).get("intermarche")  # PrixMalin restarted
+        return results, saved
+
+    try:
+        results, saved = run(scenario())
+    finally:
+        asyncio.run(browser.shutdown())
+    assert api_calls == ["farine"]
+    assert [r.status for r in results] == ["blocked", "blocked"]
+    assert {r.retry_after for r in results} == {saved.until}
+    assert saved.seconds == 30 * 60
