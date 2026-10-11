@@ -237,7 +237,7 @@ a.name:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radi
 
 /* --- Retailers without results (js/views/search/parts.js: unavailableBar) --- */
 
-.unavailable {
+.retailers-bar {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -249,7 +249,7 @@ a.name:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radi
     border-radius: var(--radius-70);
     border: 1px solid var(--border);
 }
-.unavailable-title { margin: 0; font-weight: 700; font-size: var(--text-90); }
+.retailers-bar-title { margin: 0; font-weight: 700; font-size: var(--text-90); }
 .column-mini { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); min-height: 2.25rem; min-width: 0; }
 .column-mini .badge { font-size: var(--text-85); padding: .15rem .6rem; }
 .mini-status { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); font-size: var(--text-90); }
@@ -262,7 +262,7 @@ a.name:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radi
     .column-mini, .mini-actions button, .notice .actions button { min-height: 2.75rem; }
 }
 @media (max-width: 759px) {
-    .unavailable { flex-direction: column; align-items: stretch; gap: var(--space-3); padding: var(--space-3) var(--space-4); }
+    .retailers-bar { flex-direction: column; align-items: stretch; gap: var(--space-3); padding: var(--space-3) var(--space-4); }
     .column-mini { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; }
     .mini-actions { grid-column: 1 / -1; }
 }

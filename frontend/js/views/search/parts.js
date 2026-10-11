@@ -74,8 +74,8 @@ export function unavailableBar(items, now = Date.now()) {
     const parts = [];
     if (errors) parts.push(plural(errors, "enseigne indisponible", "enseignes indisponibles"));
     if (empties) parts.push(errors ? `${empties} sans produit` : plural(empties, "enseigne sans produit", "enseignes sans produit"));
-    return html`<div class="unavailable" data-key="bar" data-patch data-testid="unavailable" role="group" aria-labelledby="unavailable-title">
-        <p class="unavailable-title" id="unavailable-title" data-key="title">${parts.join(", ")} :</p>
+    return html`<div class="retailers-bar" data-key="bar" data-patch data-testid="unavailable" role="group" aria-labelledby="unavailable-title">
+        <p class="retailers-bar-title" id="unavailable-title" data-key="title">${parts.join(", ")} :</p>
         ${items.map((item) => barItem(item, now))}
     </div>`;
 }

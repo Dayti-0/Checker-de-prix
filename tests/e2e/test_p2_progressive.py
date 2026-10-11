@@ -133,8 +133,12 @@ def test_thumbnails_are_asked_once(desktop, delays):
     page.wait_for_function("() => [...document.querySelectorAll('#results-body .thumb img')].every((i) => i.complete)")
     # Rows updated in place while the retailers answered: one request per thumbnail
     assert sorted(seen) == sorted(set(seen)) and len(seen) == 3, seen
-    # Neither when the order changes (rows moved, not rebuilt)
+    # Neither when the order changes (rows moved, not rebuilt). The other view
+    # draws its own rows: their thumbnails are loaded first, then the sort changes.
     choose_view(page, "Tout trié")
+    expect(images).to_have_count(3)
+    page.wait_for_function("() => [...document.querySelectorAll('#results-body .thumb img')].every((i) => i.complete)")
+    page.wait_for_timeout(300)
     del seen[:]
     page.get_by_role("radio", name="Pertinence").check()
     page.get_by_role("radio", name="Prix", exact=True).check()
