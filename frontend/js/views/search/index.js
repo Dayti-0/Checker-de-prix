@@ -160,13 +160,13 @@ function resetSearch() {
     search.token++;
 }
 
-// The user reads the list of « Tout trié » further down: new offers wait
+// The user scrolled down the list of « Tout trié »: new offers wait (no jump)
 function readingFurther() {
     if (!root || search.view !== "all" || ![...search.shown].some((k) => relevantOf(search.results[k]).length)) {
         return false;
     }
-    const body = $("#results-body");
-    return Boolean(body) && body.getBoundingClientRect().top < -8;
+    // « Si l'utilisateur a défilé »: the page is no longer at its top
+    return window.scrollY > 80;
 }
 
 async function searchStore(key, token, refresh = false) {

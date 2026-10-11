@@ -177,3 +177,61 @@ def test_the_keyboard_of_a_phone_closes_after_a_search(mobile):
     box.press("Enter")
     wait_done(page)
     expect(box).not_to_be_focused()
+
+
+def test_new_offers_wait_while_the_user_reads_further_down(mobile, delays):
+    page = mobile
+    delays.update({"carrefour": 2.5})
+    page.goto(page.base)
+    search(page, "huile de tournesols", wait=False)
+    rows = page.locator("[data-testid=offers] .offer-list .product")
+    expect(rows).to_have_count(4)  # Aldi and Lidl
+    # The user reads the list further down: the offers of Carrefour wait
+    page.mouse.wheel(0, 600)
+    page.wait_for_function("() => window.scrollY > 300")
+    wait_done(page)
+    banner = page.get_by_test_id("new-offers")
+    expect(banner).to_have_text("2 nouvelles offres")
+    expect(rows).to_have_count(4)
+    # The summary already counts them
+    expect(page.locator("[data-summary=carrefour]")).to_contain_text("1,95 €")
+    banner.click()
+    expect(rows).to_have_count(6)
+    expect(banner).to_have_count(0)
+
+
+def test_prices_of_a_while_ago_and_old_prices(desktop, monkeypatch):
+    """« prix d'il y a 2 h » from the cache; « Prix du … » when the site fails (last prices kept)."""
+    import sqlite3
+
+    from backend import config
+    from backend.scrapers.base import BlockedError
+    from backend.services import search as search_service
+
+    page = desktop
+    assert page.request.get(f"{page.base}/api/search", params={"q": "farine", "stores": "aldi,lidl"}).ok
+    with sqlite3.connect(config.DB_PATH) as db:
+        db.execute("UPDATE search_cache SET created_at = created_at - 7200 WHERE cache_key LIKE 'aldi|%'")
+    db.close()
+    page.goto(page.base)
+    search(page, "farine")
+    aldi = page.locator(".column[data-store=aldi]")
+    expect(aldi.locator(".column-head .column-status")).to_have_text("2 produits · prix d'il y a 2 h")
+    expect(page.locator("#updated")).to_have_text("Mis à jour il y a 2 h")
+
+    # The site of Aldi asks for a check: its last prices stay, marked as old
+    fake_scrape = search_service._scrape
+
+    async def blocked(scraper, query, store):
+        if scraper.key == "aldi":
+            raise BlockedError("Aldi affiche une vérification anti-robot.")
+        return await fake_scrape(scraper, query, store)
+
+    monkeypatch.setattr(search_service, "_scrape", blocked)
+    page.get_by_role("button", name="Actualiser les prix").click()
+    wait_done(page)
+    notice = aldi.locator(".notice.warn")
+    expect(notice).to_contain_text(re.compile(r"Prix du \d\d/\d\d à \d+ h.*\(Aldi : vérification requise\)"))
+    expect(notice.get_by_role("button", name="Ouvrir le site Aldi")).to_be_visible()
+    expect(aldi.locator(".product")).to_have_count(2)
+    expect(page.locator("[data-summary=aldi]")).to_contain_text("ancien prix")
