@@ -39,6 +39,8 @@ const STATE_HELP = {
     unknown: "Aucune recherche pour l'instant : appuyez sur « Tester ».",
 };
 
+const STORE_GONE_HELP = "Le site ne reconnaît plus le magasin choisi : choisissez-en un autre.";
+
 // Results of « Tester », kept while the page is open: key → { status, text }
 let tests = {};
 let cleanup = null;
@@ -86,10 +88,16 @@ function facts(h) {
     return html`<dl class="status-facts">${rows.map(([k, v]) => html`<div><dt>${k}</dt><dd>${v}</dd></div>`)}</dl>`;
 }
 
+// « Magasin à choisir » while a store is saved: the site no longer knows it
+function storeGone(h) {
+    return h.state === "store_required" && Boolean(h.store_name);
+}
+
 function fixAction(h) {
     const name = nameOf(h);
     if (h.state === "store_required") {
-        return html`<a class="btn-primary small" href="#/reglages?enseigne=${h.key}" aria-label="Choisir mon magasin ${name}">Choisir mon magasin</a>`;
+        const text = storeGone(h) ? "Choisir un autre magasin" : "Choisir mon magasin";
+        return html`<a class="btn-primary small" href="#/reglages?enseigne=${h.key}" aria-label="${text} ${name}">${text}</a>`;
     }
     if (h.state === "blocked") {
         return html`<button type="button" class="btn-primary small" data-action="setup" aria-label="Faire la vérification sur le site ${name}">Faire la vérification</button>`;
@@ -116,7 +124,8 @@ function testResult(h) {
 
 function card(h) {
     const kind = HEALTH_KIND[h.state] || "unknown";
-    const showError = h.last_error && h.state !== "ok" && h.state !== "store_required";
+    const showError = h.last_error && h.state !== "ok" && (h.state !== "store_required" || storeGone(h));
+    const help = storeGone(h) ? STORE_GONE_HELP : STATE_HELP[h.state] || "";
     const testing = tests[h.key] && tests[h.key].status === "loading";
     return html`
         <article class="status-card" data-retailer="${h.key}" aria-labelledby="status-${h.key}-name">
@@ -124,7 +133,7 @@ function card(h) {
                 <h2 class="status-name" id="status-${h.key}-name">${retailerBadge(h.key, nameOf(h))}</h2>
                 ${statePill(kind, h.state_label)}
             </div>
-            <p class="status-help">${h.national ? "Prix identiques partout en France. " : ""}${STATE_HELP[h.state] || ""}</p>
+            <p class="status-help">${h.national ? "Prix identiques partout en France. " : ""}${help}</p>
             ${facts(h)}
             ${showError && html`<p class="status-error"><strong>Dernière erreur :</strong> ${h.last_error}</p>`}
             ${testResult(h)}

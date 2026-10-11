@@ -47,10 +47,17 @@ export function healthOf(key) {
     return (health.list || []).find((h) => h.key === key) || null;
 }
 
+// The site no longer knows the store saved for `r` (« Ce magasin n'existe
+// plus »): the state was computed for that very store
+export function storeGone(r, h = healthOf(r.key)) {
+    return Boolean(r.store && h && h.state === "store_required" && (h.store_name || null) === (r.store.name || null));
+}
+
 // What the user has to do for a retailer: nothing, choose a store, pass a check
 export function setupState(r) {
     if (r.needs_store && !r.store) return { kind: "store", label: "Magasin à choisir" };
     const h = healthOf(r.key);
+    if (storeGone(r, h)) return { kind: "store", label: "Magasin à changer" };
     if (h && (h.state === "blocked" || h.last_status === "blocked")) {
         return { kind: "check", label: "Vérification requise" };
     }

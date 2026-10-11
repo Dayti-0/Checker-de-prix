@@ -15,7 +15,17 @@ import { icon } from "../../../core/icons.js";
 import { currentRoute } from "../../../core/router.js";
 import { emit, loadSettings, on, state } from "../../../core/store.js";
 import { announce, notify } from "../../../core/ui.js";
-import { autoPick, distanceText, FAR_KM, loadHealth, openSite, setupState, statePill } from "../../status/shared.js";
+import {
+    autoPick,
+    distanceText,
+    FAR_KM,
+    healthOf,
+    loadHealth,
+    openSite,
+    setupState,
+    statePill,
+    storeGone,
+} from "../../status/shared.js";
 
 export const id = "stores";
 export const title = "Enseignes";
@@ -108,6 +118,10 @@ function detail(r, setup) {
         if (r.key === "coursesu" && r.store.auto && r.store.distance_km > FAR_KM) {
             lines.push(html`<p class="retailer-detail warn-text">Aucun drive Courses U à moins de ${FAR_KM} km.</p>`);
         }
+        if (storeGone(r)) {
+            const error = healthOf(r.key).last_error || "Le site ne reconnaît plus ce magasin : choisissez-en un autre.";
+            lines.push(html`<p class="retailer-detail warn-text">${error}</p>`);
+        }
     } else if (r.key === "coursesu") {
         lines.push(coursesuWithoutStore());
     } else if (r.key === "intermarche") {
@@ -140,7 +154,8 @@ function coursesuWithoutStore() {
 
 function mainAction(r, setup) {
     if (setup.kind === "store") {
-        return html`<div class="retailer-main"><button type="button" class="btn-primary small" data-action="pick" aria-label="Choisir mon magasin ${r.label}">Choisir mon magasin</button></div>`;
+        const text = r.store ? "Choisir un autre magasin" : "Choisir mon magasin";
+        return html`<div class="retailer-main"><button type="button" class="btn-primary small" data-action="pick" aria-label="${text} ${r.label}">${text}</button></div>`;
     }
     if (setup.kind === "check") {
         return html`<div class="retailer-main"><button type="button" class="btn-primary small" data-action="setup" aria-label="Faire la vérification sur le site ${r.label}">Faire la vérification</button></div>`;
@@ -396,11 +411,17 @@ export function render(el) {
     document.addEventListener("click", outside);
 
     // #/reglages?enseigne=intermarche: the list of that retailer opens by itself
+    // when it has no store, or a store the site no longer knows (once per
+    // visit of the address: closed, it stays closed)
+    let routeOpened = null;
     function openFromRoute() {
         const route = currentRoute();
         const key = route && route.params.enseigne;
         const r = key && state.retailers.find((x) => x.key === key);
-        if (r && r.finds_stores && !r.store && state.settings.location && !pickerOf(key).open) openPicker(key);
+        if (!r || !r.finds_stores || !state.settings.location || routeOpened === window.location.hash) return;
+        if (r.store && setupState(r).kind !== "store") return;
+        routeOpened = window.location.hash;
+        if (!pickerOf(key).open) openPicker(key);
     }
 
     renderRows();
@@ -411,10 +432,16 @@ export function render(el) {
             renderRows();
             openFromRoute();
         }),
-        on("status:changed", renderRows),
+        on("status:changed", () => {
+            renderRows();
+            openFromRoute();
+        }),
         on("coursesu:auto", renderRows),
         on("stores:picker", renderRows),
-        on("route:changed", openFromRoute),
+        on("route:changed", () => {
+            if (routeOpened !== window.location.hash) routeOpened = null;
+            openFromRoute();
+        }),
         on("browser:changed", () => {
             // After « J'ai terminé » the state of the sites may have changed
             if (state.browser && !state.browser.setup_mode) loadHealth();

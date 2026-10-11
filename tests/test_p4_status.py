@@ -104,6 +104,33 @@ def test_blocked_and_store_required():
     assert with_store.consecutive_failures == 0 and with_store.searches_7d == 1
 
 
+def test_store_unknown_to_the_site():
+    gone = "Ce magasin n'existe plus sur Courses U, choisissez-en un autre."
+    rows = [
+        {**row("store_required", error=gone), "store_ctx": "https://www.coursesu.com/drive-superu-x"},
+        row(ago=600),
+    ]
+    kwargs = {"needs_store": True, "has_store": True}
+    h = state_of(rows, store_ctx="https://www.coursesu.com/drive-superu-x", **kwargs)
+    # The store is still saved, the site no longer knows it: why is shown
+    assert (h.state, h.state_label, h.last_error) == ("store_required", "Magasin à choisir", gone)
+    # Another store chosen since: that answer was about the old store
+    h = state_of(rows, store_ctx="https://www.coursesu.com/drive-superu-y", **kwargs)
+    assert (h.state, h.last_error, h.last_status) == ("ok", None, "ok")
+    # No store at all: nothing to explain
+    h = state_of(rows, store_ctx="", needs_store=True, has_store=False)
+    assert (h.state, h.last_error) == ("store_required", None)
+
+
+def test_totals_given_by_the_journal_win():
+    totals = health.Totals(
+        searches_7d=451, ok_7d=1, avg_elapsed_ms=700, last_success=NOW - 3 * 86400, last_source="api"
+    )
+    h = state_of([row("error", ago=60)], totals=totals, primary="api")
+    assert (h.searches_7d, h.success_rate_7d, h.avg_elapsed_ms) == (451, 0.002, 700)
+    assert (h.last_success, h.last_source, h.state) == (NOW - 3 * 86400, "api", "failing")
+
+
 def test_timeout_is_a_failure_but_not_broken():
     rows = [row("timeout", "a"), row("timeout", "b", ago=120), row("timeout", "c", ago=180)]
     h = state_of(rows)
@@ -165,6 +192,44 @@ def test_log_entry_of_a_store_and_purge():
 
     removed, rows, empty = run(scenario())
     assert removed == 1 and len(rows) == 1 and empty == []
+
+
+def test_long_journals_keep_the_whole_week():
+    """Hundreds of searches at the 5 retailers: the state still covers 7 days and 30 days."""
+
+    def entry(ts, store, status, query):
+        error = None if status == "ok" else "Intermarché ne répond pas."
+        return {**row(status, query), "ts": ts, "store": store, "error": error}
+
+    async def scenario():
+        now = NOW
+        await scrape_log.insert(entry(now - 3 * 86400, "intermarche", "ok", "farine"))
+        for i in range(450):
+            ts = now - 2 * 86400 + i * 60
+            for key in ("aldi", "lidl", "carrefour", "coursesu"):
+                await scrape_log.insert(entry(ts, key, "ok", f"q{i}"))
+            await scrape_log.insert(entry(ts, "intermarche", "error", f"q{i}"))
+            await scrape_log.insert({**entry(ts, "intermarche", "ok", f"q{i}"), "from_cache": 1})
+        states = {h.key: h for h in await health.all_health(now)}
+        rows = await scrape_log.entries(store="intermarche", limit=10_000)
+        return states, rows
+
+    states, rows = run(scenario())
+    h = states["intermarche"]
+    assert h.last_success == NOW - 3 * 86400
+    assert h.searches_7d == 451 and h.success_rate_7d == round(1 / 451, 3)
+    assert h.consecutive_failures == 450
+    assert h.state == "store_required"  # no Intermarché store in these settings
+    assert states["aldi"].searches_7d == 450 and states["aldi"].success_rate_7d == 1.0
+    # The SQL figures are those of the pure function on every row
+    real = [r for r in rows if not r["from_cache"]]
+    assert health.totals_of(real, NOW) == health.Totals(
+        searches_7d=h.searches_7d,
+        ok_7d=1,
+        avg_elapsed_ms=h.avg_elapsed_ms,
+        last_success=h.last_success,
+        last_source=h.last_source,
+    )
 
 
 # ---------------------------------------------------------------- API

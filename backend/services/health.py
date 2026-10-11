@@ -5,7 +5,10 @@ Every search at a retailer is written to the journal ``scrape_log`` by the
 than ``LOG_DAYS`` days are removed. ``retailer_health`` turns the journal of a
 retailer into its state (pure function):
 
-- ``store_required``: no store chosen for a retailer that needs one;
+- ``store_required``: no store chosen for a retailer that needs one, or the
+  site does not know the store chosen any more (``last_error`` says why);
+  an answer « Magasin à choisir » given for another store than the current
+  one (the store was changed since) is left out;
 - ``blocked``: the last search met an anti-robot check;
 - ``broken``: « Probablement cassé », the last ``BROKEN_AFTER`` searches were
   empty or failed, on as many different queries;
@@ -15,7 +18,9 @@ retailer into its state (pure function):
 - ``ok``, or ``unknown`` before any search.
 
 Only the searches read on the site count; results from the cache are kept in
-the journal but say nothing about the site.
+the journal but say nothing about the site. ``all_health`` reads, for each
+retailer, its last ``RECENT_ROWS`` searches and the figures of its whole
+journal computed by SQL (``Totals``): a long journal never cuts the 7 days.
 
 ``diagnostic_zip()`` builds the report « Télécharger le diagnostic »: logs,
 last debug snapshots, state, versions, settings without personal data. Never
@@ -30,6 +35,7 @@ import re
 import sys
 import time
 import zipfile
+from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
 
@@ -65,6 +71,8 @@ STATE_LABELS = {
 
 FAILED = ("empty", "error", "timeout", "blocked")
 BROKEN = ("empty", "error")
+# Searches of a retailer read to know its last ones (failures in a row...)
+RECENT_ROWS = 500
 
 # Files of data/debug/ that may be sent: aldi.html, coursesu-blocked.png,
 # intermarche-20261009-101500-error.json, coursesu-stores.html...
@@ -117,6 +125,31 @@ hooks.on("search_finished", record_search)
 # ---------------------------------------------------------------- state (pure)
 
 
+@dataclass
+class Totals:
+    """Figures of a retailer over its whole journal (searches read on the site)."""
+
+    searches_7d: int = 0
+    ok_7d: int = 0
+    avg_elapsed_ms: int | None = None
+    last_success: float | None = None
+    last_source: str | None = None
+
+
+def totals_of(real: list[dict], now: float) -> Totals:
+    """``Totals`` from the rows themselves (all of them, the newest first)."""
+    week = [r for r in real if now - r["ts"] <= WEEK and r["status"] != "store_required"]
+    last_ok = next((r for r in real if r["status"] == "ok"), None)
+    elapsed = [r["elapsed_ms"] for r in week if r.get("elapsed_ms")]
+    return Totals(
+        searches_7d=len(week),
+        ok_7d=sum(r["status"] == "ok" for r in week),
+        avg_elapsed_ms=round(sum(elapsed) / len(elapsed)) if elapsed else None,
+        last_success=last_ok["ts"] if last_ok else None,
+        last_source=last_ok.get("source") if last_ok else None,
+    )
+
+
 def primary_source(key: str) -> str | None:
     scraper = SCRAPERS.get(key)
     return getattr(scraper, "primary_source", None) or PRIMARY_SOURCE.get(key)
@@ -133,11 +166,20 @@ def retailer_health(
     has_store: bool = False,
     primary: str | None = None,
     snapshots: list[Snapshot] | None = None,
+    store_ctx: str | None = None,
+    totals: Totals | None = None,
 ) -> RetailerHealth:
-    """State of retailer ``key`` from its journal ``rows`` (the newest first)."""
+    """State of retailer ``key`` from its journal ``rows`` (the newest first).
+
+    ``store_ctx``: context of the current store (``scraper.context_key``), to
+    leave out the answers « Magasin à choisir » about another store.
+    ``totals``: figures of the whole journal when ``rows`` holds the last
+    searches only (computed from ``rows`` otherwise).
+    """
     real = [r for r in rows if not r.get("from_cache")]
-    week = [r for r in real if now - r["ts"] <= WEEK and r["status"] != "store_required"]
-    successes = [r for r in real if r["status"] == "ok"]
+    if store_ctx is not None:
+        real = [r for r in real if r["status"] != "store_required" or (r.get("store_ctx") or "") == store_ctx]
+    totals = totals or totals_of(real, now)
     last = real[0] if real else None
 
     failures = 0
@@ -156,8 +198,7 @@ def retailer_health(
         queries.add(query_key(row["query"]))
     broken = run >= BROKEN_AFTER and len(queries) >= BROKEN_AFTER
 
-    last_ok = successes[0] if successes else None
-    degraded = bool(last_ok and primary and last_ok.get("source") and last_ok["source"] != primary)
+    degraded = bool(totals.last_success and primary and totals.last_source and totals.last_source != primary)
 
     if needs_store and not has_store:
         state = "store_required"
@@ -177,7 +218,10 @@ def retailer_health(
         state = "ok"
 
     last_failed = next((r for r in real if r["status"] in FAILED and r.get("error")), None)
-    elapsed = [r["elapsed_ms"] for r in week if r.get("elapsed_ms")]
+    last_error = last_failed["error"] if last_failed and failures else None
+    if state == "store_required":
+        # The store chosen is unknown to the site (« Ce magasin n'existe plus »)
+        last_error = last.get("error") if has_store and last and last["status"] == "store_required" else None
     return RetailerHealth(
         key=key,
         label=label or key,
@@ -189,14 +233,14 @@ def retailer_health(
         last_at=last["ts"] if last else None,
         last_status=last["status"] if last else None,
         last_query=last["query"] if last else None,
-        last_success=last_ok["ts"] if last_ok else None,
-        searches_7d=len(week),
-        success_rate_7d=round(sum(r["status"] == "ok" for r in week) / len(week), 3) if week else None,
+        last_success=totals.last_success,
+        searches_7d=totals.searches_7d,
+        success_rate_7d=round(totals.ok_7d / totals.searches_7d, 3) if totals.searches_7d else None,
         consecutive_failures=failures,
-        last_error=last_failed["error"] if last_failed and failures else None,
-        last_source=last_ok.get("source") if last_ok else None,
+        last_error=last_error,
+        last_source=totals.last_source,
         primary_source=primary,
-        avg_elapsed_ms=round(sum(elapsed) / len(elapsed)) if elapsed else None,
+        avg_elapsed_ms=totals.avg_elapsed_ms,
         snapshots=snapshots or [],
     )
 
@@ -238,17 +282,16 @@ async def all_health(now: float | None = None) -> list[RetailerHealth]:
     """State of every retailer, in the display order."""
     now = now or time.time()
     settings = await load_settings()
-    rows = await scrape_log.entries(since=now - LOG_DAYS * 24 * 3600)
-    by_store: dict[str, list[dict]] = {}
-    for row in rows:
-        by_store.setdefault(row["store"], []).append(row)
+    since = now - LOG_DAYS * 24 * 3600
     out = []
     for key, scraper in SCRAPERS.items():
         store = settings.stores.get(key)
+        rows = await scrape_log.entries(since=since, store=key, limit=RECENT_ROWS, real_only=True)
+        totals = Totals(**await scrape_log.totals(key, week_since=now - WEEK, since=since))
         out.append(
             retailer_health(
                 key,
-                by_store.get(key, []),
+                rows,
                 now,
                 label=scraper.label,
                 needs_store=scraper.needs_store,
@@ -256,6 +299,8 @@ async def all_health(now: float | None = None) -> list[RetailerHealth]:
                 has_store=store is not None,
                 primary=primary_source(key),
                 snapshots=snapshots_of(key),
+                store_ctx=scraper.context_key(store),
+                totals=totals,
             )
         )
     return out

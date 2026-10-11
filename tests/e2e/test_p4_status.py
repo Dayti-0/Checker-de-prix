@@ -102,6 +102,53 @@ def test_fix_from_the_status_page(desktop):
     expect(coursesu.locator(".pill")).to_have_text("Prêt")
 
 
+def test_store_unknown_to_the_site_leads_to_another_store(desktop, monkeypatch):
+    """« Ce magasin n'existe plus » (404 on the page of the store): État and Réglages say so and lead to the list."""
+    from backend.scrapers.base import StoreRequiredError
+    from backend.scrapers.coursesu import STORE_GONE
+    from backend.services import search as search_service
+
+    fake_scrape = search_service._scrape
+
+    async def gone(scraper, query, store):
+        if scraper.key == "coursesu" and store and store.url.endswith("roujan"):
+            raise StoreRequiredError(STORE_GONE)
+        return await fake_scrape(scraper, query, store)
+
+    monkeypatch.setattr(search_service, "_scrape", gone)
+    page = desktop
+    page.goto(page.base)
+    page.request.post(f"{page.base}/api/settings/location", data={"postal_code": "34480"})
+    choose_coursesu_store(page)
+    result = page.request.get(f"{page.base}/api/search/coursesu", params={"q": "farine"}).json()
+    assert (result["status"], result["message"]) == ("store_required", STORE_GONE)
+
+    page.goto(f"{page.base}/#/etat")
+    card = page.locator(".status-card[data-retailer=coursesu]")
+    expect(card.locator(".pill")).to_have_text("Magasin à choisir")
+    expect(card).to_contain_text("Le site ne reconnaît plus le magasin choisi")
+    expect(card.locator(".status-error")).to_contain_text(STORE_GONE)
+    assert_accessible(page, "état, magasin inconnu du site")
+    card.get_by_role("link", name="Choisir un autre magasin Courses U").click()
+
+    expect(page).to_have_url(re.compile(r"#/reglages\?enseigne=coursesu$"))
+    row = page.locator(".retailer-row[data-retailer=coursesu]")
+    expect(row.locator(".pill")).to_have_text("Magasin à changer")
+    expect(row).to_contain_text(STORE_GONE)
+    # The list of the nearest stores opens by itself
+    options = row.locator(".store-option")
+    expect(options).to_have_count(8)
+    assert_accessible(page, "réglages, magasin inconnu du site")
+    options.filter(has_text="Super U Pézenas").click()
+    expect(row).to_contain_text("✓ Super U Pézenas")
+    expect(row.locator(".pill")).to_have_text("Prêt")
+    expect(row).not_to_contain_text(STORE_GONE)
+    page.wait_for_timeout(300)
+    expect(options).to_have_count(0)  # closed after the choice, not opened again
+    states = {h["key"]: h for h in page.request.get(f"{page.base}/api/status/retailers").json()}
+    assert states["coursesu"]["state"] != "store_required"
+
+
 def test_home_card_of_the_state(desktop):
     page = desktop
     page.goto(page.base)
