@@ -24,12 +24,23 @@ product is relevant when:
    skipped) is in the head of the name or in the brand: « Thon à l'huile de
    tournesol » is not « huile de tournesol », but is « thon huile de tournesol »
    (otherwise: reason ``complement``);
+   A name without the keyword but starting with a kind of it counts as it
+   (``HYPONYMS``: « Spaghetti n°5 » or « Coquillettes » for « pâtes »,
+   « Basmati » for « riz »). A brand in capitals at the end of the name
+   (« … PETIT NAVIRE ») only counts for a query that is not a food: « Pizza
+   THON » is not « thon »;
 3. when the main keyword is a food (``PRODUCT_NOUNS``), no other food comes
    before it in the head: « Sauce tomate » is not « tomate », « Thon huile de
-   tournesol » is not « huile de tournesol » (reason ``other_product``);
+   tournesol » is not « huile de tournesol » (reason ``other_product``). A
+   known brand in front (``KNOWN_BRANDS``: « Fruit d'Or », « Nestlé Dessert »)
+   is not another food. « pur X » after a word that is not a cut of X is an
+   ingredient: « Sablés pur beurre » is not « beurre », « Steak haché pur
+   bœuf » is « bœuf » (reason ``complement``);
 4. it is not a compound that is another product: « Eau de javel » for « eau »,
-   « Pâte à tartiner » for « pâtes », « Beurre de cacahuète » for « beurre »
-   (reason ``compound``, ``COMPOUNDS``);
+   « Pâte à tartiner » for « pâtes », « Beurre de cacahuète » or « Petit
+   Beurre » for « beurre » (reason ``compound``, ``COMPOUNDS``): the other word
+   follows the keyword (« de », « à », « pour »... between them), before any
+   complement (« Eau aromatisée parfum citron » is water);
 5. a word ending in -é, -ée, -és or -ées is not its form without the accent
    when both are common words (pâté ≠ pâtes, sucré ≠ sucre, purée ≠ pure);
 6. « sans X » in the name: X is not in the product (« Bonbons sans sucre » for
@@ -119,21 +130,81 @@ cassoulet cereale champignon chips chocolat chorizo chou chouquette cidre
 citron clementine colin compote comte concentre concombre confiserie confiture
 cookie cornichon coulis courgette couscous crabe creme crepe crevette
 croissant croque croquette crouton dessert dinde echalote emmental endive
-entremets epinard farine fenouil feta flan fraise framboise frite
-fromage fruit galette gateau gaufre gelee glace gnocchi gratin hachis hareng
+entremets epinard farine fenouil feta financier flan fraise framboise frite
+fromage fruit galette gateau gaufre gaufrette gelee glace gnocchi gratin hachis hareng
 haricot huile jambon jus ketchup kiwi lait lardon lasagne legume lentille levure
-limonade madeleine mais mangue maquereau margarine mayonnaise melon merguez
+limonade liqueur madeleine mais mangue maquereau margarine mayonnaise melon merguez
 miel moule mousse moutarde mozzarella muesli muffin myrtille navet nectar
-noisette noix nougat nugget oeuf oignon olive omelette orange pain palet
+noisette noix nougat nouille nugget oeuf oignon olive omelette orange pain palet
 pamplemousse parmentier pastis pate peche pesto pizza poire poireau pois poisson
 poivre poivron pomme porc potage poulet praline pruneau puree quiche quinoa
-radis raisin ratatouille ravioli rillette riz salade sandwich sardine sauce
+radis raisin ratatouille ravioli rillette riz sable salade sandwich sardine sauce
 saucisse saucisson saumon sel semoule sirop soda soupe sucre surimi taboule
 tarte tartelette terrine the thon tisane tomate tortilla truite vanille veau
-veloute viande vin vinaigre vinaigrette wrap yaourt
+veloute vermicelle viande vin vinaigre vinaigrette wrap yaourt
 """.split()
 
+# Cuts and shapes of a food: « Steak haché pur bœuf » is beef, « Sablés pur beurre » is not butter
+CUTS = frozenset(
+    """
+    steak steaks hache haches escalope escalopes filet filets pave paves miette miettes tranche tranches
+    morceau morceaux emince eminces roti rotis cube cubes lamelle lamelles rondelle rondelles
+    aiguillette aiguillettes cuisse cuisses haut hauts blanc blancs aile ailes bavette bavettes
+    entrecote entrecotes faux rumsteck onglet onglets plaquette plaquettes motte mottes bloc blocs
+    portion portions
+    """.split()
+)
+
+# « pur beurre », « pure laine »: the next word is what the product is made of
+PURE = frozenset(("pur", "pure", "purs", "pures"))
+
+# Kinds of a food that names often give alone (rule 2): « Spaghetti n°5 BARILLA » are « pâtes »
+HYPONYMS = {
+    "pâtes": (
+        "spaghetti",
+        "spaghettis",
+        "penne",
+        "pennes",
+        "coquillettes",
+        "macaroni",
+        "macaronis",
+        "tagliatelle",
+        "tagliatelles",
+        "fettuccine",
+        "fusilli",
+        "torsades",
+        "torti",
+        "farfalle",
+        "papillons",
+        "linguine",
+        "rigatoni",
+        "tortiglioni",
+        "conchiglie",
+        "coudes",
+        "capellini",
+        "pappardelle",
+        "orecchiette",
+        "gemelli",
+        "cavatappi",
+    ),
+    "riz": ("basmati", "thaï", "arborio", "carnaroli"),
+}
+
+# Brands that start names and hold a food (rule 3): « Fruit d'Or Huile de tournesol » is oil
+KNOWN_BRANDS = (
+    "fruit d'or",
+    "nestlé dessert",
+    "côte d'or",
+    "bonne maman",
+    "tropicana",
+    "brioche pasquier",
+)
+
+# Words between a keyword and the other word of its compound: « eau de parfum », « crème pour les mains »
+LINKS = frozenset("de d du des a au aux la l le les pour en".split())
+
 # Compounds that are another product (rule 4): keyword, words that make it another product
+# when they follow it (« Eau de javel »)
 COMPOUNDS = [
     (
         "eau",
@@ -182,6 +253,8 @@ COMPOUNDS = [
     ("vinaigre", ("ménager",)),
     ("oeuf", ("pâques", "chocolat", "surprise")),
 ]
+# ... or when they come right before it (« Petit Beurre LU »)
+COMPOUNDS_BEFORE = [("beurre", ("petit", "petits"))]
 
 
 def normalize(text: str) -> str:
@@ -245,9 +318,34 @@ def _stem_of(word: str) -> str:
 
 # Words that differ from their -é form (rule 5), compared by stem
 _AMBIGUOUS = frozenset(_stem_of(w) for w in ("pâte", "sucre", "glace", "sale", "râpe", "grille", "côte", "pure"))
-_NOUN_STEMS = frozenset(_stem_of(w) for w in PRODUCT_NOUNS)
 _QUALIFIER_STEMS = frozenset(stem(w) for w in QUALIFIERS)
-_COMPOUND_STEMS = [(_stem_of(word), frozenset(_stem_of(other) for other in others)) for word, others in COMPOUNDS]
+_COMPOUND_STEMS = [
+    (_stem_of(word), frozenset(_stem_of(other) for other in others), frozenset()) for word, others in COMPOUNDS
+] + [(_stem_of(word), frozenset(), frozenset(_stem_of(other) for other in others)) for word, others in COMPOUNDS_BEFORE]
+_CUT_STEMS = frozenset(stem(w) for w in CUTS)
+_KNOWN_BRANDS = [tuple(w.plain for w in words_of(brand)) for brand in KNOWN_BRANDS]
+_HYPONYMS = [(words_of(word)[0], tuple(words_of(" ".join(kinds)))) for word, kinds in HYPONYMS.items()]
+
+
+def _spelled_e_form(word: Word) -> bool:
+    """Ends in -é, -ée...: by its accents, or « ee » without accents (« PUREE », but « PATE » may be either)."""
+    return word.e_form or (not word.accented and word.plain.endswith(("ee", "ees")))
+
+
+# Foods by stem, with their -é forms (« puree » is purée, never « Pure »)
+_NOUN_FORMS: dict[str, frozenset[bool]] = {}
+for _noun in PRODUCT_NOUNS:
+    _word = words_of(_noun)[0]
+    _NOUN_FORMS[_word.stem] = _NOUN_FORMS.get(_word.stem, frozenset()) | {_spelled_e_form(_word)}
+_NOUN_STEMS = frozenset(_NOUN_FORMS)
+
+
+def is_food(word: Word) -> bool:
+    """``word`` is a food of ``PRODUCT_NOUNS`` (« Pure » is not « purée », « Pâté » is not « pâte »)."""
+    forms = _NOUN_FORMS.get(word.stem)
+    if not forms:
+        return False
+    return word.stem not in _AMBIGUOUS or _spelled_e_form(word) in forms
 
 
 def _same(wanted: Word, found: Word) -> bool:
@@ -351,11 +449,24 @@ def head_end(words: list[Word]) -> int:
 
 
 def _brand_offset(words: list[Word], brand: list[Word]) -> int:
-    """Number of words of the brand written in front of the name (« Lesieur Huile de tournesol »)."""
-    size = len(brand)
-    if size and len(words) > size and [w.plain for w in words[:size]] == [b.plain for b in brand]:
-        return size
-    return 0
+    """Number of words of a brand written in front of the name.
+
+    The brand given apart (« Lesieur » + « Lesieur Huile de tournesol »), or a
+    known brand (« Fruit d'Or Huile de tournesol », « Nestlé » + « Dessert
+    Chocolat noir »). Never the whole name.
+    """
+    plains = [w.plain for w in words]
+    given = [b.plain for b in brand]
+    offset = len(given) if given and plains[: len(given)] == given else 0
+    for known in _KNOWN_BRANDS:
+        size = len(known)
+        if plains[:size] == list(known):
+            offset = max(offset, size)
+        elif given and len(given) < size and list(known[: len(given)]) == given:
+            rest = list(known[len(given) :])
+            if plains[: len(rest)] == rest:
+                offset = max(offset, len(rest))
+    return offset if offset < len(words) else 0
 
 
 def _capital_tail(words: list[Word]) -> list[Word]:
@@ -374,10 +485,47 @@ def _capital_tail(words: list[Word]) -> list[Word]:
     return tail
 
 
-def _is_compound(q: ParsedQuery, stems: set[str]) -> bool:
+# Content words allowed between a keyword and the other word of its compound
+# (« Crème de jour visage », « Huile de tournesol pour massage »)
+_COMPOUND_GAP = 2
+
+
+def _is_compound(q: ParsedQuery, words: list[Word], negated: set[int]) -> bool:
+    """A keyword of the query is part of a compound that is another product (rule 4)."""
     keyword_stems = {w.stem for w in q.words}
+    for index, word in enumerate(words):
+        if index in negated or word.stem not in keyword_stems:
+            continue
+        for compound, after, before in _COMPOUND_STEMS:
+            if word.stem != compound:
+                continue
+            previous = words[index - 1] if index else None
+            if previous is not None and previous.stem in before and previous.stem not in q.all_stems:
+                return True
+            gap = 0
+            for following in words[index + 1 :]:
+                if following.plain in LINKS:
+                    continue
+                if following.stem in after and following.stem not in q.all_stems:
+                    return True
+                if following.plain in COMPLEMENTS or gap >= _COMPOUND_GAP:
+                    break
+                gap += following.content
+    return False
+
+
+def _kinds(main: Word) -> tuple[Word, ...]:
+    """The kinds of ``main`` that count as it in front of a name (« spaghetti » for « pâtes »)."""
+    return next((kinds for word, kinds in _HYPONYMS if _same(main, word)), ())
+
+
+def _ingredient(q: ParsedQuery, head: list[Word], position: int) -> bool:
+    """« Sablés pur beurre »: the main keyword follows « pur » after a word that is not a cut of it."""
+    if position == 0 or head[position - 1].plain not in PURE:
+        return False
     return any(
-        word in stems and word in keyword_stems and (others & stems) - q.all_stems for word, others in _COMPOUND_STEMS
+        w.content and w.stem not in _CUT_STEMS and w.plain not in QUALIFIERS and w.stem not in q.all_stems
+        for w in head[: position - 1]
     )
 
 
@@ -417,8 +565,22 @@ class Matcher:
         if not q.words and not q.without:
             return Match(1.0, 1.0)
 
+        main = q.main
+        offset = _brand_offset(words, brand_words)
+        head = words[offset:]
+        end = head_end(head)
+        kinds = _kinds(main) if main is not None else ()
+
+        def is_main(word: Word) -> bool:
+            return _same(main, word) or any(_same(kind, word) for kind in kinds)
+
+        # Where the product searched is in the head (« Spaghetti n°5 » for « pâtes »)
+        position = None
+        if main is not None:
+            position = next((i for i in range(end) if i + offset not in negated and is_main(head[i])), None)
+
         absent = [w for i, w in enumerate(words) if i in negated]
-        found = [w for w in q.words if any(_same(w, p) for p in present)]
+        found = [w for w in q.words if any(_same(w, p) for p in present) or (w == main and position is not None)]
         found_without = [w for w in q.without if any(_same(w, a) for a in absent)]
         coverage = (len(found) + len(found_without)) / (len(q.words) + len(q.without))
         if not coverage:
@@ -426,28 +588,27 @@ class Matcher:
 
         reason = None if coverage == 1 else "missing"
         score = 0.85 * coverage
-        main = q.main
         if main is not None and main in found:
-            offset = _brand_offset(words, brand_words)
-            head = words[offset:]
-            end = head_end(head)
-            position = next(
-                (i for i in range(end) if i + offset not in negated and _same(main, head[i])),
-                None,
+            food = is_food(main)
+            # A brand holding the keyword: given apart, written in front, or in
+            # capitals at the end, this one never for a food (« Pizza THON »)
+            in_brand = any(_same(main, w) for w in brand_words + words[:offset]) or (
+                not food and any(_same(main, w) for w in _capital_tail(words))
             )
-            in_brand = any(_same(main, w) for w in brand_words + _capital_tail(words))
             if position is None and not in_brand:
                 reason = reason or "complement"
             else:
                 score += 0.05
                 first = next((w for w in head if w.content), None)
-                if first is not None and _same(main, first):
+                if first is not None and is_main(first):
                     score += 0.1
-                if position is not None and not in_brand and main.stem in _NOUN_STEMS:
-                    before = {w.stem for w in head[:position] if w.content} - q.all_stems
-                    if before & _NOUN_STEMS:
+                if position is not None and not in_brand and food:
+                    before = [w for w in head[:position] if w.content and w.stem not in q.all_stems]
+                    if any(is_food(w) for w in before):
                         reason = reason or "other_product"
-        if reason is None and _is_compound(q, stems):
+                    elif _ingredient(q, head, position):
+                        reason = reason or "complement"
+        if reason is None and _is_compound(q, words, negated):
             reason = "compound"
         if q.quantity:
             pack = parse_pack(name)

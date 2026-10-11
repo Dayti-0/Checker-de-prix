@@ -269,3 +269,117 @@ def test_prepare_products_keeps_close_products_out_of_the_main_list():
 )
 def test_real_names_stay_relevant(query, name):
     assert Matcher(query).match(name).relevant
+
+
+# Corrections after the review of the lot
+@pytest.mark.parametrize(
+    "query, name, brand, expected",
+    [
+        # A food written in capitals at the end of the name is not a brand
+        ("huile de tournesol", "Chips HUILE DE TOURNESOL", None, False),
+        ("thon", "Pizza THON", None, False),
+        ("chocolat", "Biscuits fourrés CHOCOLAT", None, False),
+        ("lait", "Yaourt LAIT ENTIER", None, False),
+        ("beurre", "Galettes PUR BEURRE", None, False),
+        ("beurre", "Biscuits PETIT BEURRE LU", None, False),
+        ("petit navire", "Thon albacore à l'huile d'olive PETIT NAVIRE", None, True),
+        ("huile de tournesol", "Lesieur HUILE DE TOURNESOL 1L", None, True),
+        ("chocolat", "Tablette CHOCOLAT NOIR", None, True),
+        # Another food in front, or « pur X » after a word that is not a cut of X
+        ("beurre", "Sablés pur beurre", None, False),
+        ("beurre", "Financiers pur beurre", None, False),
+        ("beurre", "Gaufrettes pur beurre", None, False),
+        ("beurre", "Quatre-quarts pur beurre", None, False),
+        ("beurre", "Petit Beurre LU", None, False),
+        ("beurre", "LU Petit Beurre 200g", None, False),
+        ("beurre", "Petit Beurre", "LU", False),
+        ("petit beurre", "Petit Beurre LU", None, True),
+        ("beurre", "Beurre doux petit format", None, True),
+        ("riz", "Nouilles de riz 400g", None, False),
+        ("riz", "Vermicelles de riz", None, False),
+        ("café", "Liqueur de café", None, False),
+        ("boeuf", "Haché pur bœuf 15%", None, True),
+        ("jus d'orange", "Pur jus d'orange", None, True),
+        # A known brand in front is not another food; « Pure » is not « purée »
+        ("huile de tournesol", "Fruit d'Or Huile de tournesol 1L", None, True),
+        ("huile de tournesols", "Fruit d'Or Huile de tournesol 1L", None, True),
+        ("huile tournesol", "Fruit d'Or Huile de tournesol 1L", None, True),
+        ("fruit d'or", "Fruit d'Or Huile de tournesol 1L", None, True),
+        ("chocolat", "Nestlé Dessert Chocolat noir 205g", None, True),
+        ("chocolat", "Dessert Chocolat noir", "Nestlé", True),
+        ("chocolat", "Nestlé Dessert Chocolat noir", "Nestlé", True),
+        ("chocolat", "Dessert chocolat", None, False),
+        ("jus d'orange", "Tropicana Pure Premium Jus d’orange 1L", None, True),
+        ("jus d’orange", "Tropicana Pure Premium Jus d’orange 1L", None, True),
+        ("jus orange", "Tropicana Pure Premium Jus d’orange 1L", None, True),
+        ("pomme", "Purée de pommes", None, False),
+        ("pomme", "PUREE DE POMMES", None, False),
+        ("pain au lait", "Brioche Pasquier Pains au lait x10", None, True),
+        # Names without the word of the category: a kind of it in front
+        ("pâtes", "Spaghetti n°5 BARILLA 500g", None, True),
+        ("pates", "Spaghetti n°5 BARILLA 500g", None, True),
+        ("pâtes", "Coquillettes Lustucru 500g", None, True),
+        ("pates", "Coquillettes Lustucru 500g", None, True),
+        ("pâtes", "Spaghetti n°5", "Barilla", True),
+        ("pâtes", "Barilla Spaghetti n°5", None, True),
+        ("pâtes complètes", "Spaghetti complets", None, True),
+        ("riz", "Basmati", "Taureau Ailé", True),
+        ("pâté", "Spaghetti n°5", None, False),
+        ("pâtes", "Gratin de macaronis", None, False),
+        ("pâtes", "Sauce pour spaghetti", None, False),
+        # Compounds: the other word follows the keyword, before any complement
+        ("eau", "Eau aromatisée parfum citron", None, True),
+        ("eau", "Eau aromatisée saveur citron", None, True),
+        ("eau", "Eau de parfum", None, False),
+        ("eau", "Eau-de-vie de poire", None, False),
+        ("crème", "Crème de jour visage", None, False),
+        ("lait", "Lait en poudre bébé", None, False),
+        ("sel", "Sel pour lave-vaisselle", None, False),
+        ("oeufs", "Oeufs en chocolat", None, False),
+        ("pâtes", "Pâtes de fruits", None, False),
+    ],
+)
+def test_review_cases(query, name, brand, expected):
+    match = Matcher(query).match(name, brand)
+    assert match.relevant is expected, match
+    assert (match.score >= RELEVANT_SCORE) is expected
+
+
+@pytest.mark.parametrize(
+    "query, name, reason",
+    [
+        ("huile de tournesol", "Chips HUILE DE TOURNESOL", "other_product"),
+        ("chocolat", "Biscuits fourrés CHOCOLAT", "complement"),
+        ("beurre", "Quatre-quarts pur beurre", "complement"),
+        ("beurre", "Petit Beurre LU", "compound"),
+        ("eau", "Eau de parfum", "compound"),
+    ],
+)
+def test_review_reasons(query, name, reason):
+    assert Matcher(query).match(name).reason == reason
+
+
+def test_kinds_of_a_food_are_shown_not_hidden():
+    # « Spaghetti » is in the main list for « pâtes », not hidden as unrelated
+    products = [
+        Product(store="lidl", name="Spaghetti n°5", brand="Barilla", price=1.2, product_url="https://l/1"),
+        Product(store="lidl", name="Pâté de campagne", price=1.5, product_url="https://l/2"),
+    ]
+    prepared = prepare_products(products, "pâtes")
+    assert [(p.name, p.relevance) for p in prepared] == [("Spaghetti n°5", 1.0), ("Pâté de campagne", 0.0)]
+
+
+@pytest.mark.parametrize(
+    "word, food",
+    [
+        ("Pure", False),
+        ("PURE", False),
+        ("Purée", True),
+        ("PUREE", True),
+        ("Pâté", False),
+        ("PATE", True),
+        ("Thon", True),
+    ],
+)
+def test_is_food(word, food):
+    assert matching.is_food(matching.words_of(word)[0]) is food
