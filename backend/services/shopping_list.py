@@ -1,53 +1,66 @@
 """The shopping list: add, change, remove, paste, export, templates (area of P5).
 
-One line per query (``repos.shopping_list.list_key``): adding « Farine » when
-« farine » is already there adds to its quantity. Writes go through one lock,
-so two simultaneous additions of the same query still give one line.
+One line per query (``repos.shopping_list.list_key`` = ``matching.query_key``):
+adding « Farine » when « farine » is already there adds to its quantity (or
+sets the product chosen at a retailer). Every change that writes several rows
+is written in one transaction (``database.transaction()``): all or nothing, and
+two simultaneous additions of the same query still give one line.
+
+The price of a chosen product is never the one sent by the page: it is read
+again in the search cache (same address or barcode), else the product is
+marked « prix non vérifié » (``Pick.verified``).
 """
 
-import asyncio
 import csv
 import io
 import logging
 import re
 import time
 
+from backend import config
+from backend.database import transaction
 from backend.errors import AppError
 from backend.models import (
+    BasketComparison,
     CheckUpdate,
     ListItem,
     ListItemCreate,
     ListItemUpdate,
+    ManualPrice,
     ParsedLine,
     Pick,
     Product,
     Template,
+    TemplateDetail,
     UsualItem,
 )
 from backend.repos import shopping_list as repo
 from backend.repos import templates as templates_repo
+from backend.scrapers.parsing import finalize_product
 from backend.services import hooks
-from backend.services.categories import OTHER, categorize, category_order, is_category
+from backend.services.categories import CATEGORIES, OTHER, categorize, category_order, is_category
 
 logger = logging.getLogger("prixmalin.list")
 
 # Longest shopping list (each line may be searched at every retailer)
 MAX_ITEMS = 300
 
-_lock: tuple[asyncio.AbstractEventLoop, asyncio.Lock] | None = None
 
-
-def _get_lock() -> asyncio.Lock:
-    global _lock
-    loop = asyncio.get_running_loop()
-    if _lock is None or _lock[0] is not loop:
-        _lock = (loop, asyncio.Lock())
-    return _lock[1]
+def plural(n: int, singular: str, plural_form: str | None = None) -> str:
+    """« 0 article », « 1 article », « 2 articles » (as fmt.plural of the page)."""
+    return f"{n} {singular if abs(n) < 2 else plural_form or singular + 's'}"
 
 
 def _to_item(raw: dict) -> ListItem:
     chosen = raw.get("category")
     data = {**raw, "category": chosen or categorize(raw["query"]), "category_set": bool(chosen)}
+    picks = {}
+    for store, pick in (data.get("picks") or {}).items():
+        try:
+            picks[store] = Pick(**pick)
+        except (TypeError, ValueError):
+            logger.warning("Invalid choice of %s ignored in « %s »", store, raw["query"])
+    data["picks"] = picks
     return ListItem(**data)
 
 
@@ -64,6 +77,11 @@ async def get_version() -> int:
     return await repo.get_version()
 
 
+def categories() -> list[str]:
+    """Aisles the user may choose, in the order of a walk in a supermarket."""
+    return list(CATEGORIES)
+
+
 def _clean(text: str | None) -> str | None:
     text = re.sub(r"\s+", " ", text or "").strip()
     return text or None
@@ -76,11 +94,16 @@ def _check_category(category: str | None) -> str | None:
     return category
 
 
+def _full() -> AppError:
+    return AppError(f"Votre liste est pleine ({MAX_ITEMS} articles au maximum).", code="list_full")
+
+
 # --- Prices of the chosen products (B63) ---------------------------------------
 
 
-async def cached_products(store: str, query: str) -> list[Product]:
-    """Products of the search cache for (retailer, chosen store, query), or []."""
+async def cached_products(store: str, query: str) -> tuple[list[Product], float | None]:
+    """Products of the search cache for (retailer, chosen store, query) younger than
+    7 days, and when they were read; ([], None) when there are none."""
     from backend.repos import cache
     from backend.scrapers import SCRAPERS
     from backend.services import search
@@ -89,19 +112,19 @@ async def cached_products(store: str, query: str) -> list[Product]:
     try:
         settings = await load_settings()
         key = search.cache_key(SCRAPERS[store], settings.stores.get(store), query)
-        entry = await cache.get_cached_entry(key)
+        entry = await cache.get_entry(key, config.CACHE_STALE_MAX_SECONDS)
     except Exception:  # noqa: BLE001 (the cache is optional here)
         logger.warning("Search cache unreadable for %s / %s", store, query, exc_info=True)
-        return []
+        return [], None
     if not entry:
-        return []
+        return [], None
     products = []
-    for raw in entry[0]:
+    for raw in entry.products:
         try:
             products.append(Product(**raw))
-        except ValueError:
+        except (TypeError, ValueError):
             continue
-    return products
+    return products, entry.created_at
 
 
 def same_product(a: Product, b: Product) -> bool:
@@ -111,19 +134,38 @@ def same_product(a: Product, b: Product) -> bool:
     return bool(a.ean) and a.ean == b.ean
 
 
-async def verified_pick(product: Product, query: str) -> Pick:
-    """The product chosen by the user, with the price read by PrixMalin (never the client's).
+def pick_from(product: Product, cached: list[Product], read_at: float | None, now: float) -> Pick:
+    """The product chosen by the user with the price read by PrixMalin (pure).
 
-    The price comes from the search results in the cache (same address or
-    barcode); otherwise the product is kept as sent, marked « prix non vérifié ».
+    The price comes from ``cached`` (search results read at ``read_at``) when
+    the product is there (same address or barcode); otherwise the product is
+    kept as sent, marked unverified.
     """
-    now = time.time()
-    for cached in await cached_products(product.store, query):
-        if same_product(cached, product):
-            return Pick(**cached.model_dump(), picked_at=now, source="site", verified=True)
+    for found in cached:
+        if same_product(found, product):
+            return Pick(**found.model_dump(), picked_at=now, price_at=read_at, source="site", verified=True)
     data = product.model_dump()
-    data.update(picked_at=now, source="site", verified=False)
+    data.update(picked_at=now, price_at=None, source="site", verified=False)
     return Pick(**data)
+
+
+async def verified_pick(product: Product, query: str) -> Pick:
+    """The product chosen by the user, with the price read by PrixMalin (never the client's)."""
+    cached, read_at = await cached_products(product.store, query)
+    return pick_from(product, cached, read_at, time.time())
+
+
+def manual_pick(manual: ManualPrice, now: float) -> Pick:
+    """A price seen in the store (« saisi le 03/10 »), with its price per kg/L when the contents say it."""
+    seen = min(manual.seen_at or now, now)
+    product = Product(
+        store=manual.store,
+        name=_clean(manual.name) or manual.name,
+        price=round(manual.price, 2),
+        quantity_label=_clean(manual.quantity_label),
+    )
+    finalize_product(product)
+    return Pick(**product.model_dump(), picked_at=seen, price_at=seen, source="manual", verified=True)
 
 
 def _dump(picks: dict) -> dict:
@@ -133,31 +175,24 @@ def _dump(picks: dict) -> dict:
 # --- Add, change, remove ---------------------------------------------------------
 
 
-async def add_item(data: ListItemCreate) -> ListItem:
-    """Add a query to the list, or update the existing line for the same query."""
-    query = _clean(data.query) or data.query.strip()
-    category = _check_category(data.category)
-    pick = await verified_pick(data.product, query) if data.product else None
-    async with _get_lock():
-        return await _add_locked(query, data, category, pick)
-
-
-async def _add_locked(query: str, data: ListItemCreate, category: str | None, pick: Pick | None) -> ListItem:
+async def _add(db, query: str, data: ListItemCreate, category: str | None, pick: Pick | None) -> int:
+    """Add ``query`` in the transaction ``db``, or update its line; returns the id of the line."""
     existing = await repo.get_by_key(repo.list_key(query))
     if existing is None:
         if await repo.count_items() >= MAX_ITEMS:
-            raise AppError(f"Votre liste est pleine ({MAX_ITEMS} articles au maximum).", code="list_full")
+            raise _full()
         picks = {pick.store: pick} if pick else {}
         item_id = await repo.insert_item(
             query,
             data.quantity,
             _dump(picks),
+            db=db,
             target=_clean(data.target),
             category=category,
             note=_clean(data.note),
         )
-        await repo.record_added(query)
-        return await get_item(item_id)
+        await repo.record_added(query, db=db)
+        return item_id
     item = _to_item(existing)
     fields: dict = {}
     if pick:
@@ -173,18 +208,34 @@ async def _add_locked(query: str, data: ListItemCreate, category: str | None, pi
         fields["note"] = _clean(data.note)
     if category:
         fields["category"] = category
-    await repo.update_fields(item.id, **fields)
-    return await get_item(item.id)
+    await repo.update_fields(item.id, db=db, **fields)
+    return item.id
+
+
+async def add_item(data: ListItemCreate) -> ListItem:
+    """Add a query to the list, or update the existing line for the same query."""
+    query = _clean(data.query) or data.query.strip()
+    category = _check_category(data.category)
+    pick = await verified_pick(data.product, query) if data.product else None
+    async with transaction() as db:
+        item_id = await _add(db, query, data, category, pick)
+    return await get_item(item_id)
 
 
 async def bulk_add(items: list[ListItemCreate]) -> list[ListItem]:
-    """Add several items (pasted list); returns the whole list."""
-    current = await repo.list_items()
-    new = {repo.list_key(i.query) for i in items} - {repo.list_key(i["query"]) for i in current}
-    if len(current) + len(new) > MAX_ITEMS:
-        raise AppError(f"Votre liste serait trop longue ({MAX_ITEMS} articles au maximum).", code="list_full")
-    for item in items:
-        await add_item(item)
+    """Add several items at once (pasted list), merged with the existing lines; returns the list."""
+    prepared = []
+    for data in items:
+        query = _clean(data.query) or data.query.strip()
+        pick = await verified_pick(data.product, query) if data.product else None
+        prepared.append((query, data, _check_category(data.category), pick))
+    async with transaction() as db:
+        current = {item["key"] for item in await repo.list_items()}
+        new = {repo.list_key(query) for query, *_ in prepared} - current
+        if len(current) + len(new) > MAX_ITEMS:
+            raise AppError(f"Votre liste serait trop longue ({MAX_ITEMS} articles au maximum).", code="list_full")
+        for query, data, category, pick in prepared:
+            await _add(db, query, data, category, pick)
     return await get_list()
 
 
@@ -194,14 +245,20 @@ def _later(new: float | None, old: float | None) -> bool:
 
 
 async def update_item(item_id: int, data: ListItemUpdate) -> ListItem | None:
-    async with _get_lock():
+    now = time.time()
+    current = await repo.get_item(item_id)
+    if current is None:
+        return None
+    query = (_clean(data.query) or current["query"]) if data.query is not None else current["query"]
+    pick = await verified_pick(data.set_pick, query) if data.set_pick is not None else None
+    category = _check_category(data.category) if data.category is not None else None
+    async with transaction() as db:
         raw = await repo.get_item(item_id)
         if raw is None:
             return None
         item = _to_item(raw)
         fields: dict = {}
-        if data.query is not None:
-            query = _clean(data.query) or item.query
+        if data.query is not None and query != item.query:
             other = await repo.get_by_key(repo.list_key(query))
             if other is not None and other["id"] != item.id:
                 raise AppError("Cet article est déjà dans votre liste.", 409, "duplicate")
@@ -213,28 +270,19 @@ async def update_item(item_id: int, data: ListItemUpdate) -> ListItem | None:
         if data.note is not None:
             fields["note"] = _clean(data.note)
         if data.category is not None:
-            fields["category"] = _check_category(data.category)
+            fields["category"] = category
         if data.compare is not None:
             fields["compare"] = data.compare
         picks, excluded = dict(item.picks), set(item.excluded)
         if data.remove_pick:
             picks.pop(data.remove_pick, None)
             excluded.discard(data.remove_pick)
-        if data.set_pick is not None:
-            pick = await verified_pick(data.set_pick, fields.get("query", item.query))
+        if pick is not None:
             picks[pick.store] = pick
             excluded.discard(pick.store)
         if data.manual_price is not None:
-            manual = data.manual_price
-            picks[manual.store] = Pick(
-                store=manual.store,
-                name=_clean(manual.name) or manual.name,
-                price=round(manual.price, 2),
-                quantity_label=_clean(manual.quantity_label),
-                picked_at=manual.seen_at or time.time(),
-                source="manual",
-                verified=True,
-            )
+            manual = manual_pick(data.manual_price, now)
+            picks[manual.store] = manual
             excluded.discard(manual.store)
         if data.exclude_store:
             excluded.add(data.exclude_store)
@@ -245,47 +293,48 @@ async def update_item(item_id: int, data: ListItemUpdate) -> ListItem | None:
             fields["excluded"] = sorted(excluded)
         if data.checked is not None and _later(data.checked_at, item.checked_at):
             fields["checked"] = data.checked
-            fields["checked_at"] = data.checked_at or time.time()
-        await repo.update_fields(item.id, **fields)
-        return await get_item(item.id)
+            fields["checked_at"] = min(data.checked_at or now, now)
+        await repo.update_fields(item.id, db=db, **fields)
+    return await get_item(item_id)
 
 
 async def apply_checks(checks: list[CheckUpdate]) -> list[ListItem]:
     """Ticks made in the store, possibly offline: the most recent tick of each item wins."""
-    async with _get_lock():
+    now = time.time()
+    async with transaction() as db:
         for check in checks:
             raw = await repo.get_item(check.id)
             if raw is None or not _later(check.checked_at, raw.get("checked_at")):
                 continue
-            await repo.update_fields(check.id, checked=check.checked, checked_at=check.checked_at or time.time())
+            moment = min(check.checked_at or now, now)
+            await repo.update_fields(check.id, db=db, checked=check.checked, checked_at=moment)
     return await get_list()
 
 
 async def finish(mode: str) -> list[ListItem]:
     """End of the shopping: untick everything, or remove the ticked items."""
-    async with _get_lock():
-        if mode == "remove":
-            await repo.delete_checked()
-        else:
-            await repo.uncheck_all()
+    if mode == "remove":
+        await repo.delete_checked()
+    else:
+        await repo.uncheck_all()
     return await get_list()
 
 
-async def delete_item(item_id: int) -> None:
-    async with _get_lock():
-        await repo.delete_item(item_id)
+async def delete_item(item_id: int) -> bool:
+    return await repo.delete_item(item_id)
 
 
 async def restore_item(item: ListItem) -> ListItem:
     """Put back a deleted line as it was (same id, choices, target, ticks…)."""
     category = _check_category(item.category) if item.category_set else None
-    async with _get_lock():
+    async with transaction() as db:
         existing = await repo.get_by_key(repo.list_key(item.query))
         if existing is not None:
             # Added again meanwhile: the line takes back its choices and settings
             current = _to_item(existing)
             await repo.update_fields(
                 current.id,
+                db=db,
                 quantity=item.quantity,
                 picks=_dump({**current.picks, **item.picks}),
                 target=item.target,
@@ -294,33 +343,38 @@ async def restore_item(item: ListItem) -> ListItem:
                 excluded=item.excluded,
                 category=category,
             )
-            return await get_item(current.id)
-        if await repo.count_items() >= MAX_ITEMS:
-            raise AppError(f"Votre liste est pleine ({MAX_ITEMS} articles au maximum).", code="list_full")
-        taken = await repo.get_item(item.id)
-        item_id = await repo.insert_item(
-            item.query,
-            item.quantity,
-            _dump(item.picks),
-            item_id=None if taken else item.id,
-            target=item.target,
-            category=category,
-            note=item.note,
-            compare=item.compare,
-            excluded=item.excluded,
-            checked=item.checked,
-            checked_at=item.checked_at,
-        )
-        return await get_item(item_id)
+            item_id = current.id
+        else:
+            if await repo.count_items() >= MAX_ITEMS:
+                raise _full()
+            taken = await repo.get_item(item.id)
+            item_id = await repo.insert_item(
+                item.query,
+                item.quantity,
+                _dump(item.picks),
+                db=db,
+                item_id=None if taken else item.id,
+                target=item.target,
+                category=category,
+                note=item.note,
+                compare=item.compare,
+                excluded=item.excluded,
+                checked=item.checked,
+                checked_at=item.checked_at,
+            )
+    return await get_item(item_id)
 
 
 async def clear() -> None:
-    async with _get_lock():
-        await repo.clear_items()
+    await repo.clear_items()
 
 
 async def usual_items() -> list[UsualItem]:
     return [UsualItem(**row) for row in await repo.usual_items()]
+
+
+async def forget_usual(query: str) -> bool:
+    return await repo.forget_usual(query)
 
 
 # --- Pasted lists (B67) -------------------------------------------------------------
@@ -387,12 +441,12 @@ def _parse_piece(text: str) -> ParsedLine | None:
     query = text.strip(" \t.;,:-–—")[:120].strip()
     if not query or not re.search(r"[^\W\d_]", query):
         return None
-    return ParsedLine(query=query, quantity=max(1, min(99, quantity)), target=target)
+    return ParsedLine(query=query, quantity=max(1, min(99, quantity)), target=target, category=categorize(query))
 
 
 def parse_list_text(text: str) -> list[ParsedLine]:
-    """Items of a pasted list: « 2 lait demi-écrémé », « farine 1kg », « - beurre »,
-    « • œufs x12 », « 3x yaourts »… (one item per line, or separated by « ; » or « , »).
+    """Items of a pasted list (pure): « 2 lait demi-écrémé », « farine 1kg », « - beurre »,
+    « • œufs x12 », « 3x yaourts »… (one item per line, or separated by « ; », « , » or « + »).
     The same item twice is merged (quantities added)."""
     found: dict[str, ParsedLine] = {}
     for line in (text or "").splitlines():
@@ -409,6 +463,15 @@ def parse_list_text(text: str) -> list[ParsedLine]:
     return list(found.values())
 
 
+async def preview_text(text: str) -> list[ParsedLine]:
+    """``parse_list_text`` with the items already in the list marked ``existing``."""
+    keys = {item["key"] for item in await repo.list_items()}
+    lines = parse_list_text(text)
+    for line in lines:
+        line.existing = repo.list_key(line.query) in keys
+    return lines
+
+
 # --- Export (B69) -----------------------------------------------------------------
 
 
@@ -420,6 +483,41 @@ def _cell(value: object) -> str:
     """A CSV cell that a spreadsheet never runs as a formula."""
     text = "" if value is None else str(value)
     return "'" + text if text[:1] in ("=", "+", "-", "@", "\t", "\r") else text
+
+
+def assignment_of(
+    comparison: BasketComparison | None, *, plan: int | None = None, store: str | None = None
+) -> tuple[dict[int, dict], dict[str, str]]:
+    """Where each item is bought in a basket comparison (pure).
+
+    ``store``: everything at that retailer; ``plan``: plan number ``plan`` of
+    the optimizer. Returns ({item id: {"store", "product", "price"}}, {retailer:
+    name}) for format_list; nothing when the comparison does not say.
+    """
+    if comparison is None:
+        return {}, {}
+    baskets = {basket.store: basket for basket in comparison.stores}
+    if store is not None:
+        if store not in baskets:
+            return {}, {}
+        where = {line.item_id: store for line in baskets[store].lines}
+        order = [store]
+    elif plan is not None and 0 <= plan < len(comparison.plans):
+        chosen = comparison.plans[plan]
+        where = {item_id: part.store for part in chosen.stores for item_id in part.item_ids}
+        order = [part.store for part in chosen.stores]
+    else:
+        return {}, {}
+    assignment = {}
+    for item_id, key in where.items():
+        line = next((li for li in baskets[key].lines if li.item_id == item_id), None) if key in baskets else None
+        entry = {"store": key, "product": None, "price": None}
+        if line is not None and line.status == "found" and line.product is not None:
+            entry["product"] = line.product.name
+            entry["price"] = line.line_total
+        assignment[item_id] = entry
+    labels = {key: baskets[key].label for key in order if key in baskets}
+    return assignment, labels
 
 
 def group_items(items: list[ListItem], assignment: dict[int, dict], labels: dict[str, str]) -> list[tuple]:
@@ -444,10 +542,10 @@ def format_list(
     assignment: dict[int, dict] | None = None,
     labels: dict[str, str] | None = None,
 ) -> str:
-    """The list as text (to share) or CSV (for a spreadsheet), by retailer then by aisle.
+    """The list as text (to share) or CSV (for a spreadsheet), by retailer then by aisle (pure).
 
-    ``assignment``: {item id: {"store", "product", "price"}} of a basket plan;
-    ``labels``: {retailer key: name} of the retailers to group by.
+    ``assignment``: {item id: {"store", "product", "price"}} of a basket plan
+    (``assignment_of``); ``labels``: {retailer key: name} of the retailers to group by.
     """
     assignment = assignment or {}
     labels = labels or {}
@@ -476,8 +574,7 @@ def format_list(
                     )
         return out.getvalue()
 
-    count = len(items)
-    lines = [f"Ma liste de courses ({count} article{'s' if count > 1 else ''})"]
+    lines = [f"Ma liste de courses ({plural(len(items), 'article')})"]
     for store, aisles in groups:
         lines.append("")
         if store:
@@ -489,10 +586,10 @@ def format_list(
             lines.append(f"{aisle} :")
             for item in aisle_items:
                 text = item.query
-                if item.quantity > 1:
-                    text += f" x{item.quantity}"
                 if item.target:
                     text += f" ({item.target})"
+                elif item.quantity > 1:
+                    text += f" x{item.quantity}"
                 chosen = assignment.get(item.id, {}) if store else {}
                 if chosen.get("product"):
                     text += f" : {chosen['product']}"
@@ -511,11 +608,22 @@ def format_list(
 
 
 def _template_item(item: ListItem) -> dict:
-    return item.model_dump(exclude={"id", "checked", "checked_at"})
+    data = item.model_dump(exclude={"id", "key", "checked", "checked_at", "created_at"})
+    if not item.category_set:
+        data["category"] = None
+    return data
 
 
 async def list_templates() -> list[Template]:
     return [Template(**row) for row in await templates_repo.list_templates()]
+
+
+async def get_template(template_id: int) -> TemplateDetail | None:
+    saved = await templates_repo.get_template(template_id)
+    if saved is None:
+        return None
+    queries = [str(i.get("query", "")) for i in saved.pop("items")]
+    return TemplateDetail(**saved, queries=queries)
 
 
 async def save_template(name: str) -> Template:
@@ -534,24 +642,32 @@ async def delete_template(template_id: int) -> bool:
     return await templates_repo.delete_template(template_id)
 
 
+def _saved_items(raw_items: list[dict], name: str) -> list[ListItem]:
+    saved = []
+    for raw in raw_items:
+        try:
+            item = ListItem(**{**raw, "id": 0, "category": raw.get("category") or ""})
+        except (TypeError, ValueError):
+            logger.warning("Invalid item in the template %s", name)
+            continue
+        item.category_set = bool(raw.get("category"))
+        saved.append(item)
+    return saved
+
+
 async def apply_template(template_id: int, mode: str = "replace") -> list[ListItem] | None:
     """Put a saved list back (``replace``) or add its items to the list (``merge``)."""
     template = await templates_repo.get_template(template_id)
     if template is None:
         return None
-    saved = []
-    for raw in template["items"]:
-        try:
-            saved.append(ListItem(**{**raw, "id": 0}))
-        except ValueError:
-            logger.warning("Invalid item in the template %s", template["name"])
-    async with _get_lock():
+    saved = _saved_items(template["items"], template["name"])
+    async with transaction() as db:
         current = await repo.list_items() if mode == "merge" else []
-        new = {repo.list_key(i.query) for i in saved} - {repo.list_key(i["query"]) for i in current}
+        new = {repo.list_key(i.query) for i in saved} - {i["key"] for i in current}
         if len(current) + len(new) > MAX_ITEMS:
             raise AppError(f"Votre liste serait trop longue ({MAX_ITEMS} articles au maximum).", code="list_full")
         if mode == "replace":
-            await repo.clear_items()
+            await repo.clear_items(db=db)
         for item in saved:
             existing = await repo.get_by_key(repo.list_key(item.query))
             if existing is None:
@@ -559,17 +675,19 @@ async def apply_template(template_id: int, mode: str = "replace") -> list[ListIt
                     item.query,
                     item.quantity,
                     _dump(item.picks),
+                    db=db,
                     target=item.target,
                     category=item.category if item.category_set else None,
                     note=item.note,
                     compare=item.compare,
                     excluded=item.excluded,
                 )
-                await repo.record_added(item.query)
+                await repo.record_added(item.query, db=db)
             else:
                 current_item = _to_item(existing)
                 await repo.update_fields(
                     current_item.id,
+                    db=db,
                     quantity=min(99, current_item.quantity + item.quantity),
                     picks=_dump({**item.picks, **current_item.picks}),
                     target=current_item.target or item.target,
@@ -585,19 +703,27 @@ async def export_backup() -> list[dict]:
 
 
 async def restore_backup(data: list[dict]) -> None:
-    """Replace the list with the lines of a backup (their ids are not kept)."""
-    items = [ListItem(**item) for item in data]
-    async with _get_lock():
-        await repo.clear_items()
+    """Replace the list with the lines of a backup (their ids are not kept), all at once."""
+    items = []
+    for raw in data or []:
+        item = ListItem(**{**raw, "category": raw.get("category") or ""})
+        item.category_set = bool(raw.get("category_set", raw.get("category")))
+        items.append(item)
+    async with transaction() as db:
+        await repo.clear_items(db=db)
+        seen = set()
         for item in items:
-            if await repo.get_by_key(repo.list_key(item.query)) is not None:
+            key = repo.list_key(item.query)
+            if key in seen or not key:
                 continue
+            seen.add(key)
             await repo.insert_item(
                 item.query,
                 item.quantity,
                 _dump(item.picks),
+                db=db,
                 target=item.target,
-                category=item.category if item.category_set else None,
+                category=item.category if item.category_set and is_category(item.category) else None,
                 note=item.note,
                 compare=item.compare,
                 excluded=item.excluded,
@@ -607,14 +733,24 @@ async def restore_backup(data: list[dict]) -> None:
 
 
 async def export_templates() -> list[dict]:
-    return [await templates_repo.get_template(row["id"]) for row in await templates_repo.list_templates()]
+    return [{"name": t["name"], "items": t["items"]} for t in await templates_repo.all_templates()]
 
 
 async def restore_templates(data: list[dict]) -> None:
-    await templates_repo.clear_templates()
-    for template in data or []:
-        await templates_repo.save_template(template["name"], template.get("items", []))
+    async with transaction() as db:
+        await templates_repo.clear_templates(db=db)
+        for template in data or []:
+            await templates_repo.save_template(str(template["name"]), list(template.get("items", [])), db=db)
+
+
+async def export_history() -> list[dict]:
+    return await repo.history_rows()
+
+
+async def restore_history(data: list[dict]) -> None:
+    await repo.replace_history(list(data or []))
 
 
 hooks.register_backup("shopping_list", export_backup, restore_backup)
 hooks.register_backup("list_templates", export_templates, restore_templates)
+hooks.register_backup("list_history", export_history, restore_history)

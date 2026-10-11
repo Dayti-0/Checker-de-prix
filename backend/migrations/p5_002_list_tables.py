@@ -1,7 +1,21 @@
-"""P5: usual items, saved lists (templates), version of the list, last basket."""
+"""P5: usual items, saved lists (templates), version of the list, last basket.
+
+Written in one transaction: an interrupted migration leaves nothing behind.
+"""
 
 
 async def up(db) -> None:
+    await db.execute("BEGIN IMMEDIATE")
+    try:
+        await _up(db)
+    except BaseException:
+        await db.rollback()
+        raise
+    await db.commit()
+
+
+async def _up(db) -> None:
+    # How many times each query was added to the list (« habituels »: at least 2)
     await db.execute("""
         CREATE TABLE IF NOT EXISTS list_history (
             query_key TEXT PRIMARY KEY,
@@ -21,11 +35,14 @@ async def up(db) -> None:
             created_at REAL NOT NULL,
             updated_at REAL NOT NULL
         )""")
+    # version: incremented at each write to the list (the pages poll it)
     await db.execute("CREATE TABLE IF NOT EXISTS list_meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL)")
     await db.execute("INSERT OR IGNORE INTO list_meta (key, value) VALUES ('version', 0)")
+    # Last basket comparison, shown again without searching
     await db.execute("""
         CREATE TABLE IF NOT EXISTS basket_last (
             id INTEGER PRIMARY KEY CHECK (id = 1),
             comparison_json TEXT NOT NULL,
-            created_at REAL NOT NULL
+            created_at REAL NOT NULL,
+            list_version INTEGER
         )""")

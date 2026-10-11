@@ -1,17 +1,21 @@
 """Lines of the shopping list, usual items, version of the list, last basket (area of P5).
 
-Every write to the list increments its version (``get_version``), which the
-pages poll to follow the changes made on another device.
+Every write to the list increments its version (``get_version``) in the same
+transaction: the pages poll it to follow the changes made on another device.
+A write function takes ``db``, the connection of a transaction already open
+(``async with database.transaction() as db``), to be written with other
+statements all at once; without it, it opens its own transaction.
 """
 
+import contextlib
 import json
-import re
 import time
-import unicodedata
+from collections.abc import AsyncIterator
 
 import aiosqlite
 
-from backend.database import get_db
+from backend.database import get_db, transaction
+from backend.services.matching import query_key
 
 # Columns that update_fields() may change, with their conversion to SQLite
 _FIELDS = {
@@ -33,11 +37,29 @@ _COLUMNS = {"picks": "picks_json", "excluded": "excluded_json"}
 def list_key(query: str) -> str:
     """Normalised query: one line per key (« Farine » and « farine » are the same item).
 
-    Stable: the keys of existing lines are computed with it (UNIQUE index).
+    It is ``matching.query_key``, which the page also uses (``listKey`` of
+    add-sheet.js). The keys of the saved lines are computed with it (UNIQUE
+    index): if query_key changes, a migration must compute them again.
     """
-    text = (query or "").lower().replace("œ", "oe").replace("æ", "ae")
-    text = "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))
-    return " ".join(re.findall(r"[a-z0-9]+", text))
+    return query_key(query or "")
+
+
+@contextlib.asynccontextmanager
+async def writing(db: aiosqlite.Connection | None = None) -> AsyncIterator[aiosqlite.Connection]:
+    """``db`` (a transaction already open), or a new transaction."""
+    if db is not None:
+        yield db
+        return
+    async with transaction() as tx:
+        yield tx
+
+
+def _json(text: str | None, default):
+    try:
+        value = json.loads(text) if text else default
+    except ValueError:
+        return default
+    return value if isinstance(value, type(default)) else default
 
 
 def _row_to_item(row: aiosqlite.Row) -> dict:
@@ -49,36 +71,31 @@ def _row_to_item(row: aiosqlite.Row) -> dict:
     return {
         "id": row["id"],
         "query": row["query"],
+        "key": get("query_key") or list_key(row["query"]),
         "quantity": row["quantity"],
-        "picks": json.loads(row["picks_json"] or "{}"),
+        "picks": _json(row["picks_json"], {}),
         "target": get("target"),
         "category": get("category"),
         "note": get("note"),
         "compare": bool(get("compare", 1)),
-        "excluded": json.loads(get("excluded_json", "[]")),
+        "excluded": _json(get("excluded_json"), []),
         "checked": bool(get("checked", 0)),
         "checked_at": get("checked_at"),
+        "created_at": get("created_at"),
     }
 
 
 async def _bump(db: aiosqlite.Connection) -> None:
-    await db.execute("UPDATE list_meta SET value = value + 1 WHERE key = 'version'")
-
-
-async def _commit(db: aiosqlite.Connection) -> None:
-    await _bump(db)
-    await db.commit()
+    await db.execute(
+        "INSERT INTO list_meta (key, value) VALUES ('version', 1) ON CONFLICT(key) DO UPDATE SET value = value + 1"
+    )
 
 
 async def get_version() -> int:
     db = await get_db()
     cursor = await db.execute("SELECT value FROM list_meta WHERE key = 'version'")
     row = await cursor.fetchone()
-    if row is None:  # emptied by hand: start again
-        await db.execute("INSERT OR IGNORE INTO list_meta (key, value) VALUES ('version', 0)")
-        await db.commit()
-        return 0
-    return row[0]
+    return row[0] if row else 0
 
 
 async def list_items() -> list[dict]:
@@ -113,6 +130,7 @@ async def insert_item(
     quantity: int,
     picks: dict,
     *,
+    db: aiosqlite.Connection | None = None,
     item_id: int | None = None,
     target: str | None = None,
     category: str | None = None,
@@ -123,35 +141,35 @@ async def insert_item(
     checked_at: float | None = None,
 ) -> int:
     """Insert a line (with ``item_id`` to put a deleted line back); returns its id."""
-    db = await get_db()
-    cursor = await db.execute(
-        "INSERT INTO shopping_list (id, query, query_key, quantity, picks_json, target, category, note, compare,"
-        " excluded_json, checked, checked_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (
-            item_id,
-            query,
-            list_key(query),
-            quantity,
-            json.dumps(picks),
-            target,
-            category,
-            note,
-            1 if compare else 0,
-            json.dumps(sorted(set(excluded))),
-            1 if checked else 0,
-            checked_at,
-            time.time(),
-        ),
-    )
-    await _commit(db)
-    return cursor.lastrowid
+    async with writing(db) as tx:
+        cursor = await tx.execute(
+            "INSERT INTO shopping_list (id, query, query_key, quantity, picks_json, target, category, note, compare,"
+            " excluded_json, checked, checked_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                item_id,
+                query,
+                list_key(query),
+                quantity,
+                json.dumps(picks),
+                target,
+                category,
+                note,
+                1 if compare else 0,
+                json.dumps(sorted(set(excluded))),
+                1 if checked else 0,
+                checked_at,
+                time.time(),
+            ),
+        )
+        await _bump(tx)
+        return cursor.lastrowid
 
 
 async def update_item(item_id: int, quantity: int, picks: dict) -> None:
     await update_fields(item_id, quantity=quantity, picks=picks)
 
 
-async def update_fields(item_id: int, **fields) -> None:
+async def update_fields(item_id: int, *, db: aiosqlite.Connection | None = None, **fields) -> None:
     """Change some columns of a line (names of _FIELDS)."""
     if not fields:
         return
@@ -162,49 +180,49 @@ async def update_fields(item_id: int, **fields) -> None:
         convert = _FIELDS[name]
         sets.append(f"{_COLUMNS.get(name, name)} = ?")
         values.append(None if value is None else convert(value))
-    db = await get_db()
-    await db.execute(f"UPDATE shopping_list SET {', '.join(sets)} WHERE id = ?", (*values, item_id))  # noqa: S608
-    await _commit(db)
+    async with writing(db) as tx:
+        await tx.execute(f"UPDATE shopping_list SET {', '.join(sets)} WHERE id = ?", (*values, item_id))  # noqa: S608
+        await _bump(tx)
 
 
-async def delete_item(item_id: int) -> None:
-    db = await get_db()
-    await db.execute("DELETE FROM shopping_list WHERE id = ?", (item_id,))
-    await _commit(db)
+async def delete_item(item_id: int, *, db: aiosqlite.Connection | None = None) -> bool:
+    async with writing(db) as tx:
+        cursor = await tx.execute("DELETE FROM shopping_list WHERE id = ?", (item_id,))
+        await _bump(tx)
+        return cursor.rowcount > 0
 
 
-async def clear_items() -> None:
-    db = await get_db()
-    await db.execute("DELETE FROM shopping_list")
-    await _commit(db)
+async def clear_items(*, db: aiosqlite.Connection | None = None) -> None:
+    async with writing(db) as tx:
+        await tx.execute("DELETE FROM shopping_list")
+        await _bump(tx)
 
 
-async def delete_checked() -> int:
-    db = await get_db()
-    cursor = await db.execute("DELETE FROM shopping_list WHERE checked = 1")
-    await _commit(db)
-    return cursor.rowcount
+async def delete_checked(*, db: aiosqlite.Connection | None = None) -> int:
+    async with writing(db) as tx:
+        cursor = await tx.execute("DELETE FROM shopping_list WHERE checked = 1")
+        await _bump(tx)
+        return cursor.rowcount
 
 
-async def uncheck_all() -> None:
-    db = await get_db()
-    await db.execute("UPDATE shopping_list SET checked = 0, checked_at = NULL")
-    await _commit(db)
+async def uncheck_all(*, db: aiosqlite.Connection | None = None) -> None:
+    async with writing(db) as tx:
+        await tx.execute("UPDATE shopping_list SET checked = 0, checked_at = NULL")
+        await _bump(tx)
 
 
 # --- Usual items ---------------------------------------------------------------
 
 
-async def record_added(query: str) -> None:
+async def record_added(query: str, *, db: aiosqlite.Connection | None = None) -> None:
     """One more addition of ``query`` to the list (usual items: at least 2)."""
-    db = await get_db()
-    await db.execute(
-        "INSERT INTO list_history (query_key, query, count, last_added_at) VALUES (?, ?, 1, ?)"
-        " ON CONFLICT(query_key) DO UPDATE SET count = count + 1, query = excluded.query,"
-        " last_added_at = excluded.last_added_at",
-        (list_key(query), query, time.time()),
-    )
-    await db.commit()
+    async with writing(db) as tx:
+        await tx.execute(
+            "INSERT INTO list_history (query_key, query, count, last_added_at) VALUES (?, ?, 1, ?)"
+            " ON CONFLICT(query_key) DO UPDATE SET count = count + 1, query = excluded.query,"
+            " last_added_at = excluded.last_added_at",
+            (list_key(query), query, time.time()),
+        )
 
 
 async def usual_items(min_count: int = 2, limit: int = 12) -> list[dict]:
@@ -219,26 +237,51 @@ async def usual_items(min_count: int = 2, limit: int = 12) -> list[dict]:
     return [{"query": r["query"], "count": r["count"]} for r in await cursor.fetchall()]
 
 
-async def clear_history() -> None:
+async def history_rows() -> list[dict]:
     db = await get_db()
-    await db.execute("DELETE FROM list_history")
-    await db.commit()
+    cursor = await db.execute("SELECT query, count, last_added_at FROM list_history ORDER BY query_key")
+    return [dict(r) for r in await cursor.fetchall()]
+
+
+async def replace_history(rows: list[dict]) -> None:
+    """Replace the usual items with ``rows`` ({query, count, last_added_at}), all at once."""
+    async with transaction() as db:
+        await db.execute("DELETE FROM list_history")
+        for row in rows:
+            await db.execute(
+                "INSERT INTO list_history (query_key, query, count, last_added_at) VALUES (?, ?, ?, ?)"
+                " ON CONFLICT(query_key) DO UPDATE SET count = count + excluded.count",
+                (list_key(row["query"]), row["query"], int(row["count"]), float(row.get("last_added_at") or 0)),
+            )
+
+
+async def forget_usual(query: str) -> bool:
+    """« Ne plus proposer » a usual item."""
+    db = await get_db()
+    cursor = await db.execute("DELETE FROM list_history WHERE query_key = ?", (list_key(query),))
+    return cursor.rowcount > 0
 
 
 # --- Last basket comparison ----------------------------------------------------
 
 
-async def save_last_basket(comparison: dict) -> None:
+async def save_last_basket(comparison: dict, list_version: int | None = None) -> None:
     db = await get_db()
     await db.execute(
-        "INSERT OR REPLACE INTO basket_last (id, comparison_json, created_at) VALUES (1, ?, ?)",
-        (json.dumps(comparison), time.time()),
+        "INSERT OR REPLACE INTO basket_last (id, comparison_json, created_at, list_version) VALUES (1, ?, ?, ?)",
+        (json.dumps(comparison), time.time(), list_version),
     )
-    await db.commit()
 
 
 async def get_last_basket() -> dict | None:
     db = await get_db()
     cursor = await db.execute("SELECT comparison_json FROM basket_last WHERE id = 1")
     row = await cursor.fetchone()
-    return json.loads(row[0]) if row else None
+    if row is None:
+        return None
+    return _json(row[0], {}) or None
+
+
+async def clear_last_basket() -> None:
+    db = await get_db()
+    await db.execute("DELETE FROM basket_last")

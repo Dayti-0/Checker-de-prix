@@ -2,12 +2,13 @@
 
 Lines whose queries only differ by case, accents or spaces (« Farine » and
 « farine ») are merged into the oldest one (quantities added, choices kept),
-then a UNIQUE index on the normalised query prevents new duplicates.
+then a UNIQUE index on the normalised query prevents new duplicates. Written in
+one transaction: an interrupted migration leaves the table as it was.
 """
 
 import json
-
-from backend.repos.shopping_list import list_key
+import re
+import unicodedata
 
 COLUMNS = {
     "query_key": "TEXT",
@@ -21,7 +22,24 @@ COLUMNS = {
 }
 
 
+def key_of(query: str) -> str:
+    """matching.query_key as it was when this migration was written (frozen copy)."""
+    text = (query or "").lower().replace("œ", "oe").replace("æ", "ae")
+    text = "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))
+    return " ".join(re.findall(r"[a-z0-9]+", text))
+
+
 async def up(db) -> None:
+    await db.execute("BEGIN IMMEDIATE")
+    try:
+        await _up(db)
+    except BaseException:
+        await db.rollback()
+        raise
+    await db.commit()
+
+
+async def _up(db) -> None:
     cursor = await db.execute("PRAGMA table_info(shopping_list)")
     existing = {row[1] for row in await cursor.fetchall()}
     for name, ddl in COLUMNS.items():
@@ -31,10 +49,12 @@ async def up(db) -> None:
     cursor = await db.execute("SELECT id, query, quantity, picks_json FROM shopping_list ORDER BY id")
     kept: dict[str, dict] = {}
     for row_id, query, quantity, picks_json in await cursor.fetchall():
-        key = list_key(query)
+        key = key_of(query)
         try:
             picks = json.loads(picks_json or "{}")
         except ValueError:
+            picks = {}
+        if not isinstance(picks, dict):
             picks = {}
         first = kept.get(key)
         if first is None:
