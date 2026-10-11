@@ -74,7 +74,7 @@ function okColumn(col, view) {
             col.relevant.length > rows.length &&
             html`<button class="more-btn" type="button" data-key="more" data-action="more" data-store-key="${col.key}" data-focus="more:${col.key}" aria-label="Voir ${col.relevant.length - rows.length} de plus chez ${col.label}">Voir ${col.relevant.length - rows.length} de plus</button>`
         }
-        ${closeBlock(col.key, col.close, Boolean(view.closeOpen[col.key]), view.closeRowOptions)}
+        ${closeBlock(col.key, col.close, Boolean(view.closeOpen[col.key]), view.closeRowOptions, `chez ${col.label}`)}
         ${read > 0 && html`<p class="column-foot" data-key="foot">${plural(read, "produit lu", "produits lus")}</p>`}
     </section>`;
 }

@@ -66,7 +66,9 @@ function nameOf(p) {
     const cut = p.name.lastIndexOf(" ");
     const head = cut > 0 ? p.name.slice(0, cut + 1) : "";
     const tail = cut > 0 ? p.name.slice(cut + 1) : p.name;
-    return html`<a class="name" href="${link}" target="_blank" rel="noopener noreferrer" data-focus="link:${productKey(p)}"><span class="name-text">${head}<span class="nowrap">${tail}${icon("external-link")}</span></span><span class="visually-hidden"> (nouvel onglet)</span></a>`;
+    // One name per link: « Huile de tournesol, Lidl, 1,79 € (nouvel onglet) »
+    const where = [retailer(p.store).label, p.price != null ? euros(p.price) : null].filter(Boolean).join(", ");
+    return html`<a class="name" href="${link}" target="_blank" rel="noopener noreferrer" data-focus="link:${productKey(p)}"><span class="name-text">${head}<span class="nowrap">${tail}${icon("external-link")}</span></span><span class="visually-hidden">, ${where} (nouvel onglet)</span></a>`;
 }
 
 function priceOf(p, sort) {

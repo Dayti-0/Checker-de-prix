@@ -28,6 +28,16 @@ def page(request):
     return request.getfixturevalue(request.param)
 
 
+def assert_unique_names(page):
+    """No two buttons or links of the results with the same accessible name (CLAUDE.md, B29)."""
+    names = page.locator("#results").evaluate(
+        """(root) => [...root.querySelectorAll("a, button")]
+            .filter((el) => el.offsetParent !== null)
+            .map((el) => (el.getAttribute("aria-label") || el.textContent).replace(/\\s+/g, " ").trim())"""
+    )
+    assert len(names) == len(set(names)), sorted(n for n in names if names.count(n) > 1)
+
+
 def test_sunflower_oil_filters_well(page):
     page.goto(page.base)
     search(page, "huile de tournesols")
@@ -56,7 +66,8 @@ def test_sunflower_oil_filters_well(page):
 
     # The food in sunflower oil: only in « Produits proches », folded
     toggle = close_toggle(page)
-    expect(toggle).to_have_text("Produits proches (5)")
+    expect(toggle).to_have_text("Produits proches (5) dans toutes les enseignes")
+    expect(toggle).to_have_accessible_name("Produits proches (5) dans toutes les enseignes")
     expect(toggle).to_have_attribute("aria-expanded", "false")
     body = page.locator("#results-body")
     for word in SUNFLOWER_FOOD:
@@ -87,8 +98,15 @@ def test_sunflower_oil_filters_well(page):
     expect(page.locator(".column[data-store=lidl] .product.best")).to_contain_text("Le moins cher")
     expect(page.locator(".tag.best")).to_have_count(1)
     expect(page.get_by_role("heading", name="Aldi, 2 produits")).to_be_visible()
+    # One name per retailer for the toggles, one name per product for the links
+    expect(close_toggle(page, page.locator(".column[data-store=aldi]"))).to_have_accessible_name(
+        "Produits proches (2) chez Aldi"
+    )
+    assert_unique_names(page)
     assert_accessible(page, "par enseigne")
     assert no_horizontal_scroll(page)
+    choose_view(page, "Tout trié")
+    assert_unique_names(page)
 
 
 @pytest.mark.parametrize("query", ["huile de tournesol", "huile tournesol"])
@@ -98,7 +116,7 @@ def test_other_spellings_give_the_same_list(desktop, query):
     search(page, query)
     choose_view(page, "Tout trié")
     expect(main_rows(page)).to_have_count(6)
-    expect(close_toggle(page)).to_have_text("Produits proches (5)")
+    expect(close_toggle(page)).to_have_text("Produits proches (5) dans toutes les enseignes")
     expect(page.get_by_test_id("best-offer")).to_contain_text("1,79 €")
 
 

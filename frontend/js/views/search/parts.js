@@ -13,11 +13,15 @@ import { failureLabel, STATUS_LABEL } from "./summary.js";
 // « Produits proches (3) »: products that contain the words of the search
 // without being the product searched (« Thon à l'huile de tournesol »).
 // Never counted, never « Le moins cher »; folded until the user opens them.
-export function closeBlock(id, products, open, rowOptions) {
+// `where` (« chez Aldi », « dans toutes les enseignes ») ends the name of the
+// button for screen readers: one name per retailer.
+export function closeBlock(id, products, open, rowOptions, where = "") {
     if (!products.length) return null;
     return html`<div class="close-block" data-key="close" data-patch data-testid="close-products">
         <button class="close-toggle" type="button" data-key="toggle" data-action="close" data-close="${id}" data-focus="close:${id}" aria-expanded="${open ? "true" : "false"}" aria-controls="close-${id}">
-            ${icon(open ? "chevron-down" : "chevron-right")}<span>Produits proches (${products.length})</span>
+            ${icon(open ? "chevron-down" : "chevron-right")}<span>Produits proches (${products.length})</span>${
+                where && html`<span class="visually-hidden"> ${where}</span>`
+            }
         </button>
         <div class="close-body" id="close-${id}" data-key="body" data-patch${open ? "" : " hidden"}>
             ${open && html`<p class="close-help" data-key="help">Ils contiennent les mots cherchés sans être le produit cherché (par exemple un plat cuisiné avec cet ingrédient).</p>

@@ -56,6 +56,6 @@ export function offersMarkup({ groups, count, stores, close, pending }, view) {
             groups.length > shown.length &&
             html`<button class="more-btn" type="button" data-key="more" data-action="more" data-store-key="all" data-focus="more:all">Voir ${groups.length - shown.length} de plus</button>`
         }
-        ${closeBlock("all", close, Boolean(view.closeOpen.all), view.closeRowOptions)}
+        ${closeBlock("all", close, Boolean(view.closeOpen.all), view.closeRowOptions, "dans toutes les enseignes")}
     </section>`;
 }
