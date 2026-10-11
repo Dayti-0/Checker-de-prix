@@ -46,12 +46,21 @@ function render() {
     document.body.classList.toggle("has-setup-banner", shown);
     const text = banner.querySelector("span");
     if (text) text.textContent = state.browser && state.browser.is_local === false ? REMOTE_TEXT : LOCAL_TEXT;
+    measure();
     if (shown && !timer) {
         timer = setInterval(poll, POLL_MS);
     } else if (!shown && timer) {
         clearInterval(timer);
         timer = null;
     }
+}
+
+// Height of the banner (fixed at the bottom on a phone): the page and the
+// messages are moved above it (css/stores.css)
+function measure() {
+    const banner = document.getElementById("setup-banner");
+    if (!banner || banner.hidden) return;
+    document.documentElement.style.setProperty("--setup-banner-h", `${banner.offsetHeight}px`);
 }
 
 // « Ouvrir le site » of the other views, from a phone: confirm before opening
@@ -82,6 +91,7 @@ export function init() {
     initDoneButton();
     document.addEventListener("click", interceptRemoteSetup, true);
     on("browser:changed", render);
+    window.addEventListener("resize", measure);
     watchStores();
     render();
     // Once the first view is shown (the router is started)

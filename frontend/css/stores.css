@@ -189,5 +189,7 @@
         padding-bottom: max(.7rem, env(safe-area-inset-bottom));
     }
     .setup-banner .btn-primary { min-height: 2.75rem; }
-    body.has-setup-banner { padding-bottom: 8rem; }
+    /* --setup-banner-h: height of the banner, measured by setup-banner.js */
+    body.has-setup-banner { padding-bottom: calc(var(--setup-banner-h, 8rem) + var(--bottom-bar-h)); }
+    body.has-setup-banner .toast { bottom: calc(var(--setup-banner-h, 8rem) + var(--bottom-bar-h) + var(--space-4)); }
 }
