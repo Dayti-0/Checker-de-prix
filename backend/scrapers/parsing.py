@@ -305,8 +305,12 @@ _PRICE_IN_TEXT = re.compile(
 
 
 def _denominator(text: str, skip: tuple[int, int] | None = None, last: bool = False) -> tuple[float, str] | None:
-    """(amount, unit) of the first (or ``last``) unit of ``text`` outside ``skip``: '/ 500 g' -> (0.5, 'kg')."""
+    """(amount, unit) of the first (or ``last``) unit of ``text`` outside ``skip``: '/ 500 g' -> (0.5, 'kg').
+
+    A weight or a volume wins over a piece: « le sachet de 500 g » is per kg.
+    """
     matches = list(_DENOMINATOR.finditer(text))
+    pieces = []
     for m in reversed(matches) if last else matches:
         if skip and skip[0] <= m.start() < skip[1]:
             continue
@@ -315,10 +319,11 @@ def _denominator(text: str, skip: tuple[int, int] | None = None, last: bool = Fa
         if amount <= 0:
             continue
         if word in _PIECE_WORDS:
-            return amount, PIECE
+            pieces.append((amount, PIECE))
+            continue
         base, factor = _UNITS[word]
         return amount * factor, base
-    return None
+    return pieces[0] if pieces else None
 
 
 def parse_unit_price(label: str | None) -> tuple[float, str] | None:
