@@ -30,7 +30,6 @@ from dataclasses import dataclass
 from urllib.parse import quote
 
 from backend import config
-from backend.browser import browser
 from backend.models import Product, StoreOption, StoreSelection
 from backend.scrapers.base import BaseScraper, BlockedError, StoreRequiredError
 from backend.scrapers.common import (
@@ -442,6 +441,9 @@ class CoursesUScraper(BaseScraper):
         return products
 
     async def _visit_store(self, page, store: StoreSelection) -> None:
+        # Imported here: backend.browser imports the scrapers package
+        from backend.browser import browser
+
         if not needs_store_visit(self._visit, store.url, browser.context_generation, time.monotonic()):
             return
         response = await page.goto(store.url, wait_until="domcontentloaded", timeout=30000)

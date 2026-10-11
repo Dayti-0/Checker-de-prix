@@ -84,8 +84,11 @@ def reset_data() -> None:
     """Empty the list, the settings and the cache of the running server.
 
     Written with a separate SQLite connection: the server reads them again at
-    each request.
+    each request. The circuits of the retailers (in memory) are closed too.
     """
+    from backend.services import search
+
+    search.reset_circuit()
     if not Path(config.DB_PATH).exists():
         return
     with sqlite3.connect(config.DB_PATH, timeout=5) as db:

@@ -35,7 +35,7 @@ MAX_DISTANCE_KM = 20100
 
 
 def _invalid(message: str) -> PydanticCustomError:
-    # The message is shown as is by the frontend (422 « detail[].msg »)
+    # The message is shown as is by the frontend (422 « detail », backend/api/errors.py)
     return PydanticCustomError("invalid", message)
 
 

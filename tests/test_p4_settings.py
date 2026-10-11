@@ -287,7 +287,7 @@ def client():
 def test_location_validation(client, body, message):
     response = client.post("/api/settings/location", json=body)
     assert response.status_code == 422
-    assert response.json()["detail"][0]["msg"] == message
+    assert response.json() == {"detail": message, "code": "validation"}
 
 
 def test_location_api(client, monkeypatch):
@@ -340,7 +340,7 @@ def test_store_distance_messages_are_french(client):
     for bad in (-1, 1e9):
         response = client.put("/api/retailers/coursesu/store", json={"url": url, "distance_km": bad})
         assert response.status_code == 422
-        assert [d["msg"] for d in response.json()["detail"]] == ["Distance invalide."]
+        assert response.json()["detail"] == "Distance invalide."
 
 
 def test_valid_stores_are_saved(client):

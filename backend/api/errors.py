@@ -81,9 +81,18 @@ async def _http_error(request: Request, error: StarletteHTTPException) -> JSONRe
     return response
 
 
+# Type of the errors whose message is written for the user (backend/models/settings.py)
+USER_MESSAGE_TYPE = "invalid"
+
+
 async def _validation_error(request: Request, error: RequestValidationError) -> JSONResponse:
+    errors = error.errors()
+    if errors and all(e.get("type") == USER_MESSAGE_TYPE for e in errors):
+        # Messages written in French for the user (« Saisissez 5 chiffres… »)
+        message = " ".join(dict.fromkeys(str(e.get("msg", "")) for e in errors))
+        return error_response(422, message, "validation")
     # Field names only: the submitted values are never echoed back
-    fields = sorted({".".join(str(part) for part in e.get("loc", ())[1:]) or "requête" for e in error.errors()})
+    fields = sorted({".".join(str(part) for part in e.get("loc", ())[1:]) or "requête" for e in errors})
     message = "Données invalides : " + ", ".join(fields) + "."
     return error_response(422, message, "validation")
 

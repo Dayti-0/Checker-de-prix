@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from backend import config, main
 from backend.browser import BrowserManager, BrowserUnavailable
+from backend.browser import browser as shared_browser
 from backend.models import Location, StoreOption, StoreSelection
 from backend.repos import stores_cache
 from backend.scrapers import SCRAPERS, common
@@ -1021,7 +1022,7 @@ def test_browser_store_page_revisited_when_the_context_changes(manager, fast, mo
         await page.route(re.compile(r"https://www\.coursesu\.com/recherche.*"), html(fixtures.COURSESU_PAGE))
         first = await fast.search(page, "farine", STORE)
         await fast.search(page, "farine", STORE)  # same context: no new visit
-        monkeypatch.setattr(cu.browser, "context_generation", cu.browser.context_generation + 1)
+        monkeypatch.setattr(shared_browser, "context_generation", shared_browser.context_generation + 1)
         await fast.search(page, "farine", STORE)
         return first
 

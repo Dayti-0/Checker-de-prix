@@ -140,9 +140,14 @@ def test_http_and_validation_errors_are_in_french(client):
     assert missing.status_code == 404
     assert missing.json() == {"detail": "Introuvable.", "code": "http_404"}
 
-    invalid = client.post("/api/settings/location", json={"postal_code": "<script>"})
+    invalid = client.post("/api/list", json={"query": "farine", "quantity": "<script>"})
     assert invalid.status_code == 422
     body = invalid.json()
     assert body["code"] == "validation"
-    assert body["detail"] == "Données invalides : postal_code."
+    assert body["detail"] == "Données invalides : quantity."
     assert "<script>" not in invalid.text
+
+    # A message written for the user by the model is shown as is
+    written = client.post("/api/settings/location", json={"postal_code": "<script>"})
+    assert written.json() == {"detail": "Saisissez 5 chiffres, par ex. 34000.", "code": "validation"}
+    assert "<script>" not in written.text
