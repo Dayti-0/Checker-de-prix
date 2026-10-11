@@ -278,3 +278,21 @@ def test_a_retailer_unticked_while_searching_is_no_longer_awaited(desktop, delay
     page.locator(".store-toggle", has_text="Carrefour").click()
     expect(page.locator("[data-summary=carrefour]")).to_contain_text("Recherche…")
     expect(page.locator(".column[data-store=carrefour]")).to_contain_text("Farine de blé T45", timeout=15000)
+
+
+@pytest.mark.parametrize("viewport", ["mobile", "desktop"])
+def test_accessible_while_the_retailers_answer(request, viewport, delays):
+    """Filters shown but useless while searching: reachable with the keyboard (the row scrolls on a phone)."""
+    from tests.e2e.axe import assert_accessible
+
+    page = request.getfixturevalue(viewport)
+    delays.update({"aldi": 2, "lidl": 2, "carrefour": 2})
+    page.goto(page.base)
+    search(page, "farine", wait=False)
+    expect(page.locator("#results")).to_have_attribute("aria-busy", "true")
+    chips = page.get_by_test_id("result-filters").get_by_role("button")
+    expect(chips).to_have_count(5)
+    expect(chips.first).to_be_disabled()  # aria-disabled: still focusable
+    assert_accessible(page, "recherche en cours")
+    wait_done(page)
+    expect(page.get_by_test_id("result-filters").get_by_role("button", name=re.compile("^Bio"))).to_be_enabled()

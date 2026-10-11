@@ -313,7 +313,7 @@
 .filter-chip.on .icon { color: var(--best-text); }
 .chip-count { min-width: 1.4rem; padding: 0 var(--space-2); border-radius: var(--radius-pill); background: var(--surface-2); color: var(--muted); font-size: var(--text-80); text-align: center; font-variant-numeric: tabular-nums; }
 .filter-chip.on .chip-count { background: var(--surface); color: var(--best-text); }
-.filter-chip:disabled { color: var(--muted); background: var(--surface-2); cursor: default; }
+.filter-chip[aria-disabled="true"] { color: var(--muted); background: var(--surface-2); cursor: default; }
 .filter-clear { border-style: dashed; color: var(--muted); }
 .filter-chip:focus-visible, .filter-clear:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 

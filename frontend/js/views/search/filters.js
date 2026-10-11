@@ -81,13 +81,14 @@ export function mountStoreFilters(el) {
 // Chips of the result filters. counts: filterCounts() of the relevant
 // products, total: their number, active: ids of the active filters. Every
 // chip is always there (the page does not move when the retailers answer); a
-// chip that would change nothing is disabled.
+// chip that would change nothing is disabled with aria-disabled: it stays
+// reachable with the keyboard (and the row, that scrolls on a phone, too).
 export function resultFiltersMarkup(counts, total, active) {
     const on = new Set(active);
     return html`<div class="result-filters-row" data-key="row" data-patch role="group" aria-label="Filtrer les résultats" data-testid="result-filters">
         ${RESULT_FILTERS.map((f) => {
             const useless = !on.has(f.id) && (counts[f.id] === 0 || counts[f.id] === total);
-            return html`<button class="filter-chip${on.has(f.id) ? " on" : ""}" type="button" data-key="${f.id}" data-action="filter" data-filter="${f.id}" data-focus="filter:${f.id}" aria-pressed="${on.has(f.id) ? "true" : "false"}"${useless ? " disabled" : ""}>
+            return html`<button class="filter-chip${on.has(f.id) ? " on" : ""}" type="button" data-key="${f.id}" data-action="filter" data-filter="${f.id}" data-focus="filter:${f.id}" aria-pressed="${on.has(f.id) ? "true" : "false"}" aria-disabled="${useless ? "true" : "false"}">
                 ${icon(on.has(f.id) ? "check" : "plus")}<span>${f.label}</span><span class="chip-count">${counts[f.id]}</span>
             </button>`;
         })}

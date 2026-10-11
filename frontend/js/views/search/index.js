@@ -519,6 +519,7 @@ function onClick(e) {
     } else if (action === "show-pending") {
         showHeld();
     } else if (action === "filter") {
+        if (target.getAttribute("aria-disabled") === "true") return;
         const id = target.dataset.filter;
         search.filters = search.filters.includes(id) ? search.filters.filter((f) => f !== id) : [...search.filters, id];
         renderResults();
