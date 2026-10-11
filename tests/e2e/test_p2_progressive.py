@@ -105,7 +105,10 @@ def test_the_page_does_not_jump_while_retailers_answer(request, viewport, delays
     """Cumulative layout shift under 0.1 on a search at 5 retailers."""
     page = request.getfixturevalue(viewport)
     delays.update(STAGGERED)
-    page.goto(f"{page.base}/#/recherche?q=sel")
+    # From the results of a search (after « Aucun produit », the summary that
+    # comes back at the start of the next search moves the page: that is the
+    # answer to the user's own action, not a jump while the retailers answer)
+    page.goto(f"{page.base}/#/recherche?q=vinaigre")
     wait_done(page)
     page.evaluate(LAYOUT_SHIFTS)
     request_search(page, "farine")

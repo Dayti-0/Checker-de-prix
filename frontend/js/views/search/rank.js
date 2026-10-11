@@ -28,9 +28,11 @@ export function hasPromo(p) {
     return Boolean(p.promo) || (p.old_price != null && p.price != null && p.old_price > p.price);
 }
 
-// Identity of a product in the page (updates, focus, « ✓ » of the list)
+// Identity of a product in the page (updates, focus, « + »). The link alone
+// is not enough: a site may give the same page (its home page) to several
+// products; the server removes the duplicates on the same fields.
 export function productKey(p) {
-    return `${p.store}|${p.product_url || `${p.name}|${p.price ?? ""}`}`;
+    return [p.store, p.product_url || "", p.name, p.quantity_label || "", p.price ?? ""].join("|");
 }
 
 export function relevantOf(result) {

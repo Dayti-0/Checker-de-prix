@@ -48,6 +48,16 @@ def test_relevant_and_close_products(page):
     assert [p["name"].split()[0] for p in close] == ["Thon", "Chips"]
 
 
+def test_product_keys_are_unique_even_with_a_shared_link(page):
+    """A site may link several products to the same page: they stay distinct rows (and « + »)."""
+    home = "https://www.aldi.fr/"
+    a = product("aldi", "Farine de blé T55", 0.79, product_url=home, quantity_label="1 kg")
+    b = product("aldi", "Farine de blé T55", 1.49, product_url=home, quantity_label="2 kg")
+    c = product("aldi", "Farine de seigle", 0.79, product_url=home, quantity_label="1 kg")
+    keys = [js_eval(page, RANK, "productKey", p) for p in (a, b, c)]
+    assert len(set(keys)) == 3, keys
+
+
 def test_rank_by_price_is_stable_and_puts_the_unavailable_last(page):
     ranked = js_eval(page, RANK, "rank", OIL[::-1], {"sort": "price", "order": ORDER})
     assert [(p["store"], p["price"]) for p in ranked] == [
