@@ -3,6 +3,7 @@
 import asyncio
 import inspect
 import time
+from datetime import datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -220,7 +221,8 @@ def test_search_result_tells_when_and_how(monkeypatch):
     before, fresh, cached = run(scenario())
     assert fresh.source == "api" and fresh.fetched_at >= before and not fresh.cached
     assert cached.cached and cached.fetched_at == pytest.approx(fresh.fetched_at, abs=1)
-    assert cached.source is None and cached.stale is False
+    # B46 (P3): the cache remembers how the products were read
+    assert cached.source == "api" and cached.stale is False
 
 
 def test_search_store_signature():
@@ -248,8 +250,10 @@ def test_every_scraper_has_a_source():
 
 
 def test_snapshot_path(tmp_path):
-    assert common.snapshot_path("aldi", "empty") == tmp_path / "debug" / "aldi.html"
-    assert common.snapshot_path("aldi", "blocked") == tmp_path / "debug" / "aldi-blocked.html"
+    # B48 (P3): timestamped names, {key}-{AAAAMMJJ-HHMMSS}-{status}.html
+    when = datetime(2026, 10, 3, 14, 0, 0)
+    assert common.snapshot_path("aldi", "empty", when) == tmp_path / "debug" / "aldi-20261003-140000-empty.html"
+    assert common.snapshot_path("aldi", "blocked", when) == tmp_path / "debug" / "aldi-20261003-140000-blocked.html"
 
 
 # --- browser -------------------------------------------------------------------

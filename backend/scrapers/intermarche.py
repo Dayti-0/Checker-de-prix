@@ -2,6 +2,11 @@
 
 The API is protected by DataDome, which only lets real browser sessions through,
 hence the in-page fetch(). Endpoints and fields as used by the site in 2026.
+
+The tab belongs to a dedicated real Chrome window (backend/real_chrome.py): no
+cookie banner clicked by script, a pause after the site loaded, a challenge
+shown in the tab is reported without loading the site again, and a refused
+connection (hard block) is never retried.
 """
 
 import json
@@ -11,9 +16,17 @@ import secrets
 import unicodedata
 from urllib.parse import quote
 
+from backend import config
 from backend.models import Product, StoreOption, StoreSelection
-from backend.scrapers.base import BaseScraper, BlockedError, ScraperError, StoreRequiredError
-from backend.scrapers.common import FetchResult, ensure_origin, page_fetch
+from backend.scrapers.base import BaseScraper, BlockedError, HardBlockError, ScraperError, StoreRequiredError
+from backend.scrapers.common import (
+    FetchResult,
+    classify_datadome,
+    ensure_origin,
+    hard_block_message,
+    page_fetch,
+    save_debug_text,
+)
 from backend.scrapers.extract import products_from_json
 from backend.scrapers.parsing import clean_text, parse_price
 
@@ -22,6 +35,14 @@ logger = logging.getLogger(__name__)
 BASE_URL = "https://www.intermarche.com"
 SEARCH_API = BASE_URL + "/api/service/produits/v4/pdvs/{pdv}/products/byKeywordAndCategory"
 STORES_API = BASE_URL + "/api/service/pdvs/v4/pdvs/zone?lat={lat}&lon={lon}&min=10&r=15000"
+# Results asked per search (one request: the site itself asks for 20 to 40)
+PAGE_SIZE = 40
+
+LABEL = "Intermarché"
+CAPTCHA_MESSAGE = (
+    "Intermarché demande une vérification : appuyez sur « Ouvrir le site », validez-la dans la "
+    "fenêtre Chrome d'Intermarché ouverte par PrixMalin, puis appuyez sur « J'ai terminé »."
+)
 
 # Identifiers the site sends with each API call (taken from its own cookies)
 _IDENTIFIERS_JS = r"""
@@ -111,7 +132,9 @@ def parse_search_json(data: object) -> list[Product]:
 
         images = item.get("images")
         image = images[0] if isinstance(images, list) and images and isinstance(images[0], str) else None
-        ean = str(item.get("produitEan13") or item.get("idProduit") or "")
+        ean13 = str(item.get("produitEan13") or "").strip()
+        product_id = str(item.get("idProduit") or "").strip()
+        ean = ean13 or product_id
         stock = item.get("stock")
 
         products.append(
@@ -128,9 +151,43 @@ def parse_search_json(data: object) -> list[Product]:
                 if old_price and price and old_price > price
                 else None,
                 available=item.get("dispoCataloguePdv") is not False and stock != 0,
+                ean=ean13 if re.fullmatch(r"\d{8,14}", ean13) else None,
+                sku=product_id or str(item.get("itemId") or "").strip() or None,
             )
         )
     return products
+
+
+def has_products_list(data: object) -> bool:
+    """The answer has the expected shape (a list of products, maybe empty)."""
+    if not isinstance(data, dict):
+        return False
+    if isinstance(data.get("produits"), list) or isinstance(data.get("products"), list):
+        return True
+    nested = data.get("data")
+    return isinstance(nested, dict) and any(isinstance(nested.get(k), list) for k in ("produits", "products"))
+
+
+def check_answer(status: int, text: str) -> None:
+    """Turn an API answer of the site into the right error (pure function).
+
+    DataDome answers 403 with ``{"url": "https://geo.captcha-delivery.com/..."}``:
+    ``t=bv`` (or « Accès temporairement restreint ») is a hard block, any other
+    captcha URL a check the user can validate in the window. 429 (too many
+    requests) is treated like a hard block: PrixMalin backs off.
+    """
+    head = (text or "")[:5000]
+    if status in (401, 403, 405, 429) or "captcha-delivery.com" in head:
+        kind = classify_datadome(None, head)
+        if kind == "hard_block" or status == 429:
+            raise HardBlockError(hard_block_message(LABEL), label=LABEL)
+        raise BlockedError(CAPTCHA_MESSAGE)
+    if status == 0:
+        logger.warning("Intermarché unreachable: %s", head[:200])
+        raise ScraperError("Intermarché est injoignable. Vérifiez votre connexion Internet.")
+    if not 200 <= status < 300:
+        logger.warning("Intermarché answered HTTP %s: %s", status, head[:200])
+        raise ScraperError("Intermarché a renvoyé une erreur. Réessayez plus tard.")
 
 
 def parse_stores(data: object) -> list[StoreOption]:
@@ -203,19 +260,30 @@ class IntermarcheScraper(BaseScraper):
         return headers
 
     def _check(self, result: FetchResult) -> None:
-        if result.status in (401, 403, 429) or "captcha-delivery" in result.text[:2000]:
-            raise BlockedError(
-                "Intermarché bloque les requêtes automatiques (DataDome). Ouvrez le site depuis "
-                "les réglages, validez la vérification si elle s'affiche, puis relancez la recherche."
-            )
-        if result.status == 0:
-            raise ScraperError(f"Intermarché est injoignable ({result.text[:100]}). Vérifiez votre connexion Internet.")
-        if not result.ok:
-            raise ScraperError(f"Intermarché a répondu HTTP {result.status}")
+        check_answer(result.status, result.text)
+
+    async def _open_site(self, page) -> None:
+        """Park the tab on intermarche.com (pause after a load, no script click on the cookie banner)."""
+        await ensure_origin(
+            page,
+            self.home_url,
+            self.label,
+            settle=config.REAL_CHROME_SETTLE_SECONDS,
+            accept=False,
+            reload_on_block=False,
+            captcha_message=CAPTCHA_MESSAGE,
+        )
+
+    def _json(self, result: FetchResult) -> object:
+        try:
+            return result.json()
+        except ValueError as e:
+            save_debug_text(self.key, "error", result.text[:200000], ".txt")
+            raise ScraperError("Intermarché a renvoyé une réponse illisible. Réessayez plus tard.") from e
 
     async def search(self, page, query: str, store: StoreSelection | None) -> list[Product]:
         self.last_source = None
-        await ensure_origin(page, self.home_url, self.label)
+        await self._open_site(page)
         pdv = store.id if store and store.id else store_from_storage(await page.evaluate(_STORAGE_JS))
         if not pdv:
             raise StoreRequiredError("Choisissez votre magasin Intermarché dans les réglages pour voir les prix.")
@@ -223,24 +291,30 @@ class IntermarcheScraper(BaseScraper):
         body = {
             "keyword": query,
             "page": 1,
-            "size": 40,
+            "size": PAGE_SIZE,
             "filtres": [],
             "tri": "pertinence",
             "ordreTri": None,
             "catalog": ["PDV"],
         }
         result = await page_fetch(
-            page, SEARCH_API.format(pdv=quote(pdv)), "POST", await self._headers(page, "produits"), body
+            page, SEARCH_API.format(pdv=quote(str(pdv), safe="")), "POST", await self._headers(page, "produits"), body
         )
         self._check(result)
-        data = result.json()
+        data = self._json(result)
+        if not has_products_list(data):
+            # The site changed its answer: keep it to update the scraper
+            save_debug_text(self.key, "json", result.text[:500000])
         products = self.found(parse_search_json(data), "api")
         if not products:
             products = self.found(products_from_json(data, self.key, BASE_URL), "generic")
         return products
 
     async def find_stores(self, page, lat: float, lon: float) -> list[StoreOption]:
-        await ensure_origin(page, self.home_url, self.label)
+        await self._open_site(page)
         result = await page_fetch(page, STORES_API.format(lat=lat, lon=lon), headers=await self._headers(page, None))
         self._check(result)
-        return parse_stores(result.json())
+        data = self._json(result)
+        if not isinstance(data, dict) or not isinstance(data.get("resultats"), list):
+            save_debug_text(self.key, "json", result.text[:500000])
+        return parse_stores(data)

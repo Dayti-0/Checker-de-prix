@@ -11,6 +11,23 @@ class BlockedError(ScraperError):
     """The site shows an anti-bot challenge (Cloudflare, DataDome...)."""
 
     status = "blocked"
+    # Already noted by browser.run (services/circuit.py HardBlocks)
+    recorded = False
+
+
+class HardBlockError(BlockedError):
+    """The site refuses this connection for a while ("Accès temporairement restreint").
+
+    Nothing the user can solve: PrixMalin makes no call to the retailer before
+    ``retry_after`` (Unix time) and never retries. Raised by a scraper without
+    ``retry_after``; ``browser.run`` then records the pause (30 min, doubled at
+    each new block, at most 4 h) and sets it.
+    """
+
+    def __init__(self, message: str = "", retry_after: float | None = None, label: str | None = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+        self.label = label
 
 
 class StoreRequiredError(ScraperError):

@@ -19,7 +19,9 @@ click==8.5.0
 fastapi==0.143.0
     # via -r requirements.in
 greenlet==3.5.6
-    # via playwright
+    # via
+    #   patchright
+    #   playwright
 h11==0.16.0
     # via
     #   httpcore
@@ -34,6 +36,8 @@ idna==3.20
     #   httpx
 opentelemetry-api==1.45.1
     # via fastapi
+patchright==1.63.0
+    # via -r requirements.in
 playwright==1.56.0
     # via
     #   -r requirements.in
@@ -47,7 +51,9 @@ pydantic==2.14.0
 pydantic-core==2.50.0
     # via pydantic
 pyee==13.0.1
-    # via playwright
+    # via
+    #   patchright
+    #   playwright
 starlette==1.7.0
     # via fastapi
 typing-extensions==4.16.0
