@@ -8,10 +8,13 @@
 //
 // The field keeps its role « searchbox » (every test and screen finds it by
 // it): it gets aria-autocomplete="list", aria-controls and
-// aria-activedescendant pointing to the listbox #q-suggestions. Keys: ↓ / ↑
-// move in the list, Entrée searches the suggestion, Échap closes the list,
-// Suppr removes a recent search.
+// aria-activedescendant pointing to the listbox #q-suggestions. A searchbox
+// cannot carry aria-expanded: when the list opens, or its length changes,
+// « 3 suggestions, flèches haut et bas pour choisir » is announced (after a
+// pause in the typing). Keys: ↓ / ↑ move in the list, Entrée searches the
+// suggestion, Échap closes the list, Suppr removes a recent search.
 
+import { plural } from "../../core/fmt.js";
 import { announce } from "../../core/ui.js";
 import { html, setHtml } from "../../core/html.js";
 import { icon } from "../../core/icons.js";
@@ -19,6 +22,8 @@ import { on, requestSearch, state } from "../../core/store.js";
 import { forgetSearch, recentSearches } from "./memory.js";
 
 export const LIMIT = 8;
+// Pause in the typing before the number of suggestions is announced (ms)
+const ANNOUNCE_DELAY = 700;
 // The last recent searches come first among equals
 const RECENT_BONUS = 8;
 const FOODS_URL = new URL("./aliments.json", import.meta.url).href;
@@ -83,6 +88,8 @@ let input = null;
 let listbox = null;
 let items = [];
 let active = -1;
+let announced = 0; // number of suggestions the screen readers last heard
+let announceTimer = 0;
 
 async function loadFoods() {
     if (foodsAsked) return;
@@ -109,12 +116,34 @@ function isOpen() {
     return Boolean(listbox) && !listbox.hidden;
 }
 
+// « 3 suggestions, … » once the typing pauses, when the list opens or its length changes
+export function suggestionsText(count) {
+    return count ? `${plural(count, "suggestion")}, flèches haut et bas pour choisir` : "";
+}
+
+function announceCount() {
+    clearTimeout(announceTimer);
+    const count = isOpen() ? items.length : 0;
+    if (count === announced) return;
+    announceTimer = setTimeout(() => {
+        announced = count;
+        if (count) announce(suggestionsText(count));
+    }, ANNOUNCE_DELAY);
+}
+
+// The current list was heard (or must not be announced again)
+function heard() {
+    clearTimeout(announceTimer);
+    announced = isOpen() ? items.length : 0;
+}
+
 function close() {
     if (!listbox) return;
     listbox.hidden = true;
     items = [];
     active = -1;
     input.removeAttribute("aria-activedescendant");
+    heard();
 }
 
 function place() {
@@ -168,6 +197,7 @@ function update() {
     place();
     listbox.hidden = false;
     render();
+    announceCount();
 }
 
 function choose(index) {
@@ -205,6 +235,7 @@ function onKey(e) {
         announce(`« ${value} » retiré des recherches récentes`);
         const keep = active;
         update();
+        heard(); // the removal is announced, not the new length
         if (items.length) {
             active = Math.min(keep, items.length - 1);
             render();

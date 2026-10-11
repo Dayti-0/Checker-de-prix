@@ -114,3 +114,30 @@ def test_first_use_shows_ideas_that_search(mobile):
     card = page.get_by_test_id("recent-card")
     expect(card.get_by_role("heading")).to_have_text("Recherches récentes")
     expect(card.get_by_role("button", name="Vinaigre", exact=True)).to_be_visible()
+
+
+def test_screen_readers_hear_that_the_list_opens(desktop):
+    from tests.e2e.helpers import js_eval
+
+    page = desktop
+    page.goto(page.base)
+    module = "/static/js/views/search/autocomplete.js"
+    assert js_eval(page, module, "suggestionsText", 1) == "1 suggestion, flèches haut et bas pour choisir"
+    assert js_eval(page, module, "suggestionsText", 3) == "3 suggestions, flèches haut et bas pour choisir"
+    assert js_eval(page, module, "suggestionsText", 0) == ""
+
+    box = field(page)
+    box.click()
+    box.press_sequentially("vinaig")
+    count = options(page).count()
+    assert count > 0
+    live = page.locator("#live-region")
+    expect(live).to_have_text(re.compile(r"^\d+ suggestions?, flèches haut et bas pour choisir$"))
+    words = "suggestions" if count > 1 else "suggestion"
+    expect(live).to_have_text(f"{count} {words}, flèches haut et bas pour choisir")
+    # Closed then opened again: heard again
+    box.press("Escape")
+    page.evaluate("document.getElementById('live-region').textContent = ''")
+    box.press("ArrowDown")
+    expect(options(page).first).to_be_visible()
+    expect(live).to_have_text(re.compile("flèches haut et bas pour choisir$"))
