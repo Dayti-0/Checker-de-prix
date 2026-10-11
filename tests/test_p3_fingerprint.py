@@ -76,7 +76,9 @@ def test_no_automation_visible(report, role):
     assert checks["iframeSelf"] is True  # no stealth iframe patch
     assert checks["notifications"] in ("prompt", "denied", "granted")  # not the stealth "default"
     assert checks["workerLanguages"] == checks["languages"]  # no language override in the page only
-    assert checks["outerGreaterThanInner"] is True  # a real window frame
+    if role == "main":
+        # A real window frame (inside the frame, innerHeight is the one of the iframe)
+        assert checks["outerGreaterThanInner"] is True
     # Console serialisation: Runtime.enable (Playwright) reads these twice and three times
     assert data["variants"] == {"errName": 1, "protoProxy": 1}
 

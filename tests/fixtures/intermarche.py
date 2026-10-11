@@ -149,6 +149,8 @@ FINGERPRINT_PROBE_JS = r"""
     return;
   }
   const out = () => {
+    // Re-measured at each report: PrixMalin minimizes the window it starts for a search
+    safe('outerGreaterThanInner', () => outerHeight > innerHeight);
     let pre = document.getElementById('report');
     if (!pre) { pre = document.createElement('pre'); pre.id = 'report'; document.body.appendChild(pre); }
     pre.textContent = JSON.stringify(R);

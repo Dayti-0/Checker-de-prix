@@ -30,8 +30,13 @@ def chrome_path() -> str | None:
 
 
 def sandbox_args() -> tuple[str, ...]:
-    """Chrome refuses to start as root on Linux without --no-sandbox (containers, CI)."""
-    if sys.platform.startswith("linux") and os.geteuid() == 0:
+    """--no-sandbox for the test window on Linux (tests only, never in the app).
+
+    Chrome refuses to start as root without it (containers), and Ubuntu 23.10+
+    (GitHub runners) restricts the user namespaces its sandbox needs, so a plain
+    Chrome started by a normal user exits at once there too.
+    """
+    if sys.platform.startswith("linux"):
         return ("--no-sandbox",)
     return ()
 

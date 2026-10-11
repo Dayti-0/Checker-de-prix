@@ -1,6 +1,7 @@
 import asyncio
 import os
 import re
+import shutil
 from pathlib import Path
 
 import pytest
@@ -28,11 +29,8 @@ def temp_data_dir(tmp_path, monkeypatch, request):
     """Each test gets its own database and data directory."""
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "test.db")
-    # In the CI, pages saved by a failing scraper are published with the artifacts
-    debug_dir = tmp_path / "debug"
-    if ARTIFACTS:
-        debug_dir = Path(ARTIFACTS) / "debug" / re.sub(r"[^\w.-]+", "_", request.node.nodeid)
-    monkeypatch.setattr(config, "DEBUG_DIR", debug_dir)
+    monkeypatch.setattr(config, "DEBUG_DIR", tmp_path / "debug")
+    request.node.prixmalin_debug_dir = tmp_path / "debug"
     database._db = None
     yield tmp_path
     database._db = None
@@ -48,3 +46,14 @@ def run(coro):
             await database.close_db()
 
     return asyncio.run(wrapper())
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """In the CI, the pages saved by the scrapers of a failed test go with the artifacts."""
+    outcome = yield
+    report = outcome.get_result()
+    debug_dir = getattr(item, "prixmalin_debug_dir", None)
+    if ARTIFACTS and report.failed and debug_dir is not None and debug_dir.is_dir():
+        target = Path(ARTIFACTS) / "debug" / re.sub(r"[^\w.-]+", "_", item.nodeid)
+        shutil.copytree(debug_dir, target, dirs_exist_ok=True)
