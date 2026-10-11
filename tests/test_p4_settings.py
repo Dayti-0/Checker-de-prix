@@ -331,6 +331,18 @@ def test_store_validation(client, key, body, status):
     assert client.get("/api/settings").json()["stores"] == {}
 
 
+def test_store_distance_messages_are_french(client):
+    url = "https://www.coursesu.com/drive-superu-roujan"
+    # Overseas: the nearest drive may be on the mainland, thousands of km away
+    far = client.put("/api/retailers/coursesu/store", json={"url": url, "distance_km": 6800.4})
+    assert far.status_code == 200
+    assert far.json()["stores"]["coursesu"]["distance_km"] == 6800.4
+    for bad in (-1, 1e9):
+        response = client.put("/api/retailers/coursesu/store", json={"url": url, "distance_km": bad})
+        assert response.status_code == 422
+        assert [d["msg"] for d in response.json()["detail"]] == ["Distance invalide."]
+
+
 def test_valid_stores_are_saved(client):
     saved = client.put("/api/retailers/intermarche/store", json={"id": "06814", "name": " Lattes "}).json()
     assert saved["stores"]["intermarche"]["name"] == "Lattes"

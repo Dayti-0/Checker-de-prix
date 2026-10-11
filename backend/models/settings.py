@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, field_validator
 from pydantic_core import PydanticCustomError
 
 __all__ = [
@@ -27,6 +27,11 @@ __all__ = [
 def valid_store_id(value: str | None) -> bool:
     """Store numbers of Intermarché (pdvRef) and Courses U: 2 to 8 digits."""
     return value is not None and value.isascii() and value.isdigit() and 2 <= len(value) <= 8
+
+
+# Longest distance between two points of the Earth: any store may be listed
+# (an overseas user whose nearest drive is on the mainland)
+MAX_DISTANCE_KM = 20100
 
 
 def _invalid(message: str) -> PydanticCustomError:
@@ -62,7 +67,14 @@ class StoreChoice(BaseModel):
     name: str | None = None
     url: str | None = None
     address: str | None = None
-    distance_km: float | None = Field(default=None, ge=0, le=2000)
+    distance_km: float | None = None
+
+    @field_validator("distance_km")
+    @classmethod
+    def _distance(cls, value: float | None) -> float | None:
+        if value is not None and not 0 <= value <= MAX_DISTANCE_KM:  # NaN included
+            raise _invalid("Distance invalide.")
+        return value
 
     @field_validator("id")
     @classmethod

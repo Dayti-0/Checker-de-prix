@@ -122,18 +122,82 @@ def department_of(postal_code: str | None) -> str:
     return code[:3] if code.startswith("97") else code[:2]
 
 
+# Departments (code -> name), for the locations saved without them (before P4):
+# the name gives the page of the department (/drive-herault)
+DEPARTMENTS = {
+    **dict(
+        zip(
+            [f"{n:02d}" for n in range(1, 20)],
+            "Ain|Aisne|Allier|Alpes-de-Haute-Provence|Hautes-Alpes|Alpes-Maritimes|Ardèche|Ardennes|Ariège|"
+            "Aube|Aude|Aveyron|Bouches-du-Rhône|Calvados|Cantal|Charente|Charente-Maritime|Cher|Corrèze".split("|"),
+            strict=True,
+        )
+    ),
+    "2A": "Corse-du-Sud",
+    "2B": "Haute-Corse",
+    **dict(
+        zip(
+            [str(n) for n in range(21, 96)],
+            "Côte-d'Or|Côtes-d'Armor|Creuse|Dordogne|Doubs|Drôme|Eure|Eure-et-Loir|Finistère|Gard|"
+            "Haute-Garonne|Gers|Gironde|Hérault|Ille-et-Vilaine|Indre|Indre-et-Loire|Isère|Jura|Landes|"
+            "Loir-et-Cher|Loire|Haute-Loire|Loire-Atlantique|Loiret|Lot|Lot-et-Garonne|Lozère|Maine-et-Loire|"
+            "Manche|Marne|Haute-Marne|Mayenne|Meurthe-et-Moselle|Meuse|Morbihan|Moselle|Nièvre|Nord|Oise|Orne|"
+            "Pas-de-Calais|Puy-de-Dôme|Pyrénées-Atlantiques|Hautes-Pyrénées|Pyrénées-Orientales|Bas-Rhin|"
+            "Haut-Rhin|Rhône|Haute-Saône|Saône-et-Loire|Sarthe|Savoie|Haute-Savoie|Paris|Seine-Maritime|"
+            "Seine-et-Marne|Yvelines|Deux-Sèvres|Somme|Tarn|Tarn-et-Garonne|Var|Vaucluse|Vendée|Vienne|"
+            "Haute-Vienne|Vosges|Yonne|Territoire de Belfort|Essonne|Hauts-de-Seine|Seine-Saint-Denis|"
+            "Val-de-Marne|Val-d'Oise".split("|"),
+            strict=True,
+        )
+    ),
+    "971": "Guadeloupe",
+    "972": "Martinique",
+    "973": "Guyane",
+    "974": "La Réunion",
+    "976": "Mayotte",
+}
+
+
+def department_name_of(location: Location | None) -> str | None:
+    """Name of the department of ``location``: saved with it, else from its postal code."""
+    if location is None:
+        return None
+    if location.department_name:
+        return location.department_name
+    code = location.department_code or department_of(location.postal_code)
+    if code == "20":  # Corse: 200xx-201xx Corse-du-Sud, 202xx-206xx Haute-Corse
+        code = "2A" if (location.postal_code or "")[:3] in ("200", "201") else "2B"
+    return DEPARTMENTS.get(code)
+
+
+def town_index(index: dict[str, list[list]] | None) -> dict[tuple[str, str], tuple]:
+    """(department, normalised town) -> coordinates, for the postal codes missing
+    from ``index`` (CEDEX codes: « 34092 Montpellier Cedex 5 »)."""
+    towns: dict[tuple[str, str], tuple] = {}
+    for postal_code, entries in (index or {}).items():
+        for name, lat, lon in entries:
+            towns.setdefault((department_of(postal_code), name), (lat, lon))
+    return towns
+
+
 def rank_stores(
     stores: list[StoreOption], origin: Location | None, index: dict[str, list[list]] | None
 ) -> list[StoreOption]:
     """Stores with their distance from ``origin``, the nearest first.
 
+    A store whose postal code is not in ``index`` (CEDEX) is placed by its town.
     Stores that cannot be placed come after, those of the same postal code
     first, then those of the same department.
     """
     ranked = []
+    towns: dict | None = None
     for store in stores:
         coords = (store.lat, store.lon) if store.lat is not None and store.lon is not None else None
         coords = coords or locate(store.postal_code, store.city, index)
+        if coords is None and store.postal_code and store.city and index:
+            if towns is None:
+                towns = town_index(index)
+            coords = towns.get((department_of(store.postal_code), normalize_town(store.city)))
         distance = None
         if coords and origin is not None and origin.lat is not None and origin.lon is not None:
             distance = round(haversine_km(origin.lat, origin.lon, coords[0], coords[1]), 1)
@@ -264,7 +328,7 @@ async def nearest_coursesu_stores(
     """The ``limit`` Courses U stores nearest to ``location``."""
     if location is None:
         raise AppError(NO_LOCATION, 400, "no_location")
-    stores = await coursesu_directory(location.department_name, refresh)
+    stores = await coursesu_directory(department_name_of(location), refresh)
     if not stores:
         return []
     index = await commune_index()
@@ -305,8 +369,20 @@ async def auto_pick_coursesu(refresh: bool = False, initial: bool = False) -> Au
 
     ``initial``: asked when a page loads; ``kept`` without reading the site when
     a store is chosen or when it was already done for this postal code.
+    The location changed while the directory was read (town chosen meanwhile):
+    the store is chosen again for the new one.
     Never raises: the outcome (``status``, French ``message``) is returned.
     """
+    for _ in range(3):
+        result = await _auto_pick_once(refresh, initial)
+        if result is not None:
+            return result
+        refresh = False  # the directory has just been read
+    return _result("kept", await settings_service.load_settings())
+
+
+async def _auto_pick_once(refresh: bool, initial: bool) -> AutoPickResult | None:
+    """One automatic choice; None when the location changed meanwhile (nothing saved)."""
     current = await settings_service.load_settings()
     chosen = current.stores.get("coursesu")
     if chosen and (not chosen.auto or initial):
@@ -333,12 +409,20 @@ async def auto_pick_coursesu(refresh: bool = False, initial: bool = False) -> Au
     nearest = stores[0]
     selection = selection_from_option(nearest, auto=True)
 
+    moved = False
+
     def change(settings: Settings) -> None:
+        nonlocal moved
+        if settings.location != current.location:
+            moved = True
+            return
         now = settings.stores.get("coursesu")
         if now is None or now.auto:  # the user may have chosen one meanwhile
             settings.stores["coursesu"] = selection
 
     saved = await settings_service.modify(change)
+    if moved:
+        return None
     if saved.stores.get("coursesu") != selection:
         return _result("kept", saved)
     await _auto_done_for(current.location.postal_code)

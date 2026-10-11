@@ -302,6 +302,54 @@ def test_rank_stores_by_distance():
     assert stores.haversine_km(43.5, 3.32, 43.5, 3.32) == 0
 
 
+def test_rank_stores_places_cedex_postal_codes_by_their_town():
+    cedex = StoreOption(
+        id="9",
+        name="Super U Montpellier Cedex",
+        url="https://www.coursesu.com/drive-superu-mtpcedex",
+        postal_code="34092",
+        city="Montpellier Cedex 5",
+    )
+    elsewhere = cedex.model_copy(update={"id": "8", "postal_code": "33092", "city": "Montpellier Cedex"})
+    montpellier = Location(postal_code="34000", city="Montpellier", lat=43.6109, lon=3.8767)
+    ranked = stores.rank_stores([*directory_stores(), cedex, elsewhere], montpellier, index())
+    assert ranked[0].name == "Super U Montpellier Cedex"
+    assert ranked[0].distance_km == 0.0
+    # The town is looked up in the department of the postal code only
+    assert ranked[-1].id == "8" and ranked[-1].distance_km is None
+    assert stores.town_index(None) == {}
+
+
+def test_department_name_of_old_locations():
+    assert stores.department_name_of(ROUJAN) == "Hérault"
+    # Saved before P4: no department, it comes from the postal code
+    assert stores.department_name_of(Location(postal_code="34320", lat=43.5, lon=3.3)) == "Hérault"
+    assert stores.department_name_of(Location(postal_code="22000")) == "Côtes-d'Armor"
+    assert stores.department_name_of(Location(postal_code="75011")) == "Paris"
+    assert stores.department_name_of(Location(postal_code="20000")) == "Corse-du-Sud"
+    assert stores.department_name_of(Location(postal_code="20200")) == "Haute-Corse"
+    assert stores.department_name_of(Location(postal_code="97410")) == "La Réunion"
+    assert stores.department_name_of(Location(postal_code="34320", department_code="2B")) == "Haute-Corse"
+    assert stores.department_name_of(Location(postal_code="98000")) is None
+    assert stores.department_name_of(None) is None
+    assert len(stores.DEPARTMENTS) == 101
+    assert cu.department_slug(stores.DEPARTMENTS["22"]) == "cotes-darmor"
+
+
+def test_nearest_stores_of_an_old_location_read_the_department_page(monkeypatch):
+    calls = []
+    fake_directory(monkeypatch, {"stores": directory_stores(), "method": "département"}, calls)
+
+    async def table(refresh=False):
+        return index()
+
+    monkeypatch.setattr(stores, "commune_index", table)
+    old = Location(postal_code="34320", city="Roujan", lat=43.505, lon=3.3108)
+    nearest = run(stores.nearest_coursesu_stores(old, limit=1))
+    assert calls == ["Hérault"]
+    assert nearest[0].name == "Super U Roujan"
+
+
 def test_rank_stores_without_town_table():
     near_pezenas = Location(postal_code="34120", city="Pézenas")
     ranked = stores.rank_stores(directory_stores(), near_pezenas, None)
@@ -512,6 +560,28 @@ def test_auto_pick_replaces_an_automatic_choice(located):
     result = run(stores.auto_pick_coursesu())
     assert result.status == "chosen"
     assert result.settings.stores["coursesu"].name == "Super U Roujan"
+
+
+def test_auto_pick_follows_a_town_chosen_during_the_read(monkeypatch, located):
+    """The town is chosen while the directory is read: the store is chosen for that town."""
+    gabian = Location(postal_code="34320", city="Gabian", lat=43.5106, lon=3.2742, department_name="Hérault")
+    reads = []
+
+    async def fetch(department_name):
+        reads.append(department_name)
+        if len(reads) == 1:  # the user picks his town meanwhile
+            await settings_service.modify(lambda s: setattr(s, "location", gabian))
+        return {"stores": many_stores(), "method": "blocs"}
+
+    monkeypatch.setattr(stores, "fetch_coursesu_directory", fetch)
+    result = run(stores.auto_pick_coursesu())
+    assert result.status == "chosen"
+    assert result.settings.location == gabian
+    saved = result.settings.stores["coursesu"]
+    expected = stores.rank_stores(many_stores(), gabian, index())[0]
+    assert (saved.url, saved.distance_km) == (expected.url, expected.distance_km)
+    assert saved.distance_km != stores.rank_stores(many_stores(), ROUJAN, index())[0].distance_km
+    assert len(reads) == 1  # the directory read the first time is cached
 
 
 def test_auto_pick_reports_a_far_store(monkeypatch, located):
