@@ -1,12 +1,20 @@
 """The SQLite database: one shared connection, WAL journal, named migrations.
 
+The shared connection commits each statement by itself (autocommit): a write
+that fails (database busy for more than 5 s: a backup, an antivirus, a test)
+leaves no transaction open behind it. In the default mode of sqlite3 it did,
+and every later write of the app failed until a restart. Several statements
+that must be written together go in ``async with transaction() as db:``.
+
 The tables are created and changed by the migrations of ``backend/migrations/``.
 The queries live in ``backend/repos/`` (one module per area); they are also
 reachable from here, e.g. ``database.get_cached(...)``, as before the split.
 """
 
 import asyncio
+import contextlib
 import importlib
+from collections.abc import AsyncIterator
 
 import aiosqlite
 
@@ -14,6 +22,7 @@ from backend import config, migrations
 
 _db: aiosqlite.Connection | None = None
 _lock: tuple[asyncio.AbstractEventLoop, asyncio.Lock] | None = None
+_write_lock: tuple[asyncio.AbstractEventLoop, asyncio.Lock] | None = None
 
 # Functions of backend/repos/ re-exported by this module
 _REPO_FUNCTIONS = {
@@ -53,6 +62,14 @@ def _open_lock() -> asyncio.Lock:
     return _lock[1]
 
 
+def _transaction_lock() -> asyncio.Lock:
+    global _write_lock
+    loop = asyncio.get_running_loop()
+    if _write_lock is None or _write_lock[0] is not loop:
+        _write_lock = (loop, asyncio.Lock())
+    return _write_lock[1]
+
+
 async def get_db() -> aiosqlite.Connection:
     global _db
     if _db is not None:
@@ -60,7 +77,8 @@ async def get_db() -> aiosqlite.Connection:
     async with _open_lock():
         if _db is None:
             config.DATA_DIR.mkdir(parents=True, exist_ok=True)
-            db = await aiosqlite.connect(config.DB_PATH)
+            # Autocommit: no transaction ever left open by a failed write
+            db = await aiosqlite.connect(config.DB_PATH, isolation_level=None)
             try:
                 db.row_factory = aiosqlite.Row
                 # Wait for another connection (a test, a backup) instead of failing
@@ -73,6 +91,24 @@ async def get_db() -> aiosqlite.Connection:
                 raise
             _db = db
     return _db
+
+
+@contextlib.asynccontextmanager
+async def transaction() -> AsyncIterator[aiosqlite.Connection]:
+    """Several statements written together, or not at all.
+
+    One transaction at a time. The other statements of the app that run
+    meanwhile on the shared connection are part of it.
+    """
+    db = await get_db()
+    async with _transaction_lock():
+        await db.execute("BEGIN IMMEDIATE")
+        try:
+            yield db
+        except BaseException:
+            await db.rollback()
+            raise
+        await db.commit()
 
 
 async def close_db() -> None:

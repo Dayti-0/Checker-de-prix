@@ -90,6 +90,8 @@ let items = [];
 let active = -1;
 let announced = 0; // number of suggestions the screen readers last heard
 let announceTimer = 0;
+// Closed by the user (search sent, Échap, Tab): nothing reopens the list until he types
+let dismissed = false;
 
 async function loadFoods() {
     if (foodsAsked) return;
@@ -98,7 +100,8 @@ async function loadFoods() {
         const resp = await fetch(FOODS_URL, { headers: { "X-PrixMalin": "1" } });
         const data = resp.ok ? await resp.json() : [];
         foods = Array.isArray(data) ? data.filter((f) => typeof f === "string") : [];
-        if (document.activeElement === input) update();
+        // Late (slow machine): never reopens a list closed by a search
+        if (document.activeElement === input && !dismissed) update();
     } catch {
         foods = [];
     }
@@ -227,6 +230,7 @@ function onKey(e) {
         choose(active);
     } else if (e.key === "Escape" && isOpen()) {
         e.preventDefault();
+        dismissed = true;
         close();
     } else if (e.key === "Delete" && isOpen() && active >= 0 && items[active].source === "recent") {
         e.preventDefault();
@@ -241,6 +245,7 @@ function onKey(e) {
             render();
         }
     } else if (e.key === "Tab") {
+        dismissed = true;
         close();
     }
 }
@@ -262,10 +267,14 @@ export function initAutocomplete() {
     input.setAttribute("aria-controls", "q-suggestions");
 
     input.addEventListener("focus", () => {
+        dismissed = false;
         loadFoods();
         update();
     });
-    input.addEventListener("input", update);
+    input.addEventListener("input", () => {
+        dismissed = false;
+        update();
+    });
     input.addEventListener("keydown", onKey);
     input.addEventListener("blur", () => setTimeout(() => document.activeElement !== input && close(), 150));
     // The field keeps the focus when a suggestion is clicked
@@ -275,6 +284,9 @@ export function initAutocomplete() {
         if (option) choose(Number(option.dataset.index));
     });
     window.addEventListener("resize", () => isOpen() && place());
-    on("search:requested", close);
+    on("search:requested", () => {
+        dismissed = true;
+        close();
+    });
     on("route:changed", close);
 }
