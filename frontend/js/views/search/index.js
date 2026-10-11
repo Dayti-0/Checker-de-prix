@@ -285,10 +285,19 @@ on("results:stale", () => {
     if (search.query) runSearch(search.query);
 });
 
-// A retailer was ticked: search it too
+// A retailer was ticked: search it too. Unticked while it was searching: its
+// answer is no longer awaited (the search may be over without it)
 on("filters:changed", (key) => {
-    if (search.query && state.enabled.has(key) && !search.results[key]) searchStore(key, search.token);
-    else renderResults();
+    if (search.query && state.enabled.has(key) && !search.results[key]) {
+        searchStore(key, search.token);
+        return;
+    }
+    if (search.query && !state.enabled.has(key) && search.results[key] && isLoading(key)) {
+        if (search.storeControllers[key]) search.storeControllers[key].abort();
+        delete search.results[key];
+        if (enabledKeys().every((k) => !isLoading(k))) finish();
+    }
+    renderResults();
 });
 
 // The « ✓ » of the products follow the list

@@ -254,3 +254,24 @@ def test_a_new_search_is_read_from_its_top(mobile, delays):
     assert page.evaluate("() => window.scrollY") < 80
     expect(page.get_by_test_id("new-offers")).to_have_count(0)
     expect(page.locator("[data-testid=offers] .offer-list .product")).to_have_count(3)
+
+
+def test_a_retailer_unticked_while_searching_is_no_longer_awaited(desktop, delays):
+    page = desktop
+    delays.update({"carrefour": 6})
+    aborted = []
+    page.on("requestfailed", lambda r: aborted.append(r.url) if "/api/search/carrefour" in r.url else None)
+    page.goto(page.base)
+    search(page, "farine", wait=False)
+    expect(page.locator(".column[data-store=lidl] .product").first).to_be_visible()
+    page.locator(".store-toggle", has_text="Carrefour").click()
+    wait_done(page)
+    expect(page.locator("#live-region")).to_have_text(
+        "Terminé : le moins cher est Lidl, 0,75 €, Farine de blé T45. 2 enseignes indisponibles."
+    )
+    expect(page.locator("[data-summary=carrefour]")).to_have_count(0)
+    assert aborted, "the request of Carrefour should be cancelled"
+    # Ticked again: searched again (the server may still be finishing the first search)
+    page.locator(".store-toggle", has_text="Carrefour").click()
+    expect(page.locator("[data-summary=carrefour]")).to_contain_text("Recherche…")
+    expect(page.locator(".column[data-store=carrefour]")).to_contain_text("Farine de blé T45", timeout=15000)

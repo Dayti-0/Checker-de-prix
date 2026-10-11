@@ -220,6 +220,25 @@ def test_result_filters_and_sorts(desktop):
     expect(page.get_by_role("radio", name="Tout trié")).to_be_checked()
 
 
+def test_bio_and_promo_on_the_flour(desktop):
+    """B31 on the catalog « farine »: Bio keeps the organic flour only, En promo the promotions only."""
+    page = desktop
+    page.goto(page.base)
+    search(page, "farine")
+    choose_view(page, "Tout trié")
+    filters = page.get_by_test_id("result-filters")
+    rows = main_rows(page)
+    filters.get_by_role("button", name=re.compile("^Bio")).click()
+    expect(rows).to_have_count(1)
+    expect(rows).to_contain_text("Farine de blé T65 bio")
+    filters.get_by_role("button", name=re.compile("^Bio")).click()
+    filters.get_by_role("button", name=re.compile("^En promo")).click()
+    expect(rows).to_have_count(2)  # Carrefour: « 2ème à -50% » and the organic flour (Courses U is blocked)
+    for i in range(2):
+        expect(rows.nth(i).locator(".tag.promo")).to_have_count(1)
+    expect(page.get_by_test_id("best-offer")).to_contain_text("0,85 €")
+
+
 def test_retailers_without_results_are_one_compact_bar(desktop):
     page = desktop
     page.goto(page.base)
