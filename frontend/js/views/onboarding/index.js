@@ -320,6 +320,8 @@ export function render(el) {
     trial = {};
     api("/api/settings/onboarding", { method: "PATCH", body: { seen: true } }).catch(() => {});
     draw();
+    // Fresh settings (they may have been changed on another device)
+    loadSettings().catch((err) => notify(err.message, { type: "error" }));
 
     el.addEventListener("change", (e) => {
         const input = e.target;

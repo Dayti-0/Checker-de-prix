@@ -13,6 +13,10 @@ from playwright.sync_api import expect
 from tests.e2e import catalog_p4, fake
 from tests.e2e.axe import assert_accessible
 
+# Width beyond the screen: on a phone the layout viewport grows with the page,
+# so the visible width is the reference (not innerWidth)
+OVERFLOW = "() => document.documentElement.scrollWidth - Math.round(window.visualViewport.width)"
+
 
 def settings_page(page):
     page.goto(f"{page.base}/#/reglages")
@@ -252,7 +256,7 @@ def test_no_horizontal_scroll(chromium, server, width):
         coursesu.get_by_role("button", name="Changer le magasin Courses U").click()
         expect(coursesu.locator(".store-option")).to_have_count(8)
         open_menu(page, "Courses U")
-        overflow = page.evaluate("() => document.documentElement.scrollWidth - window.innerWidth")
+        overflow = page.evaluate(OVERFLOW)
         context.close()
         assert overflow <= 0, f"{width} px, échelle {scale} : {overflow} px de trop"
         assert page.errors == []

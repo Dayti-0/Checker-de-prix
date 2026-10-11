@@ -7,6 +7,10 @@ from playwright.sync_api import expect
 from backend import config
 from tests.e2e.axe import assert_accessible
 
+# Width beyond the screen: on a phone the layout viewport grows with the page,
+# so the visible width is the reference (not innerWidth)
+OVERFLOW = "() => document.documentElement.scrollWidth - Math.round(window.visualViewport.width)"
+
 
 def choose_coursesu_store(page):
     url = "https://www.coursesu.com/drive-superu-roujan"
@@ -78,7 +82,7 @@ def test_status_page_in_dark_mode_and_on_a_phone(dark, mobile):
         page.goto(f"{page.base}/#/etat")
         expect(page.locator(".status-card")).to_have_count(5)
         assert_accessible(page, "état des enseignes")
-        overflow = page.evaluate("() => document.documentElement.scrollWidth - window.innerWidth")
+        overflow = page.evaluate(OVERFLOW)
         assert overflow <= 0
 
 

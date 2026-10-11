@@ -34,7 +34,7 @@
 
 .onb-nav { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-top: var(--space-7); }
 .onb-nav-space { flex: 1 1 auto; }
-.onb-nav button { min-height: 2.75rem; display: inline-flex; align-items: center; gap: var(--space-2); }
+.onb-nav button { min-height: 2.75rem; max-width: 100%; display: inline-flex; align-items: center; gap: var(--space-2); white-space: normal; text-align: center; }
 .onb-nav button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
 .onb-store-lists { display: grid; gap: var(--space-6); margin-top: var(--space-5); }
@@ -42,7 +42,7 @@
     .onb-store-lists { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 .onb-stores { margin: 0; padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-70); min-width: 0; }
-.onb-stores legend { display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-2); font-weight: 700; }
+.onb-stores legend { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); max-width: 100%; padding: 0 var(--space-2); font-weight: 700; overflow-wrap: anywhere; }
 .onb-stores legend .badge { font-size: var(--text-85); }
 .onb-store {
     display: flex;

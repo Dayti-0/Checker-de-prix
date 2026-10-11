@@ -8,6 +8,10 @@ from playwright.sync_api import expect
 from backend.services import settings as settings_service
 from tests.e2e.axe import assert_accessible
 
+# Width beyond the screen: on a phone the layout viewport grows with the page,
+# so the visible width is the reference (not innerWidth)
+OVERFLOW = "() => document.documentElement.scrollWidth - Math.round(window.visualViewport.width)"
+
 
 @pytest.fixture
 def first_launch(monkeypatch):
@@ -109,7 +113,7 @@ def test_skip_back_and_fix(mobile):
     intermarche = page.locator(".onb-trial-row").filter(has_text="Intermarché")
     expect(intermarche).to_contain_text("Magasin à choisir")
     assert_accessible(page, "assistant sur téléphone")
-    overflow = page.evaluate("() => document.documentElement.scrollWidth - window.innerWidth")
+    overflow = page.evaluate(OVERFLOW)
     assert overflow <= 0
     page.get_by_role("button", name="Choisir mon magasin Intermarché").click()
     expect(step_title(page)).to_have_text("Étape 2 sur 3 : vos magasins")
@@ -143,3 +147,34 @@ def test_assistant_in_dark_mode(dark):
     page.get_by_role("button", name="Continuer").click()
     expect(page.get_by_role("group", name=re.compile("Magasin Courses U")).get_by_role("radio")).to_have_count(4)
     assert_accessible(page, "assistant en sombre, étape 2")
+
+
+@pytest.mark.parametrize("width", [360, 390])
+def test_no_horizontal_scroll_in_the_new_views(chromium, server, width):
+    from tests.e2e.conftest import open_page
+
+    for scale in ("0.9", "1.6"):
+        context, page = open_page(chromium, server, "mobile")
+        context.add_init_script(f"localStorage.setItem('prixmalin.textScale', '{scale}')")
+        page.set_viewport_size({"width": width, "height": 800})
+        page.goto(page.base)
+        page.request.post(f"{page.base}/api/settings/location", data={"postal_code": "34480"})
+        page.request.get(f"{page.base}/api/search", params={"q": "farine"})
+        overflows = {}
+        page.goto(f"{page.base}/#/etat")
+        expect(page.locator(".status-card")).to_have_count(5)
+        overflows["état"] = page.evaluate(OVERFLOW)
+        page.goto(f"{page.base}/#/bienvenue")
+        page.get_by_role("button", name="Continuer").click()
+        expect(page.locator(".onb-store input")).to_have_count(8)
+        overflows["assistant, magasins"] = page.evaluate(OVERFLOW)
+        page.get_by_role("button", name="Enregistrer et continuer").click()
+        expect(page.locator(".onb-trial .spinner")).to_have_count(0)
+        overflows["assistant, essai"] = page.evaluate(OVERFLOW)
+        page.goto(page.base)
+        expect(page.get_by_role("searchbox", name="Produit à rechercher")).to_be_visible()
+        overflows["accueil"] = page.evaluate(OVERFLOW)
+        errors = list(page.errors)
+        context.close()
+        assert all(v <= 0 for v in overflows.values()), f"{width} px, échelle {scale} : {overflows}"
+        assert errors == []

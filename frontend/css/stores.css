@@ -14,6 +14,7 @@
     font-size: var(--text-85);
     font-weight: 700;
     white-space: nowrap;
+    max-width: 100%;
 }
 .pill-ready { background: var(--best-bg); color: var(--best-text); }
 .pill-store, .pill-warn { background: var(--warn-bg); color: var(--warn); }
