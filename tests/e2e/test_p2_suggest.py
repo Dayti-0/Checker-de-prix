@@ -141,3 +141,23 @@ def test_screen_readers_hear_that_the_list_opens(desktop):
     box.press("ArrowDown")
     expect(options(page).first).to_be_visible()
     expect(live).to_have_text(re.compile("flèches haut et bas pour choisir$"))
+
+
+def test_suggestions_loaded_late_do_not_reopen_the_list(desktop):
+    """On a slow machine the list of foods arrives after the search: the list stays closed."""
+    page = desktop
+    held = []
+    page.route("**/aliments.json", lambda route: held.append(route))
+    page.goto(page.base)
+    box = field(page)
+    box.click()
+    box.press_sequentially("farine")
+    box.press("Enter")
+    expect(page).to_have_url(re.compile(r"#/recherche\?q=farine$"))
+    page.wait_for_timeout(200)
+    assert held, "the list of foods was asked"
+    for route in held:
+        route.continue_()
+    page.wait_for_timeout(500)
+    expect(page.get_by_role("listbox", name="Suggestions")).to_be_hidden()
+    page.locator(".store-toggle", has_text="Lidl").click()  # nothing covers the filters
