@@ -192,7 +192,8 @@ def retailer_health(
 
     run, queries = 0, set()
     for row in real:
-        if row["status"] not in BROKEN:
+        # The site's API answered « nothing » (Lidl publishes few foods): not broken
+        if row["status"] not in BROKEN or (row["status"] == "empty" and row.get("source") == "api"):
             break
         run += 1
         queries.add(query_key(row["query"]))
