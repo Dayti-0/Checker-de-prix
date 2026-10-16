@@ -1,4 +1,4 @@
-"""Dedicated real Chrome window for a retailer protected by DataDome (Intermarché).
+"""Dedicated real Chrome window for a retailer protected by DataDome (Intermarché, E.Leclerc).
 
 DataDome tells an automated browser from a person's browser. PrixMalin's shared
 browser (Playwright + playwright-stealth, headless) is easy to spot, so the
@@ -47,17 +47,36 @@ from backend import config
 
 logger = logging.getLogger("prixmalin.real_chrome")
 
-CHROME_MISSING = (
-    "Intermarché nécessite Google Chrome ou Microsoft Edge installé sur l'ordinateur. "
-    "Installez Google Chrome puis relancez PrixMalin."
-)
-PATCHRIGHT_MISSING = (
-    "Il manque un composant de PrixMalin pour Intermarché (patchright) : relancez lancer.bat pour l'installer."
-)
-START_FAILED = "La fenêtre Chrome d'Intermarché n'a pas pu démarrer. Fermez-la si elle est ouverte, puis réessayez."
-ALREADY_OPEN = (
-    "Une fenêtre Chrome d'Intermarché est déjà ouverte sans PrixMalin. Fermez-la, puis relancez la recherche."
-)
+
+def _of(label: str) -> str:
+    """« d'Intermarché », « d'E.Leclerc », « de Courses U »."""
+    return f"d'{label}" if label[:1].upper() in "AEIOUYÉÈ" else f"de {label}"
+
+
+def chrome_missing(label: str) -> str:
+    return (
+        f"{label} nécessite Google Chrome ou Microsoft Edge installé sur l'ordinateur. "
+        "Installez Google Chrome puis relancez PrixMalin."
+    )
+
+
+def patchright_missing(label: str) -> str:
+    return f"Il manque un composant de PrixMalin pour {label} (patchright) : relancez lancer.bat pour l'installer."
+
+
+def start_failed(label: str) -> str:
+    return f"La fenêtre Chrome {_of(label)} n'a pas pu démarrer. Fermez-la si elle est ouverte, puis réessayez."
+
+
+def already_open(label: str) -> str:
+    return f"Une fenêtre Chrome {_of(label)} est déjà ouverte sans PrixMalin. Fermez-la, puis relancez la recherche."
+
+
+# Messages of the Intermarché window (kept for the callers of P3)
+CHROME_MISSING = chrome_missing("Intermarché")
+PATCHRIGHT_MISSING = patchright_missing("Intermarché")
+START_FAILED = start_failed("Intermarché")
+ALREADY_OPEN = already_open("Intermarché")
 
 # Seconds given to Chrome to open its debugging port
 START_TIMEOUT_SECONDS = 30.0
@@ -227,7 +246,7 @@ def _get_json(url: str, timeout: float = 2.0) -> Any:
 
 
 class RealChrome:
-    """The dedicated Chrome window of one retailer (``key``, site ``domain``)."""
+    """The dedicated Chrome window of one retailer (``key``, site ``domain``, name ``label``)."""
 
     def __init__(
         self,
@@ -235,9 +254,11 @@ class RealChrome:
         domain: str,
         profile_dir: Path | None = None,
         on_closed: Callable[[str], None] | None = None,
+        label: str | None = None,
     ) -> None:
         self.key = key
         self.domain = domain
+        self.label = label or key
         self.profile_dir = profile_dir or config.real_chrome_profile_dir(key)
         self.name: str | None = None  # "Google Chrome", "Microsoft Edge"
         self.error: str | None = None
@@ -355,7 +376,7 @@ class RealChrome:
         if endpoint is None:
             found = find_chrome(config.CHROME_PATH)
             if found is None:
-                raise ChromeUnavailable(CHROME_MISSING)
+                raise ChromeUnavailable(chrome_missing(self.label))
             path, self.name = found
             profile.mkdir(parents=True, exist_ok=True)
             endpoint = await self._start(path, profile, minimized)
@@ -370,10 +391,10 @@ class RealChrome:
             browser = await pw.chromium.connect_over_cdp(endpoint, timeout=20000, is_local=True, no_defaults=True)
         except Exception as e:
             logger.warning("connect_over_cdp failed: %s", e)
-            raise ChromeUnavailable(START_FAILED) from e
+            raise ChromeUnavailable(start_failed(self.label)) from e
         if not browser.contexts:
             await browser.close()
-            raise ChromeUnavailable(START_FAILED)
+            raise ChromeUnavailable(start_failed(self.label))
         self._browser = browser
         self._context = browser.contexts[0]  # the profile's own context: never new_context()
         self._context.set_default_timeout(20000)
@@ -388,12 +409,11 @@ class RealChrome:
             try:
                 from patchright.async_api import async_playwright
             except ImportError as e:
-                raise ChromeUnavailable(PATCHRIGHT_MISSING) from e
+                raise ChromeUnavailable(patchright_missing(self.label)) from e
             self._pw = await async_playwright().start()
         return self._pw
 
-    @staticmethod
-    def _spawn(args: list[str]) -> subprocess.Popen:
+    def _spawn(self, args: list[str]) -> subprocess.Popen:
         kwargs: dict[str, Any] = {
             "stdin": subprocess.DEVNULL,
             "stdout": subprocess.DEVNULL,
@@ -409,7 +429,7 @@ class RealChrome:
             return subprocess.Popen(args, **kwargs)  # noqa: S603 (path of the installed browser)
         except OSError as e:
             logger.warning("Chrome start failed: %s", e)
-            raise ChromeUnavailable(START_FAILED) from e
+            raise ChromeUnavailable(start_failed(self.label)) from e
 
     async def _start(self, path: str, profile: Path, minimized: bool) -> str:
         """Start Chrome on a free port; returns its websocket URL."""
@@ -429,7 +449,7 @@ class RealChrome:
                 raise
             self._proc = proc
             return endpoint
-        raise ChromeUnavailable(START_FAILED)  # pragma: no cover (loop always returns or raises)
+        raise ChromeUnavailable(start_failed(self.label))  # pragma: no cover (loop always returns or raises)
 
     async def _running_endpoint(self, profile: Path) -> str | None:
         """Websocket URL of a dedicated Chrome still open (PrixMalin restarted), else None."""
@@ -469,9 +489,10 @@ class RealChrome:
                 # this profile (opened without PrixMalin) and quit
                 exited_at = exited_at or time.monotonic()
                 if time.monotonic() - exited_at > 3:
-                    raise ChromeUnavailable(ALREADY_OPEN if proc.returncode == 0 else START_FAILED)
+                    message = already_open(self.label) if proc.returncode == 0 else start_failed(self.label)
+                    raise ChromeUnavailable(message)
             await asyncio.sleep(0.1)
-        raise ChromeUnavailable(START_FAILED)
+        raise ChromeUnavailable(start_failed(self.label))
 
     # --- tab and window -----------------------------------------------------
 

@@ -59,6 +59,7 @@ def test_search_error_statuses(monkeypatch):
         "aldi": [],
         "lidl": RuntimeError("Page.goto: net::ERR_NAME_NOT_RESOLVED at https://www.lidl.fr/"),
         "coursesu": [product("coursesu", "Farine U", None)],
+        "leclerc": StoreRequiredError("Choisissez votre drive E.Leclerc"),
     }
     monkeypatch.setattr(search, "_scrape", fake_scrape(catalog))
     response = run(search.search_all("farine"))
@@ -69,6 +70,7 @@ def test_search_error_statuses(monkeypatch):
         "carrefour": "blocked",
         "intermarche": "store_required",
         "coursesu": "store_required",  # products without price and no store chosen
+        "leclerc": "store_required",
     }
     lidl = next(r for r in response.results if r.store == "lidl")
     assert "injoignable" in lidl.message

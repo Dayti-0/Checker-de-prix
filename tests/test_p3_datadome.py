@@ -161,10 +161,11 @@ def test_kill_switch_goes_back_to_the_shared_browser(tmp_path, monkeypatch):
     from backend.browser import BrowserManager
 
     manager = BrowserManager(tmp_path / "profile")
-    assert manager.is_dedicated("intermarche")
-    assert [w.store for w in manager.status().windows] == ["intermarche"]
+    assert manager.is_dedicated("intermarche") and manager.is_dedicated("leclerc")
+    assert [w.store for w in manager.status().windows] == ["intermarche", "leclerc"]
+    assert [w.label for w in manager.status().windows] == ["Intermarché", "E.Leclerc"]
     monkeypatch.setattr(config, "REAL_CHROME_STORES", ())
-    assert not manager.is_dedicated("intermarche")
+    assert not manager.is_dedicated("intermarche") and not manager.is_dedicated("leclerc")
     assert manager.status().windows == []
 
 

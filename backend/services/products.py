@@ -5,7 +5,8 @@ cached or not (services/search.py):
 
 1. prices per kg / L / piece normalised (``parsing.finalize_product``), barcode
    checked (``valid_ean``: a wrong one becomes None);
-2. ``bio`` and ``store_brand`` computed (``is_bio``, ``is_store_brand``);
+2. ``bio`` and ``store_brand`` computed (``is_bio``, ``is_store_brand``; a
+   ``store_brand=True`` set by a scraper from the site itself is kept);
 3. relevance (services/matching.py): ``relevance``, ``match_score`` and
    ``match_reason`` of each product;
 4. duplicates dropped (``dedup_key``: the barcode, else the product page, the
@@ -18,6 +19,7 @@ cached or not (services/search.py):
 from urllib.parse import urlsplit
 
 from backend.models import Product
+from backend.scrapers.leclerc import OWN_BRANDS as LECLERC_BRANDS
 from backend.scrapers.parsing import finalize_product, valid_ean
 from backend.services.matching import Matcher, tokenize
 
@@ -81,6 +83,8 @@ STORE_BRANDS = {
         "Planteur des Tropiques",
     ),
     "coursesu": ("U", "U Bio", "U Saveurs", "U Tout Petits", "Bien Vu"),
+    # E.Leclerc (P8): kept with its scraper, which also reads the brand in the 2nd line of a product
+    "leclerc": LECLERC_BRANDS,
 }
 _STORE_BRANDS = {store: tuple(" ".join(tokenize(b)) for b in brands) for store, brands in STORE_BRANDS.items()}
 
@@ -167,7 +171,8 @@ def prepare_products(products: list[Product], query: str) -> list[Product]:
         finalize_product(product)
         product.ean = valid_ean(product.ean)
         product.bio = is_bio(product)
-        product.store_brand = is_store_brand(product)
+        if product.store_brand is not True:  # a scraper may know it from the site (E.Leclerc)
+            product.store_brand = is_store_brand(product)
         match = matcher.match(product.name, product.brand)
         product.relevance, product.match_score, product.match_reason = match.relevance, match.score, match.reason
         key = dedup_key(product)

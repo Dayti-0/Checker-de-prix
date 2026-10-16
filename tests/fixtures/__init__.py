@@ -9,4 +9,5 @@ from tests.fixtures.carrefour import *  # noqa: F403
 from tests.fixtures.coursesu import *  # noqa: F403
 from tests.fixtures.generic import *  # noqa: F403
 from tests.fixtures.intermarche import *  # noqa: F403
+from tests.fixtures.leclerc import *  # noqa: F403
 from tests.fixtures.lidl import *  # noqa: F403

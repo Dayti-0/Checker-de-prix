@@ -29,16 +29,18 @@ CACHE_EMPTY_TTL_SECONDS = 30 * 60  # "no product" is remembered 30 minutes
 # Max time for one retailer search (the first search also warms up the site);
 # PRIXMALIN_TIMEOUT_<KEY> (e.g. PRIXMALIN_TIMEOUT_COURSESU=90) for one retailer
 SCRAPER_TIMEOUT_SECONDS = float(os.environ.get("PRIXMALIN_TIMEOUT", "40"))
-# Longer default: Courses U visits the store page first; Intermarché may have
-# to start its Chrome window and waits for the site to settle
-SCRAPER_TIMEOUT_DEFAULTS = {"coursesu": 60.0, "intermarche": 60.0}
+# Longer default: Courses U visits the store page first; Intermarché and
+# E.Leclerc may have to start their Chrome window and wait for the site to
+# settle (E.Leclerc also visits the page of the drive)
+SCRAPER_TIMEOUT_DEFAULTS = {"coursesu": 60.0, "intermarche": 60.0, "leclerc": 60.0}
 # Max time waiting for the tab of a retailer (other searches before this one)
 QUEUE_TIMEOUT_SECONDS = float(os.environ.get("PRIXMALIN_QUEUE_TIMEOUT", "90"))
 
 # Politeness delay between two requests to the same retailer (plus 0 to 0.5 s)
 MIN_REQUEST_INTERVAL_SECONDS = 1.0
 REQUEST_JITTER_SECONDS = 0.5
-REQUEST_INTERVAL_SECONDS = {"intermarche": 1.1}
+# E.Leclerc: a burst of about 5 requests is refused by DataDome
+REQUEST_INTERVAL_SECONDS = {"intermarche": 1.1, "leclerc": 1.5}
 
 # Circuit breaker: after a "blocked" or "store_required" answer the retailer is
 # not called again for 10 minutes (unless the user forces it), after 2 timeouts
@@ -59,8 +61,9 @@ def parse_store_list(value: str) -> tuple[str, ...]:
 
 # Retailers driven through a dedicated real Chrome window (backend/real_chrome.py)
 # instead of the shared Playwright browser. PRIXMALIN_REAL_CHROME= (empty) goes
-# back to the shared browser for every retailer (not advised for Intermarché).
-REAL_CHROME_STORES = parse_store_list(os.environ.get("PRIXMALIN_REAL_CHROME", "intermarche"))
+# back to the shared browser for every retailer (not advised for Intermarché
+# nor E.Leclerc, both behind DataDome).
+REAL_CHROME_STORES = parse_store_list(os.environ.get("PRIXMALIN_REAL_CHROME", "intermarche,leclerc"))
 # chrome.exe or msedge.exe to use (found automatically when empty)
 CHROME_PATH = os.environ.get("PRIXMALIN_CHROME_PATH", "").strip()
 # Extra command line switches of that Chrome: for the tests only (--no-sandbox)
@@ -87,5 +90,5 @@ def scraper_timeout(key: str) -> float:
 
 
 def real_chrome_profile_dir(key: str) -> Path:
-    """Profile of the dedicated Chrome window of retailer ``key`` (data/chrome-intermarche)."""
+    """Profile of the dedicated Chrome window of retailer ``key`` (data/chrome-intermarche, data/chrome-leclerc)."""
     return DATA_DIR / f"chrome-{key}"

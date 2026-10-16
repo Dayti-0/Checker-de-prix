@@ -1,13 +1,18 @@
-"""Stores near the user: the Courses U directory ranked by distance (area of P4).
+"""Stores near the user: Courses U (area of P4) and E.Leclerc (P8) ranked by distance.
 
 - ``nearest_coursesu_stores(location)``: the directory (read in the Courses U
   tab, cached ``DIRECTORY_TTL``), placed on the map with the table of French
   towns (geo.api.gouv.fr, cached ``COMMUNES_TTL``), sorted by distance;
-- ``auto_pick_coursesu()``: saves the nearest store when none is chosen (or
-  when the current one was chosen automatically); ``initial=True`` (page
-  loaded) does nothing when it was already done for this postal code, or when
-  the user removed the store (preferences ``p4.coursesu``);
-- ``read_back_coursesu()``: saves the store the user chose on the site.
+- ``nearest_leclerc_stores(location)``: the store finder of E.Leclerc
+  (``MapPoint/nearby``, asked in its dedicated window, cached ``DIRECTORY_TTL``
+  per postal code and coordinates), sorted by distance;
+- ``auto_pick(key)`` (``auto_pick_coursesu``, ``auto_pick_leclerc``): saves the
+  nearest store when none is chosen (or when the current one was chosen
+  automatically); ``initial=True`` (page loaded) does nothing when it was
+  already done for this postal code, or when the user removed the store
+  (preferences ``p4.coursesu``, ``p8.leclerc``). E.Leclerc: the nearest drive,
+  never a pedestrian pick-up point;
+- ``read_back(key)``: saves the store the user chose on the site.
 
 Placing and sorting are pure functions (``build_commune_index``, ``locate``,
 ``rank_stores``). Without the town table, the postal codes of the stores of
@@ -22,15 +27,17 @@ import logging
 import math
 import re
 import unicodedata
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
-from backend.browser import browser
+from backend.browser import BrowserUnavailable, browser
 from backend.errors import AppError
-from backend.models import AutoPickResult, CoursesUPrefs, Location, Settings, StoreOption, StoreSelection
+from backend.models import AutoPickPrefs, AutoPickResult, Location, Settings, StoreOption, StoreSelection
 from backend.repos import stores_cache
-from backend.scrapers import SCRAPERS
+from backend.scrapers import SCRAPERS, leclerc
 from backend.scrapers.base import BlockedError, ScraperError
 from backend.scrapers.coursesu import MIN_DIRECTORY_STORES, site_store_selection
 from backend.services import prefs
@@ -50,19 +57,30 @@ FAR_KM = 40
 # Postal codes geocoded one by one when the town table cannot be downloaded
 MAX_POSTAL_LOOKUPS = 40
 
-# Preferences of the automatic choice (CoursesUPrefs)
+# Preferences of the automatic choice (AutoPickPrefs)
 PREFS_SECTION = "p4.coursesu"
+LECLERC_PREFS_SECTION = "p8.leclerc"
 
 COMMUNES_KEY = "geo:communes"
 DIRECTORY_KEY = "coursesu:directory"
 # Last directory read, whatever its size (names and addresses of the store read back from the site)
 DIRECTORY_LAST_KEY = "coursesu:directory:last"
 POSTAL_KEY = "geo:cp:{}"
+# E.Leclerc drives near a postal code and its coordinates; the last list read
+# (names and addresses of the drive read back from the site)
+LECLERC_NEARBY_KEY = "leclerc:nearby:{cp}:{where}"
+LECLERC_LAST_KEY = "leclerc:nearby:last"
+# Seconds left to the E.Leclerc window to ask its store finder (it may have to start)
+LECLERC_TIMEOUT = 60
 
 NO_LOCATION = "Indiquez d'abord votre code postal."
 NO_LOCATION_AUTO = "Indiquez votre code postal : PrixMalin choisira le magasin le plus proche."
 AUTO_FAILED = (
     "La recherche du magasin Courses U le plus proche a échoué. "
+    "Choisissez-le dans la liste, sur le site ou en collant l'adresse de sa page."
+)
+LECLERC_AUTO_FAILED = (
+    "La recherche du drive E.Leclerc le plus proche a échoué. "
     "Choisissez-le dans la liste, sur le site ou en collant l'adresse de sa page."
 )
 
@@ -343,70 +361,223 @@ async def cached_coursesu_directory() -> list[StoreOption]:
     return [StoreOption(**s) for s in json.loads(cached[0])] if cached else []
 
 
+# ---------------------------------------------------------------- E.Leclerc drives (P8)
+
+
+async def fetch_leclerc_nearby(location: Location) -> list[StoreOption]:
+    """Drives near ``location`` from the store finder of E.Leclerc, called in its
+    dedicated window (replaced by the E2E fakes)."""
+    scraper = SCRAPERS["leclerc"]
+    return await browser.run(
+        scraper.key,
+        scraper.find_stores,
+        location.lat,
+        location.lon,
+        location.postal_code,
+        timeout=LECLERC_TIMEOUT,
+        priority="interactive",
+    )
+
+
+def leclerc_cache_key(location: Location) -> str:
+    """``leclerc:nearby:34000:43.611:3.877`` (``…:-:-`` without coordinates)."""
+    if location.lat is None or location.lon is None:
+        return LECLERC_NEARBY_KEY.format(cp=location.postal_code, where="-:-")
+    return LECLERC_NEARBY_KEY.format(cp=location.postal_code, where=f"{location.lat:.3f}:{location.lon:.3f}")
+
+
+def rank_leclerc_stores(stores: list[StoreOption], origin: Location | None) -> list[StoreOption]:
+    """Drives sorted by distance (pure): computed from their coordinates, else the one given by the site."""
+    given = {(s.id, s.url): s.distance_km for s in stores}
+    ranked = [
+        s if s.distance_km is not None else s.model_copy(update={"distance_km": given.get((s.id, s.url))})
+        for s in rank_stores(stores, origin, None)
+    ]
+    return sorted(ranked, key=lambda s: (s.distance_km is None, s.distance_km or 0.0))
+
+
+async def leclerc_stores(location: Location, refresh: bool = False) -> list[StoreOption]:
+    """Drives near ``location`` (cached ``DIRECTORY_TTL`` per postal code and coordinates)."""
+    key = leclerc_cache_key(location)
+    async with _lock("leclerc-nearby"):
+        if not refresh:
+            cached = await stores_cache.get(key, DIRECTORY_TTL)
+            if cached:
+                return [StoreOption(**s) for s in json.loads(cached[0])]
+        found = await fetch_leclerc_nearby(location)
+        stores = [s if isinstance(s, StoreOption) else StoreOption(**s) for s in found or []]
+        if stores:
+            dump = json.dumps([s.model_dump() for s in stores])
+            await stores_cache.put(key, dump)
+            await stores_cache.put(LECLERC_LAST_KEY, dump)
+        return stores
+
+
+async def nearest_leclerc_stores(
+    location: Location | None, refresh: bool = False, limit: int = NEAREST_COUNT
+) -> list[StoreOption]:
+    """The ``limit`` E.Leclerc drives (and pedestrian pick-up points) nearest to ``location``."""
+    if location is None:
+        raise AppError(NO_LOCATION, 400, "no_location")
+    return rank_leclerc_stores(await leclerc_stores(location, refresh), location)[:limit]
+
+
+async def cached_leclerc_stores() -> list[StoreOption]:
+    """The drives of the last list read, without asking the site."""
+    cached = await stores_cache.get(LECLERC_LAST_KEY)
+    return [StoreOption(**s) for s in json.loads(cached[0])] if cached else []
+
+
+async def fetch_leclerc_site_store() -> dict | None:
+    """What the tab of the E.Leclerc window shows (address, page, cookie), read
+    without any request to the site (replaced by the E2E fakes)."""
+    scraper = SCRAPERS["leclerc"]
+    return await browser.run(scraper.key, scraper.read_site_store, timeout=45, priority="interactive")
+
+
+def first_drive(stores: list[StoreOption]) -> StoreOption | None:
+    """The nearest drive of a list sorted by distance (never a pedestrian pick-up point)."""
+    return next((s for s in stores if "Drive" in s.services and s.url), None)
+
+
 # ---------------------------------------------------------------- automatic choice
+
+
+@dataclass(frozen=True)
+class AutoPickSpec:
+    """A retailer whose store PrixMalin chooses by itself (Courses U, E.Leclerc)."""
+
+    key: str
+    label: str
+    # Preferences of the automatic choice (AutoPickPrefs)
+    prefs_section: str
+    # (location, refresh, limit) -> stores sorted by distance
+    nearest: Callable[[Location, bool, int], Awaitable[list[StoreOption]]]
+    # The store chosen in a sorted list
+    pick: Callable[[list[StoreOption]], StoreOption | None]
+    # () -> (store chosen on the site or None, the stores already known)
+    site_store: Callable[[], Awaitable[tuple[StoreSelection | None, list[StoreOption]]]]
+    none_message: str
+    far_message: str
+    timeout_message: str
+    failed_message: str
+    read_timeout_message: str
+
+
+async def _coursesu_site_store() -> tuple[StoreSelection | None, list[StoreOption]]:
+    info = await fetch_site_store()
+    directory = await cached_coursesu_directory()
+    return site_store_selection(info, directory), directory
+
+
+async def _leclerc_site_store() -> tuple[StoreSelection | None, list[StoreOption]]:
+    info = await fetch_leclerc_site_store() or {}
+    known = await cached_leclerc_stores()
+    selection = leclerc.site_store_selection(info.get("url"), info.get("html"), info.get("cookie"), known)
+    return selection, known
+
+
+SPECS = {
+    "coursesu": AutoPickSpec(
+        key="coursesu",
+        label="Courses U",
+        prefs_section=PREFS_SECTION,
+        nearest=lambda location, refresh, limit: nearest_coursesu_stores(location, refresh=refresh, limit=limit),
+        pick=lambda stores: stores[0] if stores and stores[0].url else None,
+        site_store=lambda: _coursesu_site_store(),
+        none_message="Aucun magasin Courses U trouvé.",
+        far_message=f"Aucun drive Courses U à moins de {FAR_KM} km.",
+        timeout_message="Courses U n'a pas répondu à temps. Réessayez dans un instant.",
+        failed_message=AUTO_FAILED,
+        read_timeout_message="Courses U n'a pas répondu à temps.",
+    ),
+    "leclerc": AutoPickSpec(
+        key="leclerc",
+        label="E.Leclerc",
+        prefs_section=LECLERC_PREFS_SECTION,
+        nearest=lambda location, refresh, limit: nearest_leclerc_stores(location, refresh=refresh, limit=limit),
+        pick=lambda stores: first_drive(stores),
+        site_store=lambda: _leclerc_site_store(),
+        none_message="Aucun drive E.Leclerc trouvé.",
+        far_message=f"Aucun drive E.Leclerc à moins de {FAR_KM} km.",
+        timeout_message="E.Leclerc n'a pas répondu à temps. Réessayez dans un instant.",
+        failed_message=LECLERC_AUTO_FAILED,
+        read_timeout_message="E.Leclerc n'a pas répondu à temps.",
+    ),
+}
+# Retailers whose nearest store is chosen automatically (RetailerInfo.auto_store)
+AUTO_STORES = tuple(SPECS)
+
+
+def _spec(key: str) -> AutoPickSpec:
+    return SPECS[key]
 
 
 def _result(status: str, settings: Settings, message: str | None = None, store=None) -> AutoPickResult:
     return AutoPickResult(status=status, message=message, store=store, settings=settings)
 
 
-async def _auto_done_for(postal_code: str | None) -> None:
-    def change(p: CoursesUPrefs) -> None:
+async def _auto_done_for(spec: AutoPickSpec, postal_code: str | None) -> None:
+    def change(p: AutoPickPrefs) -> None:
         p.auto_done_for = postal_code
 
-    await prefs.update(PREFS_SECTION, CoursesUPrefs, change)
+    await prefs.update(spec.prefs_section, AutoPickPrefs, change)
 
 
-async def forget_coursesu_store() -> None:
-    """The user removed his Courses U store: no automatic choice at startup for this postal code."""
+async def forget_store(key: str) -> None:
+    """The user removed his store: no automatic choice at startup for this postal code."""
     current = await settings_service.load_settings()
     if current.location is not None:
-        await _auto_done_for(current.location.postal_code)
+        await _auto_done_for(_spec(key), current.location.postal_code)
 
 
-async def auto_pick_coursesu(refresh: bool = False, initial: bool = False) -> AutoPickResult:
-    """Save the nearest Courses U store unless the user chose one himself.
+async def auto_pick(key: str, refresh: bool = False, initial: bool = False) -> AutoPickResult:
+    """Save the nearest store of ``key`` unless the user chose one himself.
 
     ``initial``: asked when a page loads; ``kept`` without reading the site when
     a store is chosen or when it was already done for this postal code.
-    The location changed while the directory was read (town chosen meanwhile):
+    The location changed while the stores were read (town chosen meanwhile):
     the store is chosen again for the new one.
     Never raises: the outcome (``status``, French ``message``) is returned.
     """
+    spec = _spec(key)
     for _ in range(3):
-        result = await _auto_pick_once(refresh, initial)
+        result = await _auto_pick_once(spec, refresh, initial)
         if result is not None:
             return result
-        refresh = False  # the directory has just been read
+        refresh = False  # the stores have just been read
     return _result("kept", await settings_service.load_settings())
 
 
-async def _auto_pick_once(refresh: bool, initial: bool) -> AutoPickResult | None:
+async def _auto_pick_once(spec: AutoPickSpec, refresh: bool, initial: bool) -> AutoPickResult | None:
     """One automatic choice; None when the location changed meanwhile (nothing saved)."""
     current = await settings_service.load_settings()
-    chosen = current.stores.get("coursesu")
+    chosen = current.stores.get(spec.key)
     if chosen and (not chosen.auto or initial):
         return _result("kept", current)
     if current.location is None:
         return _result("no_location", current, NO_LOCATION_AUTO)
     if initial:
-        done = await prefs.get(PREFS_SECTION, CoursesUPrefs)
+        done = await prefs.get(spec.prefs_section, AutoPickPrefs)
         if done.auto_done_for == current.location.postal_code:
             return _result("kept", current)
     try:
-        stores = await nearest_coursesu_stores(current.location, refresh=refresh, limit=1)
+        stores = await spec.nearest(current.location, refresh, NEAREST_COUNT)
     except BlockedError as e:
         return _result("blocked", current, str(e))
     except TimeoutError:
-        return _result("timeout", current, "Courses U n'a pas répondu à temps. Réessayez dans un instant.")
+        return _result("timeout", current, spec.timeout_message)
     except (AppError, ScraperError) as e:
         return _result("error", current, getattr(e, "message", None) or str(e))
+    except BrowserUnavailable as e:
+        # The dedicated Chrome window of E.Leclerc cannot start: say why
+        return _result("error", current, str(e) if browser.is_dedicated(spec.key) else spec.failed_message)
     except Exception:  # noqa: BLE001 (turned into a message for the user)
-        logger.exception("Automatic choice of the Courses U store failed")
-        return _result("error", current, AUTO_FAILED)
-    if not stores or not stores[0].url:
-        return _result("none", current, "Aucun magasin Courses U trouvé.")
-    nearest = stores[0]
+        logger.exception("Automatic choice of the %s store failed", spec.label)
+        return _result("error", current, spec.failed_message)
+    nearest = spec.pick(stores or [])
+    if nearest is None:
+        return _result("none", current, spec.none_message)
     selection = selection_from_option(nearest, auto=True)
 
     moved = False
@@ -416,20 +587,69 @@ async def _auto_pick_once(refresh: bool, initial: bool) -> AutoPickResult | None
         if settings.location != current.location:
             moved = True
             return
-        now = settings.stores.get("coursesu")
+        now = settings.stores.get(spec.key)
         if now is None or now.auto:  # the user may have chosen one meanwhile
-            settings.stores["coursesu"] = selection
+            settings.stores[spec.key] = selection
 
     saved = await settings_service.modify(change)
     if moved:
         return None
-    if saved.stores.get("coursesu") != selection:
+    if saved.stores.get(spec.key) != selection:
         return _result("kept", saved)
-    await _auto_done_for(current.location.postal_code)
+    await _auto_done_for(spec, current.location.postal_code)
     message = None
     if nearest.distance_km is not None and nearest.distance_km > FAR_KM:
-        message = f"Aucun drive Courses U à moins de {FAR_KM} km."
+        message = spec.far_message
     return _result("chosen", saved, message, nearest)
+
+
+async def read_back(key: str, opened_only: bool = False) -> AutoPickResult:
+    """Save the store the user chose on the site of ``key`` (after « Ouvrir le site »).
+
+    ``opened_only``: ``none`` at once, without reading the site, unless it was
+    opened with « Ouvrir le site » since the last read-back.
+    Never raises: ``none`` when the site shows no store, ``kept`` when it is
+    the one already saved.
+    """
+    spec = _spec(key)
+    current = await settings_service.load_settings()
+    scraper = SCRAPERS[spec.key]
+    if opened_only and getattr(scraper, "site_opened_at", None) is None:
+        return _result("none", current)
+    scraper.site_opened_at = None
+    try:
+        selection, known_stores = await spec.site_store()
+    except BlockedError as e:
+        return _result("blocked", current, str(e))
+    except TimeoutError:
+        return _result("timeout", current, spec.read_timeout_message)
+    except Exception as e:  # noqa: BLE001 (best effort: the user can still choose in the list)
+        logger.info("%s store read-back failed: %s", spec.label, e)
+        return _result("error", current, "Impossible de lire le magasin choisi sur le site.")
+    if selection is None or not selection.url:
+        return _result("none", current)
+    chosen = current.stores.get(spec.key)
+    if chosen and chosen.url == selection.url:
+        return _result("kept", current)
+    known = next((s for s in known_stores if s.url == selection.url), None)
+    if known is not None:
+        selection = selection_from_option(known)
+    saved = await settings_service.set_store(spec.key, selection)
+    option = known or StoreOption(
+        id=selection.id or "", name=selection.name or "", url=selection.url, address=selection.address
+    )
+    return _result("chosen", saved, store=option)
+
+
+# --- Courses U and E.Leclerc entry points (used by the tests and the E2E fakes)
+
+
+async def forget_coursesu_store() -> None:
+    await forget_store("coursesu")
+
+
+async def auto_pick_coursesu(refresh: bool = False, initial: bool = False) -> AutoPickResult:
+    return await auto_pick("coursesu", refresh=refresh, initial=initial)
 
 
 async def fetch_site_store() -> dict | None:
@@ -439,39 +659,16 @@ async def fetch_site_store() -> dict | None:
 
 
 async def read_back_coursesu(opened_only: bool = False) -> AutoPickResult:
-    """Save the store the user chose on the Courses U site (after « Ouvrir le site »).
+    return await read_back("coursesu", opened_only=opened_only)
 
-    ``opened_only``: ``none`` at once, without reading the site, unless it was
-    opened with « Ouvrir le site » since the last read-back.
-    Never raises: ``none`` when the site shows no store, ``kept`` when it is
-    the one already saved.
-    """
-    current = await settings_service.load_settings()
-    scraper = SCRAPERS["coursesu"]
-    if opened_only and getattr(scraper, "site_opened_at", None) is None:
-        return _result("none", current)
-    scraper.site_opened_at = None
-    try:
-        info = await fetch_site_store()
-    except BlockedError as e:
-        return _result("blocked", current, str(e))
-    except TimeoutError:
-        return _result("timeout", current, "Courses U n'a pas répondu à temps.")
-    except Exception as e:  # noqa: BLE001 (best effort: the user can still choose in the list)
-        logger.info("Courses U store read-back failed: %s", e)
-        return _result("error", current, "Impossible de lire le magasin choisi sur le site.")
-    directory = await cached_coursesu_directory()
-    selection = site_store_selection(info, directory)
-    if selection is None or not selection.url:
-        return _result("none", current)
-    chosen = current.stores.get("coursesu")
-    if chosen and chosen.url == selection.url:
-        return _result("kept", current)
-    known = next((s for s in directory if s.url == selection.url), None)
-    if known is not None:
-        selection = selection_from_option(known)
-    saved = await settings_service.set_store("coursesu", selection)
-    option = known or StoreOption(
-        id=selection.id or "", name=selection.name or "", url=selection.url, address=selection.address
-    )
-    return _result("chosen", saved, store=option)
+
+async def forget_leclerc_store() -> None:
+    await forget_store("leclerc")
+
+
+async def auto_pick_leclerc(refresh: bool = False, initial: bool = False) -> AutoPickResult:
+    return await auto_pick("leclerc", refresh=refresh, initial=initial)
+
+
+async def read_back_leclerc(opened_only: bool = False) -> AutoPickResult:
+    return await read_back("leclerc", opened_only=opened_only)

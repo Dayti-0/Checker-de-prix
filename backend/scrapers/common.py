@@ -66,10 +66,17 @@ _CLOUDFLARE_MARKS = (
 )
 
 # DataDome's own block page: no captcha to solve, the connection is refused
+# (« Access blocked. … unusual activity from your device » on E.Leclerc Drive)
 _DATADOME_HARD_TEXT = re.compile(
-    r"acc[eè]s temporairement restreint|temporairement restreint|you have been blocked|vous avez [eé]t[eé] bloqu[eé]",
+    r"acc[eè]s temporairement restreint|temporairement restreint|you have been blocked|vous avez [eé]t[eé] bloqu[eé]"
+    r"|access blocked|access is temporarily restricted|unusual activity from your device|activit[eé] inhabituelle",
     re.I,
 )
+
+
+def is_hard_block_text(text: str | None) -> bool:
+    """The text of a page says the connection is refused for a while (DataDome block page)."""
+    return bool(text) and bool(_DATADOME_HARD_TEXT.search(text))
 
 
 def _datadome_url(text: str) -> str | None:

@@ -254,7 +254,7 @@ def test_status_api(client, monkeypatch):
     write_snapshot("lidl-blocked.html")
     write_snapshot("aldi-x.txt")  # not a snapshot
     states = {h["key"]: h for h in client.get("/api/status/retailers").json()}
-    assert list(states) == ["aldi", "lidl", "carrefour", "intermarche", "coursesu"]
+    assert list(states) == ["aldi", "lidl", "carrefour", "intermarche", "coursesu", "leclerc"]
     lidl = states["lidl"]
     assert (lidl["state"], lidl["state_label"], lidl["consecutive_failures"]) == ("broken", "Probablement cassé", 3)
     assert lidl["last_error"] == "Aucun produit trouvé chez Lidl."
@@ -262,6 +262,7 @@ def test_status_api(client, monkeypatch):
     assert states["aldi"]["state"] == "unknown" and states["aldi"]["snapshots"] == []
     assert states["intermarche"]["state"] == "store_required"
     assert states["coursesu"]["needs_store"] and not states["carrefour"]["national"]
+    assert states["leclerc"]["needs_store"] and states["leclerc"]["state"] == "store_required"
 
 
 def test_snapshot_api(client):
@@ -339,6 +340,7 @@ def test_diagnostic_zip(client, monkeypatch):
         "carrefour",
         "intermarche",
         "coursesu",
+        "leclerc",
     }
 
 

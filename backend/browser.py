@@ -1,4 +1,4 @@
-"""Browsers of PrixMalin: one shared browser, plus a dedicated Chrome window for Intermarché.
+"""Browsers of PrixMalin: one shared browser, plus a dedicated Chrome window for Intermarché and E.Leclerc.
 
 Playwright runs on a dedicated thread with its own event loop, so it works
 whatever loop the web server uses (on Windows Playwright needs a Proactor loop
@@ -11,13 +11,14 @@ sites survive restarts), invisible ("new" headless with the user agent of a
 regular Chrome, playwright-stealth) unless the user shows it. One tab per
 retailer, reused from one search to the next.
 
-**Dedicated window** (``config.REAL_CHROME_STORES``, Intermarché by default):
-the Google Chrome installed on the PC (else Edge), started as a plain process
-with its own profile ``data/chrome-intermarche`` and driven by patchright over
-CDP, without stealth script or any override (backend/real_chrome.py). Never
-headless: started minimized by a search, shown by « Ouvrir le site ». The
-shared browser never opens intermarche.com (``PRIXMALIN_REAL_CHROME=`` empty
-goes back to the shared browser for every retailer).
+**Dedicated windows** (``config.REAL_CHROME_STORES``, Intermarché and E.Leclerc
+by default): one per retailer, the Google Chrome installed on the PC (else
+Edge), started as a plain process with its own profile ``data/chrome-<key>``
+and driven by patchright over CDP, without stealth script or any override
+(backend/real_chrome.py). Never headless: started minimized by a search, shown
+by « Ouvrir le site ». The shared browser never opens intermarche.com nor
+leclercdrive.fr (``PRIXMALIN_REAL_CHROME=`` empty goes back to the shared
+browser for every retailer).
 
 **Calls** (``run``):
 
@@ -849,7 +850,9 @@ class BrowserManager:
             domain = host[4:] if host.startswith("www.") else host
             root = self.real_chrome_dir
             profile = root / f"chrome-{key}" if root is not None else config.real_chrome_profile_dir(key)
-            real = self._real[key] = RealChrome(key, domain, profile, on_closed=self._on_window_closed)
+            real = self._real[key] = RealChrome(
+                key, domain, profile, on_closed=self._on_window_closed, label=SCRAPERS[key].label
+            )
         return real
 
     async def _dedicated_page(self, key: str):
