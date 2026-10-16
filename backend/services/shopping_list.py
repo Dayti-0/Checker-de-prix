@@ -820,7 +820,8 @@ def _saved_items(raw_items: list[dict], name: str) -> list[ListItem]:
 
 
 async def apply_template(template_id: int, mode: str = "replace") -> list[ListItem] | None:
-    """Put a saved list back (``replace``) or add its items to the list (``merge``)."""
+    """Put a saved list back (``replace``: the lines replaced are kept a while for
+    « Annuler », POST /api/list/restore with their ids) or add its items to the list (``merge``)."""
     template = await templates_repo.get_template(template_id)
     if template is None:
         return None
@@ -830,8 +831,10 @@ async def apply_template(template_id: int, mode: str = "replace") -> list[ListIt
         new = {repo.list_key(i.query) for i in saved} - {i["key"] for i in current}
         if len(current) + len(new) > MAX_ITEMS:
             raise AppError(f"Votre liste serait trop longue ({MAX_ITEMS} articles au maximum).", code="list_full")
-        if mode == "replace":
+        if mode == "replace":  # the lines replaced can be put back (« Annuler »)
+            replaced = await repo.list_items()
             await repo.clear_items(db=db)
+            await repo.trash_items(replaced, time.time(), TRASH_SECONDS, db=db)
         for item in saved:
             existing = await repo.get_by_key(repo.list_key(item.query))
             if existing is None:

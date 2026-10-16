@@ -526,6 +526,17 @@ def test_templates_round_trip(client, sites):
     assert client.get(f"/api/templates/{saved['id']}").status_code == 404
 
 
+def test_undo_after_replacing_the_list_by_a_template(client, sites):
+    add(client, "farine")
+    saved = client.post("/api/templates", json={"name": "Semaine"}).json()
+    sugar = add(client, "sucre", quantity=3, note="roux")
+    replaced = client.post(f"/api/templates/{saved['id']}/apply", json={"mode": "replace"}).json()
+    assert [i["query"] for i in replaced] == ["farine"]
+    restored = client.post("/api/list/restore", json={"ids": [sugar["id"]]}).json()
+    back = next(i for i in restored if i["query"] == "sucre")
+    assert (back["id"], back["quantity"], back["note"]) == (sugar["id"], 3, "roux")
+
+
 def test_template_errors(client, sites):
     assert client.post("/api/templates", json={"name": "Vide"}).status_code == 400
     add(client, "farine")
