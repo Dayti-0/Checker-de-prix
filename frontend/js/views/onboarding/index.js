@@ -4,7 +4,8 @@
 // startup by features/setup-banner.js); can be started again from Réglages.
 // Three steps:
 //   1. postal code, then town (the form of Réglages › Localisation);
-//   2. the 3 nearest Intermarché and Courses U stores, the nearest chosen
+//   2. the 3 nearest Intermarché and Courses U stores and E.Leclerc drives
+//      (the retailers whose `finds_stores` is true), the nearest chosen
 //      (a store already chosen stays proposed and checked: started again from
 //      Réglages, the assistant never replaces it by itself);
 //   3. a trial search « lait » showing the state of each retailer and how to
@@ -21,7 +22,7 @@ import { navigate } from "../../core/router.js";
 import { emit, loadSettings, on, state } from "../../core/store.js";
 import { announce, notify } from "../../core/ui.js";
 import { mountLocationForm } from "../settings/sections/location.js";
-import { distanceText, openSite, statePill } from "../status/shared.js";
+import { andList, distanceText, ofLabel, openSite, statePill, storeNoun, storeTitle } from "../status/shared.js";
 
 export const enabled = true;
 export const title = "Bienvenue";
@@ -31,7 +32,20 @@ export const STEPS = ["Votre commune", "Vos magasins", "Essai"];
 export const TRIAL_QUERY = "lait";
 // Stores proposed for each retailer
 const PROPOSED = 3;
-const STORE_KEYS = ["intermarche", "coursesu"];
+// Retailers whose stores PrixMalin lists (before /api/retailers is read: the usual ones)
+const STORE_KEYS = ["intermarche", "coursesu", "leclerc"];
+
+export function storeKeys(retailers = state.retailers) {
+    const keys = (retailers || []).filter((r) => r.finds_stores).map((r) => r.key);
+    return keys.length ? keys : STORE_KEYS;
+}
+
+function storeLabels() {
+    return storeKeys().map((key) => {
+        const r = (state.retailers || []).find((x) => x.key === key);
+        return r ? r.label : key;
+    });
+}
 
 let root = null;
 let step = 1;
@@ -87,11 +101,11 @@ function storeChoices(key) {
     const list = lists[key] || { status: "loading" };
     let body;
     if (list.status === "loading") {
-        body = html`<p class="muted"><span class="spinner"></span> Recherche des magasins proches…</p>`;
+        body = html`<p class="muted"><span class="spinner"></span> Recherche des ${storeNoun(key)}s proches…</p>`;
     } else if (list.status === "error") {
         body = html`<p class="notice warn small">${list.error}</p>`;
     } else if (!list.stores.length) {
-        body = html`<p class="muted">Aucun magasin trouvé autour de chez vous.</p>`;
+        body = html`<p class="muted">Aucun ${storeNoun(key)} trouvé autour de chez vous.</p>`;
     } else {
         body = html`${list.stores.map((s, i) => {
             const distance = distanceText(s);
@@ -108,7 +122,7 @@ function storeChoices(key) {
         </label>`;
     }
     return html`<fieldset class="onb-stores" data-retailer="${key}">
-        <legend>${retailerBadge(key, r.label)} <span>Magasin ${r.label}</span></legend>
+        <legend>${retailerBadge(key, r.label)} <span>${storeTitle(key)}</span></legend>
         ${body}
     </fieldset>`;
 }
@@ -153,7 +167,7 @@ function trialRow(r) {
 
 function stepBody() {
     if (step === 1) {
-        return html`<p>Votre code postal sert à trouver les magasins Intermarché et Courses U les plus proches de chez vous. Aldi et Lidl ont les mêmes prix partout en France.</p>
+        return html`<p>Votre code postal sert à trouver les magasins ${andList(storeLabels())} les plus proches de chez vous. Aldi et Lidl ont les mêmes prix partout en France.</p>
             <div class="onb-location"></div>
             ${nav({ back: false, skip: "Passer", nextDisabled: !(state.settings && state.settings.location) })}`;
     }
@@ -163,12 +177,12 @@ function stepBody() {
                 ${nav({ next: "Continuer" })}`;
         }
         const place = state.settings.location.city || state.settings.location.postal_code;
-        const kept = STORE_KEYS.some((key) => state.settings.stores && state.settings.stores[key]);
+        const kept = storeKeys().some((key) => state.settings.stores && state.settings.stores[key]);
         const intro = kept
             ? `Voici les plus proches de ${place}. Un magasin déjà choisi reste coché ; sinon le plus proche est proposé.`
             : `Voici les plus proches de ${place} : le plus proche est déjà choisi.`;
-        return html`<p>Les prix d'Intermarché et de Courses U dépendent du magasin. ${intro}</p>
-            <div class="onb-store-lists">${STORE_KEYS.map(storeChoices)}</div>
+        return html`<p>Les prix ${andList(storeLabels().map(ofLabel))} dépendent du magasin. ${intro}</p>
+            <div class="onb-store-lists">${storeKeys().map(storeChoices)}</div>
             ${nav({ skip: "Passer", next: "Enregistrer et continuer" })}`;
     }
     const done = state.retailers.every((r) => trial[r.key] && trial[r.key] !== "loading");
@@ -223,7 +237,7 @@ async function loadLists() {
     const location = state.settings && state.settings.location;
     if (!location) return;
     await Promise.all(
-        STORE_KEYS.map(async (key) => {
+        storeKeys().map(async (key) => {
             const known = lists[key];
             if (known && known.status === "done" && known.postal === location.postal_code) return;
             lists[key] = { status: "loading", stores: [], choice: "" };
@@ -274,7 +288,7 @@ function drawLists() {
     if (!box) return;
     const active = document.activeElement;
     const focused = active && box.contains(active) && active.name ? [active.name, active.value] : null;
-    setHtml(box, html`${STORE_KEYS.map(storeChoices)}`);
+    setHtml(box, html`${storeKeys().map(storeChoices)}`);
     if (focused) {
         const again = box.querySelector(`input[name="${CSS.escape(focused[0])}"][value="${CSS.escape(focused[1])}"]`);
         if (again) again.focus();
@@ -283,7 +297,7 @@ function drawLists() {
 
 async function saveStores() {
     let saved = 0;
-    for (const key of STORE_KEYS) {
+    for (const key of storeKeys()) {
         const list = lists[key];
         if (!list || list.status !== "done" || list.choice === "") continue;
         const store = list.stores[list.choice];

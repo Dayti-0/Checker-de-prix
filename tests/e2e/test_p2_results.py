@@ -226,6 +226,9 @@ def test_sorts_without_result_filters(desktop):
 def test_retailers_without_results_are_one_compact_bar(desktop):
     page = desktop
     page.goto(page.base)
+    # A drive E.Leclerc is chosen: two retailers without results (E.Leclerc without drive: tests/e2e/test_p8_leclerc.py)
+    drive = "https://fd12-courses.leclercdrive.fr/magasin-173301-173301-Bruges"
+    page.request.put(f"{page.base}/api/retailers/leclerc/store", data={"url": drive})
     search(page, "farine")
     bar = page.get_by_test_id("unavailable")
     expect(bar).to_contain_text("2 enseignes indisponibles")
@@ -257,7 +260,7 @@ def test_no_result_is_one_block_with_shorter_searches(desktop):
         ["chocolat noir", "chocolat", "noir"]
     )
     # The retailers without the product are not listed a second time in the bar
-    expect(page.get_by_test_id("unavailable")).to_contain_text("2 enseignes indisponibles :")
+    expect(page.get_by_test_id("unavailable")).to_contain_text("3 enseignes indisponibles :")
     expect(page.get_by_test_id("unavailable")).not_to_contain_text("sans produit")
     # The summary would only repeat it: hidden, the block comes first
     expect(page.get_by_test_id("summary")).to_be_hidden()

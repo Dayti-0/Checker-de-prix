@@ -99,7 +99,9 @@ async def api_auto_store(key: str, refresh: bool = False, initial: bool = False)
 
     ``initial=true`` (page loaded): only once per postal code.
     """
-    return await stores_service.auto_pick(_auto_store_key(key), refresh=refresh, initial=initial)
+    # The functions of each retailer, looked up at each call (replaced by some tests)
+    pick = stores_service.auto_pick_leclerc if _auto_store_key(key) == "leclerc" else stores_service.auto_pick_coursesu
+    return await pick(refresh=refresh, initial=initial)
 
 
 @router.post("/retailers/{key}/store/from-site", response_model=AutoPickResult)
@@ -108,7 +110,8 @@ async def api_store_from_site(key: str, opened_only: bool = False):
 
     ``opened_only=true``: only when the site was opened with « Ouvrir le site ».
     """
-    return await stores_service.read_back(_auto_store_key(key), opened_only=opened_only)
+    read = stores_service.read_back_leclerc if _auto_store_key(key) == "leclerc" else stores_service.read_back_coursesu
+    return await read(opened_only=opened_only)
 
 
 def _coursesu_selection(choice: StoreChoice) -> StoreSelection:

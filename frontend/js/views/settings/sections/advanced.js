@@ -1,4 +1,4 @@
-// Settings › Navigateur: visible browser window, Intermarché window, troubleshooting (area of P3).
+// Settings › Navigateur: visible browser window, Intermarché and E.Leclerc windows, troubleshooting (area of P3).
 
 import { api } from "../../../core/api.js";
 import { html, setHtml } from "../../../core/html.js";
@@ -51,7 +51,7 @@ export function of(label) {
     return /^[aeiouyàâéèêîôû]/i.test(label) ? `d'${label}` : `de ${label}`;
 }
 
-// State line of the dedicated window of a retailer (Intermarché)
+// State line of the dedicated window of a retailer (Intermarché, E.Leclerc)
 export function windowText(w, blockedUntil) {
     if (blockedUntil) {
         return `${w.label} bloque temporairement cette connexion : PrixMalin ne le contactera pas avant ${clockText(blockedUntil)}.`;

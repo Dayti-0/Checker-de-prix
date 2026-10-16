@@ -12,7 +12,7 @@ import { icon } from "../../core/icons.js";
 import { setEnabled, state } from "../../core/store.js";
 import { notify } from "../../core/ui.js";
 
-export const MONOGRAMS = { aldi: "A", lidl: "L", carrefour: "C", intermarche: "I", coursesu: "U" };
+export const MONOGRAMS = { aldi: "A", lidl: "L", carrefour: "C", intermarche: "I", coursesu: "U", leclerc: "E" };
 
 export function monogram(key, label = key) {
     return MONOGRAMS[key] || String(label).charAt(0).toUpperCase();

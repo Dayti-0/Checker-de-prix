@@ -65,6 +65,9 @@ def test_assistant_on_the_first_launch(first_launch, desktop):
     coursesu = page.get_by_role("group", name=re.compile("Magasin Courses U"))
     expect(intermarche.get_by_role("radio")).to_have_count(4)  # 3 stores + « Ne pas choisir maintenant »
     expect(coursesu.get_by_role("radio")).to_have_count(4)
+    leclerc = page.get_by_role("group", name=re.compile("Drive E.Leclerc"))
+    expect(leclerc.get_by_role("radio")).to_have_count(4)
+    expect(leclerc.get_by_role("radio", name=re.compile("Saint-Jean-de-Védas"))).to_be_checked()
     expect(intermarche.get_by_role("radio").first).to_be_checked()
     expect(coursesu.get_by_role("radio", name=re.compile("U Express Montpellier"))).to_be_checked()
     assert_accessible(page, "assistant, étape 2")
@@ -74,16 +77,18 @@ def test_assistant_on_the_first_launch(first_launch, desktop):
     # Step 3: trial search « lait », state of each retailer and how to fix it
     expect(step_title(page)).to_have_text("Étape 3 sur 3 : essai")
     rows = page.locator(".onb-trial-row")
-    expect(rows).to_have_count(5)
+    expect(rows).to_have_count(6)
     expect(page.locator(".onb-trial .spinner")).to_have_count(0)
     expect(rows.filter(has_text="Aldi")).to_contain_text("1 produit trouvé")
     expect(rows.filter(has_text="Intermarché")).to_contain_text("Prêt")
     expect(rows.filter(has_text="Courses U")).to_contain_text("Vérification requise")
+    expect(rows.filter(has_text="E.Leclerc")).to_contain_text("1 produit trouvé")
     expect(page.get_by_role("button", name="Faire la vérification sur le site Courses U")).to_be_visible()
     assert_accessible(page, "assistant, étape 3")
     stores = page.request.get(f"{page.base}/api/settings").json()["stores"]
     assert stores["intermarche"]["name"] == "Intermarché Hyper Lattes"
     assert stores["coursesu"]["name"] == "U Express Montpellier Près d'Arènes"
+    assert stores["leclerc"]["name"] == "E.Leclerc Drive Saint-Jean-de-Védas"
 
     page.get_by_role("button", name="Terminer").click()
     expect(page).to_have_url(re.compile(r"#/$"))
@@ -180,20 +185,23 @@ def test_home_card_while_the_setup_is_incomplete(desktop):
     page = desktop
     page.goto(page.base)
     card = page.locator("[data-testid=setup-card]")
-    expect(card).to_contain_text("votre code postal, votre magasin Intermarché et votre magasin Courses U")
+    expect(card).to_contain_text("Pour voir les prix d'Intermarché, de Courses U et d'E.Leclerc")
+    expect(card).to_contain_text(
+        "votre code postal, votre magasin Intermarché, votre magasin Courses U et votre drive E.Leclerc"
+    )
     assert_accessible(page, "accueil avec la carte de configuration")
     page.request.post(f"{page.base}/api/settings/location", data={"postal_code": "34000"})
     page.request.put(
         f"{page.base}/api/retailers/intermarche/store", data={"id": "08012", "name": "Intermarché Super Montpellier"}
     )
     page.reload()
-    # Courses U: the nearest store is chosen by itself once the settings are loaded
+    # Courses U and E.Leclerc: the nearest store is chosen by itself once the settings are loaded
     for _ in range(200):
         stores = page.request.get(f"{page.base}/api/settings").json()["stores"]
-        if "coursesu" in stores:
+        if "coursesu" in stores and "leclerc" in stores:
             break
         page.wait_for_timeout(50)
-    assert stores["coursesu"]["auto"] is True
+    assert stores["coursesu"]["auto"] is True and stores["leclerc"]["auto"] is True
     expect(card).to_have_count(0)
 
 
@@ -223,11 +231,11 @@ def test_no_horizontal_scroll_in_the_new_views(chromium, server, width):
         page.request.get(f"{page.base}/api/search", params={"q": "farine"})
         overflows = {}
         page.goto(f"{page.base}/#/etat")
-        expect(page.locator(".status-card")).to_have_count(5)
+        expect(page.locator(".status-card")).to_have_count(6)
         overflows["état"] = page.evaluate(OVERFLOW)
         page.goto(f"{page.base}/#/bienvenue")
         page.get_by_role("button", name="Continuer").click()
-        expect(page.locator(".onb-store input")).to_have_count(8)
+        expect(page.locator(".onb-store input")).to_have_count(12)
         overflows["assistant, magasins"] = page.evaluate(OVERFLOW)
         overlaps = page.evaluate(STEP_OVERLAPS)
         page.get_by_role("button", name="Enregistrer et continuer").click()

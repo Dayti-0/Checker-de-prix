@@ -54,8 +54,9 @@
 .onb-nav button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
 .onb-store-lists { display: grid; gap: var(--space-6); margin-top: var(--space-5); }
-@media (min-width: 900px) {
-    .onb-store-lists { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+/* Intermarché, Courses U and E.Leclerc side by side when the assistant is wide enough */
+@container (min-width: 44rem) {
+    .onb-store-lists { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-4); }
 }
 .onb-stores { margin: 0; padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-70); min-width: 0; }
 .onb-stores legend { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); max-width: 100%; padding: 0 var(--space-2); font-weight: 700; overflow-wrap: anywhere; }

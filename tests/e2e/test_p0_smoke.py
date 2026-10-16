@@ -76,7 +76,7 @@ def test_settings_open(page):
     expect(page).to_have_title("Réglages · PrixMalin")
     expect(page.get_by_role("heading", name="Réglages")).to_be_visible()
     expect(page.get_by_role("textbox", name="Code postal")).to_be_visible()
-    for label in ("Aldi", "Lidl", "Carrefour", "Intermarché", "Courses U"):
+    for label in ("Aldi", "Lidl", "Carrefour", "Intermarché", "Courses U", "E.Leclerc"):
         expect(page.locator("[data-retailer]").filter(has_text=label).first).to_be_visible()
     # « Ouvrir le site » is in the menu « ⋯ » of each retailer (B52)
-    expect(page.get_by_role("button", name=re.compile("^Autres actions pour"))).to_have_count(5)
+    expect(page.get_by_role("button", name=re.compile("^Autres actions pour"))).to_have_count(6)

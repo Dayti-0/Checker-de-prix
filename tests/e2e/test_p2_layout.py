@@ -82,7 +82,7 @@ def test_retailer_filters(desktop):
     page = desktop
     page.goto(page.base)
     group = page.get_by_role("group", name="Enseignes comparées")
-    expect(group.get_by_role("checkbox")).to_have_count(5)
+    expect(group.get_by_role("checkbox")).to_have_count(6)
     aldi = group.get_by_role("checkbox", name=re.compile("Aldi"))
     expect(aldi).to_be_checked()
     # Ticked and unticked are told by a mark, not only by the colour
@@ -103,10 +103,10 @@ def test_retailer_filters(desktop):
         page.get_by_role("group", name="Enseignes comparées").get_by_role("checkbox", name=re.compile("Aldi"))
     ).not_to_be_checked()
     # The last ticked retailer cannot be unticked: said to the user
-    for name in ("Lidl", "Carrefour", "Intermarché"):
+    for name in ("Lidl", "Carrefour", "Intermarché", "Courses U"):
         page.locator(".store-toggle", has_text=name).click()
-    page.locator(".store-toggle", has_text="Courses U").click()
-    expect(page.get_by_role("checkbox", name=re.compile("Courses U"))).to_be_checked()
+    page.locator(".store-toggle", has_text="E.Leclerc").click()
+    expect(page.get_by_role("checkbox", name=re.compile("E.Leclerc"))).to_be_checked()
     expect(page.get_by_role("status")).to_have_text("Gardez au moins une enseigne cochée.")
     assert_accessible(page, "filtres des enseignes")
 
@@ -150,10 +150,13 @@ def test_five_best_offers_in_the_first_two_screens(mobile):
     """B25: on a phone of 390 px, the 5 best offers are in the first two screens (two retailers unavailable)."""
     page = mobile
     page.goto(page.base)
+    # A drive E.Leclerc is chosen: only Intermarché and Courses U are unavailable
+    drive = "https://fd12-courses.leclercdrive.fr/magasin-173301-173301-Bruges"
+    page.request.put(f"{page.base}/api/retailers/leclerc/store", data={"url": drive})
     search(page, "huile de tournesols")
     expect(page.get_by_role("radio", name="Tout trié")).to_be_checked()
     rows = page.locator("[data-testid=offers] .offer-list > li")
-    expect(rows).to_have_count(6)
+    expect(rows).to_have_count(7)
     bottom = rows.nth(4).evaluate("el => el.getBoundingClientRect().bottom + window.scrollY")
     assert bottom <= 2 * page.viewport_size["height"], bottom
     # « Magasin à choisir »: « Choisir » only, « Vérification requise »: « Ouvrir le site » and « Réessayer »

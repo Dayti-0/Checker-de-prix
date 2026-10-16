@@ -31,8 +31,9 @@ CATALOG = {
     "carrefour": [("Farine T45 Carrefour 1kg", 0.85, 0.85), ("Farine fluide Francine 1kg", 1.89, 1.89)],
     "intermarche": [("Farine de blé Chabrior 1kg", 0.89, 0.89)],
     "coursesu": [("Farine de blé U 1kg", 0.95, 0.95)],
+    "leclerc": [("Farine de blé Marque Repère 1kg", 0.82, 0.82)],
 }
-LABELS = ["Aldi", "Lidl", "Carrefour", "Intermarché", "Courses U"]
+LABELS = ["Aldi", "Lidl", "Carrefour", "Intermarché", "Courses U", "E.Leclerc"]
 
 
 async def fake_scrape(scraper, query, store):
@@ -74,6 +75,11 @@ async def fake_coursesu_directory(department_name=None):
     return {"stores": [], "method": "blocs"}
 
 
+async def fake_leclerc_nearby(location):
+    # No E.Leclerc drive around (P8: tests/e2e/test_p8_leclerc.py tests the list)
+    return []
+
+
 async def fake_open_setup(key, url):
     main.browser.setup_mode = True
 
@@ -106,6 +112,7 @@ def server(tmp_path_factory):
         mp.setattr(settings, "geocode", fake_geocode)
         mp.setattr(main.browser, "run", fake_browser_run)
         mp.setattr(stores_service, "fetch_coursesu_directory", fake_coursesu_directory)
+        mp.setattr(stores_service, "fetch_leclerc_nearby", fake_leclerc_nearby)
         mp.setattr(main.browser, "open_setup", fake_open_setup)
         mp.setattr(main.browser, "end_setup", fake_end_setup)
         database._db = None
@@ -163,8 +170,8 @@ def search_farine(page):
     page.press("#q", "Enter")
     expect(page).to_have_url(f"{page.base}/#/recherche?q=farine")
     columns = page.locator(".column")
-    expect(columns).to_have_count(5)
-    for i in range(5):
+    expect(columns).to_have_count(6)
+    for i in range(6):
         expect(columns.nth(i).locator(".product").first).to_be_visible()
     expect(page.locator(".summary-progress")).to_have_count(0)  # every retailer answered
 
@@ -175,7 +182,7 @@ def test_home_renders(page):
     expect(page).to_have_title("Rechercher · PrixMalin")
     expect(page.locator("#q")).to_be_visible()
     expect(page.locator(".welcome")).to_contain_text("Tapez un produit")
-    expect(page.locator(".store-toggle")).to_have_count(5)
+    expect(page.locator(".store-toggle")).to_have_count(6)
     expect(page.locator("#primary-nav .nav-link")).to_have_text(["Rechercher", "Ma liste 0", "Réglages"])
     expect(page.locator("#primary-nav .nav-link.active")).to_have_text("Rechercher")
     expect(page.locator("#location-label")).not_to_be_empty()  # "Code postal" or the saved location
@@ -195,9 +202,9 @@ def test_search_shows_one_column_per_retailer(page):
     page.get_by_role("radio", name="Prix au kg").check()
     expect(page.locator(".column[data-store=aldi] .unit")).to_have_text(["0,79 €/kg", "2,98 €/kg"])
     page.locator(".store-toggle", has_text="Carrefour").click()
-    expect(page.locator(".column")).to_have_count(4)
-    page.locator(".store-toggle", has_text="Carrefour").click()
     expect(page.locator(".column")).to_have_count(5)
+    page.locator(".store-toggle", has_text="Carrefour").click()
+    expect(page.locator(".column")).to_have_count(6)
 
 
 def test_store_required_leads_to_the_settings(page):
@@ -275,13 +282,13 @@ def test_list_compares_the_basket(page):
     page.locator(".store-toggle", has_text="Courses U").click()
     page.click(".nav-link[data-nav=search]")
     page.click("#refresh-btn")
-    expect(page.locator(".column")).to_have_count(4)
+    expect(page.locator(".column")).to_have_count(5)
     expect(page.locator(".summary-progress")).to_have_count(0)
     page.click(".nav-link[data-nav=list]")
     page.locator(".store-toggle", has_text="Courses U").click()
 
     page.click("#compare-btn")
-    expect(page.locator(".basket-card")).to_have_count(5)
+    expect(page.locator(".basket-card")).to_have_count(6)
     best = page.locator(".basket-card.best")
     expect(best).to_contain_text("Panier le moins cher")
     expect(best.locator(".badge")).to_have_text("Lidl")
@@ -291,17 +298,17 @@ def test_list_compares_the_basket(page):
     # The results and the comparison survive a trip between the views
     page.click(".nav-link[data-nav=search]")
     expect(page).to_have_url(f"{page.base}/#/recherche?q=farine")
-    expect(page.locator(".column")).to_have_count(5)
+    expect(page.locator(".column")).to_have_count(6)
     expect(page.locator(".column[data-store=coursesu] .price")).to_have_text(["0,95 €"])
     page.go_back()
     expect(page).to_have_url(f"{page.base}/#/liste")
-    expect(page.locator(".basket-card")).to_have_count(5)
+    expect(page.locator(".basket-card")).to_have_count(6)
 
 
 def test_settings_page(page):
     page.goto(f"{page.base}/#/reglages")
     expect(page).to_have_title("Réglages · PrixMalin")
-    expect(page.locator(".retailer-row")).to_have_count(5)
+    expect(page.locator(".retailer-row")).to_have_count(6)
     expect(page.locator(".retailer-row .badge")).to_have_text(LABELS)
     expect(page.locator("[data-retailer=intermarche] .pill")).to_have_text("Magasin à choisir")
     expect(page.locator("#browser-status")).to_have_text("Le navigateur démarrera à la première recherche.")
@@ -358,7 +365,7 @@ def test_old_search_links_redirect(page):
     page.goto(f"{page.base}/?q=farine")
     expect(page).to_have_url(f"{page.base}/#/recherche?q=farine")
     expect(page.locator("#q")).to_have_value("farine")
-    expect(page.locator(".column")).to_have_count(5)
+    expect(page.locator(".column")).to_have_count(6)
     expect(page.locator(".column[data-store=lidl] .price")).to_have_text(["0,75 €"])
 
 

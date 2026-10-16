@@ -71,11 +71,11 @@ def test_busy_state_and_announcements(desktop, delays):
     search(page, "farine", wait=False)
     expect(page.locator("#results")).to_have_attribute("aria-busy", "true")
     live = page.locator("#live-region")
-    expect(live).to_have_text("Recherche de « farine » dans 5 enseignes…")
+    expect(live).to_have_text("Recherche de « farine » dans 6 enseignes…")
     expect(page.locator(".summary-progress")).to_contain_text("enseignes ont répondu")
     wait_done(page)
-    expect(live).to_have_text("Terminé : le moins cher est Lidl, 0,75 €, Farine de blé T45. 2 enseignes indisponibles.")
-    expect(page.locator(".summary-foot")).to_have_text("5 enseignes comparées · 2 indisponibles")
+    expect(live).to_have_text("Terminé : le moins cher est Lidl, 0,75 €, Farine de blé T45. 3 enseignes indisponibles.")
+    expect(page.locator(".summary-foot")).to_have_text("6 enseignes comparées · 3 indisponibles")
     expect(page.locator("#updated")).to_have_text("Mis à jour à l'instant")
 
 
@@ -270,7 +270,7 @@ def test_a_retailer_unticked_while_searching_is_no_longer_awaited(desktop, delay
     page.locator(".store-toggle", has_text="Carrefour").click()
     wait_done(page)
     expect(page.locator("#live-region")).to_have_text(
-        "Terminé : le moins cher est Lidl, 0,75 €, Farine de blé T45. 2 enseignes indisponibles."
+        "Terminé : le moins cher est Lidl, 0,75 €, Farine de blé T45. 3 enseignes indisponibles."
     )
     expect(page.locator("[data-summary=carrefour]")).to_have_count(0)
     assert aborted, "the request of Carrefour should be cancelled"

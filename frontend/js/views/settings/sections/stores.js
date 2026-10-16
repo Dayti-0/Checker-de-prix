@@ -1,11 +1,13 @@
 // Settings › Enseignes: one row per retailer with its state, its main action,
-// a menu « ⋯ » (Changer, Retirer, Ouvrir le site) and, for Intermarché and
-// Courses U, the list of the nearest stores (area of P4).
+// a menu « ⋯ » (Changer, Retirer, Ouvrir le site) and, for Intermarché,
+// Courses U and E.Leclerc (`finds_stores`), the list of the nearest stores
+// (area of P4, E.Leclerc added by P8).
 //
-// Courses U: the nearest store is chosen by itself once the postal code is
-// saved (« Choisi automatiquement : Super U Roujan (≈ 2 km) · Changer »); the
-// user may take another one in the list, on the site (« Ouvrir le site »,
-// read back after « J'ai terminé ») or paste the address of its page.
+// Courses U and E.Leclerc (`auto_store`): the nearest store is chosen by
+// itself once the postal code is saved (« Choisi automatiquement : Super U
+// Roujan (≈ 2 km) · Changer »); the user may take another one in the list, on
+// the site (« Ouvrir le site », read back after « J'ai terminé ») or paste the
+// address of its page (`store_url_example`).
 
 import { retailerBadge } from "../../../components/retailer-badge.js";
 import { api } from "../../../core/api.js";
@@ -16,15 +18,19 @@ import { currentRoute } from "../../../core/router.js";
 import { emit, loadSettings, on, state } from "../../../core/store.js";
 import { announce, notify } from "../../../core/ui.js";
 import {
-    autoPick,
+    autoPickOf,
+    autoStoreKeys,
     distanceText,
     FAR_KM,
     healthOf,
     loadHealth,
+    ofLabel,
     openSite,
     setupState,
     statePill,
     storeGone,
+    storeNoun,
+    storeTitle,
 } from "../../status/shared.js";
 
 export const id = "stores";
@@ -32,15 +38,22 @@ export const title = "Enseignes";
 export const order = 20;
 export const enabled = true;
 
+// Beginning of the address of a store, shown in the empty field
+const URL_PLACEHOLDER = {
+    coursesu: "https://www.coursesu.com/drive-superu-…",
+    leclerc: "https://fd…-courses.leclercdrive.fr/magasin-…",
+};
+
 const PICKER_TITLE = {
     intermarche: "Magasins Intermarché les plus proches",
     coursesu: "Magasins Courses U les plus proches",
+    leclerc: "Drives E.Leclerc les plus proches",
 };
 
 // Lists of stores, kept while the page is hidden: key → { open, status, stores, error }
 const pickers = {};
-// Address being typed in the Courses U field
-let urlDraft = "";
+// Addresses being typed in the fields « collez l'adresse de sa page »: key → text
+const urlDrafts = {};
 // Retailer whose menu « ⋯ » is open
 let openMenu = null;
 
@@ -60,7 +73,7 @@ export function pickerOf(key) {
     return pickers[key];
 }
 
-// Loads the nearest stores of `key` (Intermarché or Courses U)
+// Loads the nearest stores of `key` (Intermarché, Courses U or E.Leclerc)
 export function loadNearestStores(key, { refresh = false } = {}) {
     const picker = pickerOf(key);
     if (picker.status === "loading" && picker.pending) return picker.pending;
@@ -107,7 +120,7 @@ function detail(r, setup) {
     if (r.national) return html`<p class="retailer-detail">Prix identiques partout en France</p>`;
     const lines = [];
     if (r.store) {
-        if (r.key === "coursesu" && r.store.auto) {
+        if (r.auto_store && r.store.auto) {
             const distance = distanceText(r.store);
             lines.push(html`<p class="retailer-detail">Choisi automatiquement : <strong>${r.store.name}</strong>${distance && ` (${distance})`} ·
                 <button type="button" class="link-btn" data-action="pick" aria-label="Changer le magasin ${r.label}">Changer</button></p>`);
@@ -115,15 +128,15 @@ function detail(r, setup) {
             lines.push(html`<p class="retailer-detail">${storeLine(r.store)}</p>`);
         }
         if (r.store.address) lines.push(html`<p class="retailer-address small muted">${r.store.address}</p>`);
-        if (r.key === "coursesu" && r.store.auto && r.store.distance_km > FAR_KM) {
-            lines.push(html`<p class="retailer-detail warn-text">Aucun drive Courses U à moins de ${FAR_KM} km.</p>`);
+        if (r.auto_store && r.store.auto && r.store.distance_km > FAR_KM) {
+            lines.push(html`<p class="retailer-detail warn-text">Aucun drive ${r.label} à moins de ${FAR_KM} km.</p>`);
         }
         if (storeGone(r)) {
             const error = healthOf(r.key).last_error || "Le site ne reconnaît plus ce magasin : choisissez-en un autre.";
             lines.push(html`<p class="retailer-detail warn-text">${error}</p>`);
         }
-    } else if (r.key === "coursesu") {
-        lines.push(coursesuWithoutStore());
+    } else if (r.auto_store) {
+        lines.push(autoWithoutStore(r));
     } else if (r.key === "intermarche") {
         lines.push(html`<p class="retailer-detail muted">Les prix dépendent du magasin : choisissez le vôtre dans la liste.</p>`);
     } else {
@@ -137,19 +150,21 @@ function detail(r, setup) {
     return lines;
 }
 
-function coursesuWithoutStore() {
+function autoWithoutStore(r) {
     const settings = state.settings;
+    const noun = storeNoun(r.key);
     if (!settings || !settings.location) {
-        return html`<p class="retailer-detail muted">Indiquez votre code postal : PrixMalin choisira le magasin le plus proche.</p>`;
+        return html`<p class="retailer-detail muted">Indiquez votre code postal : PrixMalin choisira le ${noun} le plus proche.</p>`;
     }
-    if (autoPick.status === "loading") {
-        return html`<p class="retailer-detail"><span class="spinner"></span> Recherche du magasin Courses U le plus proche…</p>`;
+    const pick = autoPickOf(r.key);
+    if (pick.status === "loading") {
+        return html`<p class="retailer-detail"><span class="spinner"></span> Recherche du ${noun} ${r.label} le plus proche…</p>`;
     }
-    const result = autoPick.result;
+    const result = pick.result;
     if (result && result.message && result.status !== "chosen") {
         return html`<p class="retailer-detail warn-text">${result.message}</p>`;
     }
-    return html`<p class="retailer-detail muted">Les prix dépendent du magasin : choisissez le vôtre.</p>`;
+    return html`<p class="retailer-detail muted">Les prix dépendent du ${noun} : choisissez le vôtre.</p>`;
 }
 
 function mainAction(r, setup) {
@@ -213,27 +228,29 @@ function picker(r) {
         if (p.stores.length) {
             parts.push(html`<ul class="store-options">${p.stores.map((s, i) => storeOption(s, i))}</ul>`);
             const nearest = p.stores[0];
-            if (r.key === "coursesu" && nearest.distance_km != null && nearest.distance_km > FAR_KM) {
-                parts.push(html`<p class="small warn-text">Aucun drive Courses U à moins de ${FAR_KM} km.</p>`);
+            if (r.auto_store && nearest.distance_km != null && nearest.distance_km > FAR_KM) {
+                parts.push(html`<p class="small warn-text">Aucun drive ${r.label} à moins de ${FAR_KM} km.</p>`);
             }
         } else {
             parts.push(html`<p class="small muted">Aucun magasin trouvé autour de chez vous.</p>`);
         }
     }
-    if (r.key === "coursesu") {
+    if (r.store_url_example) {
+        const draft = urlDrafts[r.key] || "";
+        const noun = storeNoun(r.key);
         parts.push(html`
-            <details class="manual-url"${urlDraft ? html` open` : ""}>
+            <details class="manual-url"${draft ? html` open` : ""}>
                 <summary>Saisir l'adresse à la main</summary>
                 <form class="url-form" data-action="url">
-                    <label class="field-label" for="coursesu-url">Autre magasin : collez l'adresse de sa page</label>
+                    <label class="field-label" for="${r.key}-url">Autre ${noun} : collez l'adresse de sa page</label>
                     <div class="row">
-                        <input id="coursesu-url" name="url" type="url" inputmode="url" placeholder="https://www.coursesu.com/drive-superu-…" value="${urlDraft}" aria-describedby="coursesu-url-help">
-                        <button class="btn-primary small" type="submit">Enregistrer</button>
+                        <input id="${r.key}-url" name="url" type="url" inputmode="url" placeholder="${URL_PLACEHOLDER[r.key] || "https://…"}" value="${draft}" aria-describedby="${r.key}-url-help">
+                        <button class="btn-primary small" type="submit" aria-label="Enregistrer l'adresse du ${noun} ${r.label}">Enregistrer</button>
                     </div>
-                    <p id="coursesu-url-help" class="small muted">Exemple : https://www.coursesu.com/drive-superu-roujan</p>
+                    <p id="${r.key}-url-help" class="small muted">Exemple : ${r.store_url_example}</p>
                 </form>
             </details>
-            <p class="small muted">Ou choisissez-le sur le site de Courses U avec « Ouvrir le site » dans le menu ⋯, puis appuyez sur « J'ai terminé ».</p>`);
+            <p class="small muted">Ou choisissez-le sur le site ${ofLabel(r.label)} avec « Ouvrir le site » dans le menu ⋯, puis appuyez sur « J'ai terminé ».</p>`);
     }
     parts.push(
         html`<button type="button" class="btn-ghost small" data-action="close" aria-label="Fermer la liste des magasins ${r.label}">Fermer la liste</button>`,
@@ -315,7 +332,7 @@ export function render(el) {
         p.open = true;
         renderRows();
         const location = state.settings.location;
-        // Intermarché needs the coordinates of the town; Courses U can do with the postal code
+        // Intermarché needs the coordinates of the town; Courses U and E.Leclerc can do with the postal code
         if (!location || (key === "intermarche" && location.lat == null)) {
             p.status = "error";
             p.error = "Indiquez d'abord votre code postal (section Localisation ci-dessus).";
@@ -362,7 +379,7 @@ export function render(el) {
                 await chooseStore(key, store);
                 pickerOf(key).open = false;
                 renderRows();
-                await afterChange(`Magasin ${r.label} : ${store.name}`);
+                await afterChange(`${storeTitle(key)} : ${store.name}`);
                 row.querySelector("[data-action=menu]").focus();
             } else if (action === "remove") {
                 await api(`/api/retailers/${key}/store`, { method: "DELETE" });
@@ -378,20 +395,22 @@ export function render(el) {
     });
 
     el.addEventListener("input", (e) => {
-        if (e.target.id === "coursesu-url") urlDraft = e.target.value;
+        const row = e.target.closest("[data-retailer]");
+        if (row && e.target.id === `${row.dataset.retailer}-url`) urlDrafts[row.dataset.retailer] = e.target.value;
     });
 
     el.addEventListener("submit", async (e) => {
         if (!e.target.matches("[data-action=url]")) return;
         e.preventDefault();
+        const key = e.target.closest("[data-retailer]").dataset.retailer;
         const url = e.target.elements.url.value.trim();
         try {
-            const settings = await api("/api/retailers/coursesu/store", { method: "PUT", body: { url } });
-            urlDraft = "";
-            pickerOf("coursesu").open = false;
+            const settings = await api(`/api/retailers/${key}/store`, { method: "PUT", body: { url } });
+            urlDrafts[key] = "";
+            pickerOf(key).open = false;
             await loadSettings();
             emit("results:stale");
-            await afterChange(`Magasin Courses U : ${settings.stores.coursesu.name}`);
+            await afterChange(`${storeTitle(key)} : ${settings.stores[key].name}`);
         } catch (err) {
             notify(err.message, { type: "error" });
         }
@@ -436,7 +455,7 @@ export function render(el) {
             renderRows();
             openFromRoute();
         }),
-        on("coursesu:auto", renderRows),
+        ...autoStoreKeys().map((key) => on(`${key}:auto`, renderRows)),
         on("stores:picker", renderRows),
         on("route:changed", () => {
             if (routeOpened !== window.location.hash) routeOpened = null;

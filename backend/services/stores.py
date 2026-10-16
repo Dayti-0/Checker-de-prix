@@ -432,6 +432,8 @@ async def fetch_leclerc_site_store() -> dict | None:
     """What the tab of the E.Leclerc window shows (address, page, cookie), read
     without any request to the site (replaced by the E2E fakes)."""
     scraper = SCRAPERS["leclerc"]
+    if browser.is_dedicated(scraper.key) and not browser.dedicated_running(scraper.key):
+        return None  # window closed by the user: nothing to read, Chrome is not started for it
     return await browser.run(scraper.key, scraper.read_site_store, timeout=45, priority="interactive")
 
 
