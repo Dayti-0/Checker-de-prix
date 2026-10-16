@@ -280,6 +280,11 @@ class BrowserManager:
         real = self._real.get(key)
         return real is not None and real.running
 
+    def check_pending(self, key: str) -> bool:
+        """The dedicated window of ``key`` met an anti-robot check not validated yet (no request)."""
+        real = self._real.get(key)
+        return real is not None and real.challenge_pending
+
     async def run(
         self,
         key: str,

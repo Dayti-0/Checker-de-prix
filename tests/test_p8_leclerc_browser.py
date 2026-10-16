@@ -255,6 +255,22 @@ def test_hard_block_of_the_search(manager):
     assert len(searches) == 1  # never retried
 
 
+def test_error_of_the_site_is_kept(manager):
+    scraper = lc.LeclercScraper()
+
+    async def scenario(page):
+        await offline(page)
+        await page.route(HOME, html(fixtures.LECLERC_HOME_HTML))
+        await page.route(SEARCH, html("<h1>Service indisponible</h1>", 503))
+        with pytest.raises(lc.ScraperError) as error:
+            await scraper.search(page, "farine", BRUGES)
+        return str(error.value)
+
+    assert run_scenario(manager, "leclerc-error", scenario) == lc.SITE_ERROR
+    saved = list(config.DEBUG_DIR.glob("leclerc-*-error.txt"))
+    assert len(saved) == 1 and "Service indisponible" in saved[0].read_text(encoding="utf-8")
+
+
 def test_no_product_keeps_the_page(manager):
     scraper = lc.LeclercScraper()
 

@@ -347,6 +347,17 @@ def test_auto_pick_initial_once_per_postal_code(nearby, located):
     assert run(stores.auto_pick_leclerc()).status == "chosen"
 
 
+def test_initial_auto_pick_waits_for_a_pending_check(nearby, located, monkeypatch):
+    """A page load does not ask the store finder again while its check is not validated."""
+    calls, _ = nearby
+    monkeypatch.setattr(stores.browser, "check_pending", lambda key: key == "leclerc")
+    result = run(stores.auto_pick_leclerc(initial=True))
+    assert (result.status, result.message) == ("blocked", lc.CAPTCHA_MESSAGE)
+    assert calls == []
+    # A new postal code (not « initial ») asks it: the user expects an answer
+    assert run(stores.auto_pick_leclerc()).status == "chosen" and len(calls) == 1
+
+
 def test_auto_pick_reports_a_far_drive(nearby, located):
     _, answer = nearby
     far = StoreOption(id="190801", name="E.Leclerc Drive Loin", url=lc.store_base_from_point({"noPL": "190801"}))

@@ -563,6 +563,9 @@ async def _auto_pick_once(spec: AutoPickSpec, refresh: bool, initial: bool) -> A
         done = await prefs.get(spec.prefs_section, AutoPickPrefs)
         if done.auto_done_for == current.location.postal_code:
             return _result("kept", current)
+        if browser.check_pending(spec.key):
+            # A page load never asks again a site whose check is not validated (dedicated window)
+            return _result("blocked", current, getattr(SCRAPERS[spec.key], "captcha_message", None))
     try:
         stores = await spec.nearest(current.location, refresh, NEAREST_COUNT)
     except BlockedError as e:

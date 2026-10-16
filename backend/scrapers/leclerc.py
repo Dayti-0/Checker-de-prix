@@ -909,6 +909,7 @@ class LeclercScraper(BaseScraper):
     needs_store = True
     primary_source = "api"
     store_url_example = STORE_URL_EXAMPLE
+    captcha_message = CAPTCHA_MESSAGE
     store_hint = (
         "Les prix dépendent du drive. PrixMalin choisit le plus proche de votre code postal ; "
         "vous pouvez en prendre un autre dans la liste, sur le site (« Ouvrir le site ») "
@@ -945,6 +946,9 @@ class LeclercScraper(BaseScraper):
         result = await page_fetch(page, url, headers={"accept": "text/html"}, timeout_ms=30000)
         text = result.text
         loaded = False
+        if classify_answer(result.status, result.url, text) == "error":
+            # An answer of another kind: kept to see what the site says
+            save_debug_text(self.key, "error", (text or "")[:500_000], ".txt")
         if check_answer(result.status, result.url, text) == "retry":
             # fetch refused (redirection elsewhere) or session expired: visit the
             # drive again, then load the search as a page (once)
