@@ -25,7 +25,7 @@ from backend.models import (
 from backend.repos import shopping_list as repo
 from backend.services import hooks, matching, shopping_list
 from backend.services.categories import CATEGORIES, categorize
-from backend.services.shopping_list import assignment_of, format_list, parse_list_text
+from backend.services.shopping_list import assignment_of, format_list, parse_list_text, trip_of
 from tests.conftest import run
 
 # --- B67: pasted lists ---------------------------------------------------------------
@@ -217,6 +217,54 @@ def test_export_of_an_empty_list():
 
 
 # --- Writes: one line per query, transactions, version -----------------------------------
+
+
+# --- B64: in the store -------------------------------------------------------------------
+
+
+def outline(trip):
+    return [
+        (g.store, g.label, [(a.name, [(e.item.query, e.status, e.line_total) for e in a.items]) for a in g.aisles])
+        for g in trip.stores
+    ]
+
+
+def test_trip_of_a_plan_by_retailer_then_aisle():
+    items = list_items() + [ListItem(id=4, query="sel", compare=False, category="Épicerie salée")]
+    compared = comparison()
+    compared.created_at = 1000.0
+    trip = trip_of(items, compared, plan=0)
+    assert outline(trip) == [
+        (
+            "lidl",
+            "Lidl",
+            [("Épicerie sucrée", [("farine", "found", 1.5)]), ("Entretien", [("lessive", "found", 4.99)])],
+        ),
+        ("aldi", "Aldi", [("Crèmerie", [("lait", "found", 5.4)])]),
+        (None, "Autres articles", [("Épicerie salée", [("sel", None, None)])]),
+    ]
+    lidl, aldi, _ = trip.stores
+    assert (lidl.total, lidl.item_count, lidl.checked_count) == (6.49, 2, 0)
+    assert (aldi.total, aldi.checked_count, aldi.checked_total) == (5.4, 1, 5.4)
+    assert aldi.aisles[0].items[0].product.name == "Lait 6x1L"
+    assert (trip.item_count, trip.checked_count, trip.total, trip.checked_total) == (4, 1, 11.89, 5.4)
+    assert (trip.plan, trip.basket_at, trip.unknown, trip.outdated) == (0, 1000.0, False, False)
+
+
+def test_trip_at_one_retailer_and_without_basket():
+    trip = trip_of(list_items(), comparison(), store="aldi")
+    assert [(g.store, g.item_count, g.total) for g in trip.stores] == [("aldi", 3, 6.98)]
+    lessive = trip.stores[0].aisles[2].items[0]
+    assert (lessive.item.query, lessive.status, lessive.product) == ("lessive", "not_found", None)
+    # No basket: the whole list by aisle
+    whole = trip_of(list_items(), None)
+    assert [(g.store, g.label) for g in whole.stores] == [(None, "Ma liste")]
+    assert [a.name for a in whole.stores[0].aisles] == ["Crèmerie", "Épicerie sucrée", "Entretien"]
+    assert not whole.unknown and whole.basket_at is None
+    # A plan or a retailer that the last basket does not have
+    assert trip_of(list_items(), comparison(), plan=3).unknown
+    assert trip_of(list_items(), None, store="lidl").unknown
+    assert trip_of([], comparison(), plan=0).stores == []
 
 
 def test_list_key_is_the_key_of_the_search():

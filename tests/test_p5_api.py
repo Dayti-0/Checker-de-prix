@@ -565,6 +565,31 @@ def test_export_text_and_csv(client, sites):
     assert client.get("/api/list/export", params={"format": "pdf"}).status_code == 422
 
 
+def test_trip_in_the_store(client, sites):
+    farine = add(client, "farine", quantity=2)
+    add(client, "sucre")
+    add(client, "beurre")
+    whole = client.get("/api/list/trip").json()
+    assert [(g["store"], g["label"]) for g in whole["stores"]] == [(None, "Ma liste")]
+    assert whole["basket_at"] is None and whole["item_count"] == 3
+    # No basket yet: the retailer asked is unknown
+    assert client.get("/api/list/trip", params={"store": "lidl"}).json()["unknown"]
+    client.post("/api/basket/compare", json={"stores": ["aldi", "lidl", "carrefour"]})
+    client.post("/api/list/checks", json={"checks": [{"id": farine["id"], "checked": True}]})
+    trip = client.get("/api/list/trip", params={"store": "lidl"}).json()
+    assert not trip["unknown"] and not trip["outdated"]  # a tick does not make the basket outdated
+    lidl = trip["stores"][0]
+    assert (lidl["store"], lidl["label"], lidl["item_count"], lidl["checked_count"]) == ("lidl", "Lidl", 3, 1)
+    assert (lidl["total"], lidl["checked_total"]) == (2.49, 1.5)
+    entries = {e["item"]["query"]: e for a in lidl["aisles"] for e in a["items"]}
+    assert entries["farine"]["product"]["name"] == "Farine de blé T45" and entries["farine"]["packs"] == 2
+    assert entries["beurre"]["status"] == "not_found" and entries["beurre"]["product"] is None
+    plan = client.get("/api/list/trip", params={"plan": 0}).json()
+    assert [g["store"] for g in plan["stores"]] == ["carrefour"]
+    assert client.get("/api/list/trip", params={"store": "inconnue"}).status_code == 404
+    assert client.get("/api/list/trip", params={"plan": -1}).status_code == 422
+
+
 def test_restore_ticks_and_finish(client, sites):
     flour = add(client, "farine", quantity=2, target="2 kg")
     client.patch(f"/api/list/{flour['id']}", json={"exclude_store": "aldi"})

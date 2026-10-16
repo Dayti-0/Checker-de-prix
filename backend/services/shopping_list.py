@@ -32,6 +32,10 @@ from backend.models import (
     Product,
     Template,
     TemplateDetail,
+    Trip,
+    TripAisle,
+    TripItem,
+    TripStore,
     UsualItem,
 )
 from backend.repos import shopping_list as repo
@@ -703,6 +707,65 @@ def format_list(
         if store and total:
             lines.append(f"Total {labels[store]} : {_euros(total)}")
     return "\n".join(lines) + "\n"
+
+
+# --- In the store (B64) -------------------------------------------------------------
+
+OTHER_ITEMS = "Autres articles"
+WHOLE_LIST = "Ma liste"
+
+
+def trip_of(
+    items: list[ListItem],
+    comparison: BasketComparison | None,
+    *,
+    plan: int | None = None,
+    store: str | None = None,
+) -> Trip:
+    """The list for the mode « En magasin » (pure): by retailer (``store``, or the plan
+    number ``plan`` of the basket ``comparison``), then by aisle, with the product and
+    the price the basket retained. Items the plan does not place (missing, or left out
+    of the comparison) are in a last group (``store`` None, « Autres articles »)."""
+    trip = Trip(store=store, plan=plan, outdated=bool(comparison and comparison.outdated))
+    assignment, labels = assignment_of(comparison, plan=plan, store=store)
+    if (plan is not None or store is not None) and not labels:
+        trip.unknown = True
+    baskets = {b.store: b for b in comparison.stores} if comparison is not None else {}
+    if comparison is not None and labels:
+        trip.basket_at = comparison.created_at
+    lines = {(b.store, li.item_id): li for b in baskets.values() for li in b.lines}
+    for key, aisles in group_items(items, assignment, labels):
+        basket = baskets.get(key) if key else None
+        group = TripStore(
+            store=key,
+            label=labels[key] if key else (OTHER_ITEMS if labels else WHOLE_LIST),
+            store_label=basket.store_label if basket else None,
+        )
+        for aisle, aisle_items in aisles:
+            entries = []
+            for item in aisle_items:
+                entry = TripItem(item=item, store=key)
+                line = lines.get((key, item.id)) if key else None
+                if line is not None:
+                    entry.status = line.status
+                    if line.status == "found":
+                        entry.product, entry.packs, entry.line_total = line.product, line.packs, line.line_total
+                        entry.picked, entry.manual, entry.stale = line.picked, line.manual, line.stale
+                        entry.fetched_at = line.fetched_at
+                entries.append(entry)
+                group.item_count += 1
+                group.checked_count += item.checked
+                if entry.line_total is not None:
+                    group.total = round(group.total + entry.line_total, 2)
+                    if item.checked:
+                        group.checked_total = round(group.checked_total + entry.line_total, 2)
+            group.aisles.append(TripAisle(name=aisle, items=entries))
+        trip.stores.append(group)
+        trip.item_count += group.item_count
+        trip.checked_count += group.checked_count
+        trip.total = round(trip.total + group.total, 2)
+        trip.checked_total = round(trip.checked_total + group.checked_total, 2)
+    return trip
 
 
 # --- Templates (B68) ----------------------------------------------------------------

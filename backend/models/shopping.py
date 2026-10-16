@@ -37,6 +37,10 @@ __all__ = [
     "TemplateApply",
     "TemplateCreate",
     "TemplateDetail",
+    "Trip",
+    "TripAisle",
+    "TripItem",
+    "TripStore",
     "UsualItem",
 ]
 
@@ -432,6 +436,61 @@ class Candidates(BaseModel):
     auto_url: str | None = None
     fetched_at: float | None = None
     stale: bool = False
+
+
+class TripItem(BaseModel):
+    """An item of the list in the mode « En magasin », with what the basket retained."""
+
+    item: ListItem
+    # Retailer where it is bought (None: not in the plan, or no basket)
+    store: str | None = None
+    # Line of the basket at that retailer (None: none)
+    status: LineStatus | None = None
+    product: Product | None = None
+    packs: int | None = None
+    line_total: float | None = None
+    picked: bool = False
+    manual: bool = False
+    stale: bool = False
+    fetched_at: float | None = None
+
+
+class TripAisle(BaseModel):
+    name: str
+    items: list[TripItem] = []
+
+
+class TripStore(BaseModel):
+    """The items bought at one retailer, by aisle (``store`` None: the other items)."""
+
+    store: str | None = None
+    label: str
+    store_label: str | None = None
+    aisles: list[TripAisle] = []
+    item_count: int = 0
+    checked_count: int = 0
+    # Sum of the lines found (``checked_total``: of the ticked items)
+    total: float = 0.0
+    checked_total: float = 0.0
+
+
+class Trip(BaseModel):
+    """The list in the store (``GET /api/list/trip``): by retailer, then by aisle."""
+
+    # What was asked: one retailer, or a plan of the last basket (index in ``plans``)
+    store: str | None = None
+    plan: int | None = None
+    stores: list[TripStore] = []
+    item_count: int = 0
+    checked_count: int = 0
+    total: float = 0.0
+    checked_total: float = 0.0
+    # Last basket used for the products and prices (None: no basket yet)
+    basket_at: float | None = None
+    # The list changed since that basket (its products may be wrong)
+    outdated: bool = False
+    # The retailer or plan asked is not in the last basket
+    unknown: bool = False
 
 
 class BasketPrefs(BaseModel):

@@ -25,6 +25,7 @@ from backend.models import (
     TemplateApply,
     TemplateCreate,
     TemplateDetail,
+    Trip,
     UsualItem,
 )
 from backend.services import basket, shopping_list
@@ -120,6 +121,20 @@ async def api_list_export(
         # BOM: a spreadsheet opens the accents correctly
         return Response("﻿" + text, media_type="text/csv; charset=utf-8", headers=headers)
     return Response(text, media_type="text/plain; charset=utf-8", headers=headers)
+
+
+@router.get("/list/trip", response_model=Trip)
+async def api_list_trip(
+    plan: int | None = Query(None, ge=0, le=10),
+    store: str | None = None,
+):
+    """Mode « En magasin »: the list by retailer (``store``, or ``plan`` of the last basket)
+    then by aisle, with the product and the price retained; the whole list by aisle without them."""
+    if store is not None:
+        get_scraper(store)
+    items = await shopping_list.get_list()
+    comparison = await basket.last_comparison() if plan is not None or store is not None else None
+    return shopping_list.trip_of(items, comparison, plan=plan, store=store)
 
 
 @router.patch("/list/{item_id}", response_model=ListItem)
