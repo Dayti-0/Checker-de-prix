@@ -299,12 +299,14 @@ def test_manual_price_counted_with_its_flag_then_expired():
     line = choose_line(milk, "intermarche", None, now=NOW, manual_max_age=WEEKS_6)
     assert (line.status, line.basis, line.manual, line.picked, line.line_total) == ("found", "manual", True, True, 2.04)
     assert line.fetched_at == NOW - 10 * DAY
+    assert line.expires_at == NOW - 10 * DAY + WEEKS_6  # « à mettre à jour avant le … »
     assert not needs_search(milk, "intermarche", NOW, WEEKS_6)  # no call to the site
     # Six weeks later: shown (pick), not counted
     old = item(10, "lait", picks={"intermarche": manual("intermarche", 1.02, 43)})
     assert needs_search(old, "intermarche", NOW, WEEKS_6)
     line = choose_line(old, "intermarche", failed("intermarche", "store_required", "Magasin à choisir"), now=NOW)
     assert (line.status, line.expired, line.pick_issue, line.line_total) == ("unchecked", True, "expired", None)
+    assert line.expires_at == NOW - 43 * DAY + WEEKS_6
     assert line.pick.price == 1.02
     # Expired, but the site answers: its product is counted
     line = choose_line(old, "intermarche", ok("intermarche", [prod("intermarche", "Lait 1L", 1.05)]), now=NOW)
@@ -489,6 +491,26 @@ def test_stale_pick_counted_when_the_site_fails():
     line = choose_line(flour, "carrefour", failed("carrefour", "blocked", "Vérification"), now=NOW)
     assert (line.status, line.stale, line.line_total) == ("found", True, 1.89)
     assert "vérification requise" in line.message
+
+
+def test_basket_signature_follows_what_the_basket_depends_on():
+    flour = item(1, "farine", quantity=2)
+    base = basket.basket_signature([flour, item(2, "sucre")])
+    assert base == basket.basket_signature([item(2, "sucre"), item(1, "farine", quantity=2)])
+    # Ticks, notes and aisles: same basket
+    same = item(1, "farine", quantity=2, checked=True, checked_at=NOW, note="T45", category="Boulangerie")
+    assert basket.basket_signature([same, item(2, "sucre")]) == base
+    # Items left out of the comparison do not count either
+    assert basket.basket_signature([flour, item(2, "sucre"), item(3, "sel", compare=False)]) == base
+    changed = [
+        item(1, "farine", quantity=3),
+        item(1, "farine", quantity=2, target="2 kg"),
+        item(1, "farine", quantity=2, excluded=["lidl"]),
+        item(1, "farine", quantity=2, picks={"lidl": Pick(**prod("lidl", "Farine T45", 0.75).model_dump())}),
+    ]
+    for other in changed:
+        assert basket.basket_signature([other, item(2, "sucre")]) != base
+    assert basket.basket_signature([flour]) != base
 
 
 @pytest.mark.parametrize(

@@ -44,7 +44,9 @@ re-exported here (``basket.add_item``...) as before the split.
 """
 
 import asyncio
+import hashlib
 import inspect
+import json
 import logging
 import math
 import re
@@ -320,6 +322,7 @@ def choose_line(
         line.status = "excluded"
         return line
     if pick is not None and pick.source == "manual":
+        line.expires_at = (pick.picked_at or now) + manual_max_age
         if _manual_valid(pick, now, manual_max_age):
             line.manual = True
             return _found(line, pick, _pick_packs(item, pick), "manual", pick.picked_at)
@@ -384,6 +387,31 @@ def _pick_note(issue: str | None) -> str | None:
 # ---------------------------------------------------------------------------
 # The comparison (pure)
 # ---------------------------------------------------------------------------
+
+
+def basket_signature(items: Sequence[ListItem]) -> str:
+    """What the comparison depends on in the list (pure): items compared, quantities,
+    targets, « pas disponible ici », products chosen. Ticks, notes and aisles are left
+    out: ticking an item in the store does not make the last basket outdated."""
+    data = []
+    for item in sorted(items, key=lambda i: i.id):
+        if not item.compare:
+            continue
+        picks = {
+            store: [pick.product_url, pick.ean, pick.name, pick.price, pick.source, pick.picked_at, pick.price_at]
+            for store, pick in sorted(item.picks.items())
+        }
+        data.append(
+            [
+                item.id,
+                item.key or matching.query_key(item.query),
+                item.quantity,
+                item.target or "",
+                sorted(item.excluded),
+                picks,
+            ]
+        )
+    return hashlib.sha256(json.dumps(data, ensure_ascii=False, default=str).encode()).hexdigest()[:16]
 
 
 @dataclass
@@ -643,6 +671,10 @@ async def cached_result(
     )
 
 
+def search_failed(label: str) -> str:
+    return f"La recherche chez {label} a échoué. Réessayez dans un instant."
+
+
 async def _fresh_in_cache(key: str, query: str, settings: Settings, now: float) -> bool:
     scraper = SCRAPERS[key]
     entry = await cache.get_entry(search.cache_key(scraper, settings.stores.get(key), query))
@@ -679,13 +711,20 @@ async def _search_retailer(
             i for i, c in zip(todo, cached, strict=True) if not c
         ]
     for item in todo:
-        if cache_only or info.failure is not None:
-            result = await cached_result(key, item.query, settings, info.failure, run.now)
-            if info.notice is None and result.status in FAILED:
-                info.notice = result
-        else:
-            result = await search_store(key, item.query, refresh, settings=settings, priority="basket")
-            info.failure = _failure_of(result)
+        try:
+            if cache_only or info.failure is not None:
+                result = await cached_result(key, item.query, settings, info.failure, run.now)
+                if info.notice is None and result.status in FAILED:
+                    info.notice = result
+            else:
+                result = await search_store(key, item.query, refresh, settings=settings, priority="basket")
+                info.failure = _failure_of(result)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 (one retailer must not stop the others)
+            logger.exception("Basket: search of « %s » at %s failed", item.query, info.label)
+            result = StoreResult(store=key, label=info.label, status="error", message=search_failed(info.label))
+            info.failure = result
         run.results[(key, item.id)] = result
         run.done += 1
         if on_event is not None:
@@ -789,6 +828,7 @@ async def compare_basket(
     comparison.search_count = run.done
     comparison.cache_only = cache_only
     comparison.list_version = version
+    comparison.list_signature = basket_signature(items)
     try:
         await list_repo.save_last_basket(comparison.model_dump(mode="json"), version)
     except Exception:  # noqa: BLE001 (the last basket is a convenience)
@@ -804,10 +844,12 @@ async def last_comparison() -> BasketComparison | None:
     if not raw:
         return None
     try:
-        return BasketComparison(**raw)
+        comparison = BasketComparison(**raw)
     except (ValidationError, TypeError):
         logger.info("Last basket unreadable")
         return None
+    comparison.outdated = comparison.list_signature != basket_signature(await get_list())
+    return comparison
 
 
 # ---------------------------------------------------------------------------

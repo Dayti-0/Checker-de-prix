@@ -290,6 +290,9 @@ class BasketLine(BaseModel):
     manual: bool = False
     # Price typed by hand too old: shown (``pick``), not counted
     expired: bool = False
+    # Price typed by hand: when it stops being counted (``manual_weeks`` setting),
+    # for the reminder « à mettre à jour avant le 14/11 »
+    expires_at: float | None = None
     # When the price was read (Unix time): age of the cell
     fetched_at: float | None = None
     # Missing or excluded line: median of the other retailers (estimated_total)
@@ -402,8 +405,13 @@ class BasketComparison(BaseModel):
     created_at: float | None = None
     # Only prices already read were used (cache_only)
     cache_only: bool = False
-    # Version of the list compared (GET /api/list/version): outdated when it differs
+    # Version of the list compared (GET /api/list/version; ticks included)
     list_version: int | None = None
+    # What the comparison depends on in the list (basket.basket_signature: items,
+    # quantities, targets, choices; not the ticks, notes or aisles)
+    list_signature: str | None = None
+    # GET /api/basket/last: the list changed since (another signature): compare again
+    outdated: bool = False
 
 
 class Candidates(BaseModel):

@@ -175,6 +175,33 @@ def test_blocked_retailer_is_called_once_for_ten_items(client, sites):
     assert baskets["lidl"]["action"] == "retry"
 
 
+def test_an_unexpected_failure_at_one_retailer_does_not_stop_the_others(client, sites, monkeypatch):
+    from backend.services import basket as basket_service
+
+    add(client, "farine")
+    add(client, "sucre")
+    real = basket_service.search_store
+
+    async def broken(key, query, *args, **kw):
+        if key == "lidl":
+            raise RuntimeError("bug")
+        return await real(key, query, *args, **kw)
+
+    monkeypatch.setattr(basket_service, "search_store", broken)
+    comparison = client.post("/api/basket/compare", json={"stores": ["aldi", "lidl"]}).json()
+    baskets = {b["store"]: b for b in comparison["stores"]}
+    assert baskets["aldi"]["found_count"] == 2
+    lidl = baskets["lidl"]
+    assert (lidl["status"], lidl["reason"], lidl["action"], lidl["unchecked_count"]) == (
+        "unchecked",
+        "error",
+        "retry",
+        2,
+    )
+    assert lidl["message"] == "La recherche chez Lidl a échoué. Réessayez dans un instant."
+    assert "bug" not in json.dumps(comparison)
+
+
 def test_short_circuit_serves_older_prices_without_calling_the_site(client, sites):
     add(client, "farine")
     add(client, "sucre")
@@ -208,7 +235,8 @@ def test_cache_only_never_calls_the_sites(client, sites):
     assert lines[2]["message"] == "Prix pas encore lus chez Aldi."
     # A retailer never searched: its card says why and offers a real comparison
     alone = client.post("/api/basket/compare", json={"stores": ["lidl"], "cache_only": True}).json()["stores"][0]
-    assert (alone["status"], alone["action"], alone["message"]) == ("unchecked", "retry", "Prix pas encore lus chez Lidl.")
+    expected = ("unchecked", "retry", "Prix pas encore lus chez Lidl.")
+    assert (alone["status"], alone["action"], alone["message"]) == expected
     assert sites.calls == []
 
 
@@ -295,8 +323,19 @@ def test_last_basket(client, sites):
     last = client.get("/api/basket/last").json()
     assert totals(last) == totals(compared)
     assert last["list_version"] == client.get("/api/list/version").json()["version"]
+    assert last["list_signature"] and not last["outdated"]
+    # Ticks, notes and aisles do not change the basket
+    item_id = client.get("/api/list").json()[0]["id"]
+    client.patch(f"/api/list/{item_id}", json={"checked": True, "note": "T45", "category": "Boulangerie"})
+    assert not client.get("/api/basket/last").json()["outdated"]
+    # A quantity, a target, a new item do
+    client.patch(f"/api/list/{item_id}", json={"quantity": 3})
+    assert client.get("/api/basket/last").json()["outdated"]
+    client.post("/api/basket/compare", json={"stores": ["aldi"], "cache_only": True})
+    assert not client.get("/api/basket/last").json()["outdated"]
     add(client, "sucre")
-    assert last["list_version"] < client.get("/api/list/version").json()["version"]
+    last2 = client.get("/api/basket/last").json()
+    assert last2["outdated"] and last["list_version"] < client.get("/api/list/version").json()["version"]
 
 
 # --- B60: « Changer » ------------------------------------------------------------------
