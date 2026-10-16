@@ -206,6 +206,10 @@ def test_cache_only_never_calls_the_sites(client, sites):
     lines = comparison["stores"][0]["lines"]
     assert [li["status"] for li in lines] == ["found", "found", "unchecked"]
     assert lines[2]["message"] == "Prix pas encore lus chez Aldi."
+    # A retailer never searched: its card says why and offers a real comparison
+    alone = client.post("/api/basket/compare", json={"stores": ["lidl"], "cache_only": True}).json()["stores"][0]
+    assert (alone["status"], alone["action"], alone["message"]) == ("unchecked", "retry", "Prix pas encore lus chez Lidl.")
+    assert sites.calls == []
 
 
 def test_finished_stream_is_not_started_again(client, sites):

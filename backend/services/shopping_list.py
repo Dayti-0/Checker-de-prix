@@ -830,6 +830,7 @@ async def restore_backup(data: list[dict]) -> None:
                 excluded=item.excluded,
                 checked=item.checked,
                 checked_at=item.checked_at,
+                created_at=item.created_at,
             )
 
 

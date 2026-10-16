@@ -399,6 +399,7 @@ def test_backup_providers_round_trip():
     assert [(i.query, i.quantity, i.target, i.category, i.category_set, i.note) for i in items] == [
         ("farine", 2, "1 kg", "Boulangerie", True, "T45")
     ]
+    assert items[0].created_at == saved["shopping_list"][0]["created_at"]
     assert [(t.name, t.item_count) for t in templates] == [("Semaine", 1)]
     assert [(h["query"], h["count"]) for h in history] == [("farine", 1)]
 

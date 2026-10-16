@@ -393,7 +393,10 @@ class StoreInfo:
     key: str
     label: str
     store_label: str | None = None
+    # The failed search that stopped the visits of the site (the other items are read in the cache)
     failure: StoreResult | None = None
+    # Prices only read in the cache (cache_only): the first item that has none, for the card
+    notice: StoreResult | None = None
 
 
 def _usable(result: StoreResult | None) -> bool:
@@ -546,7 +549,7 @@ def _count(basket: StoreBasket, info: StoreInfo) -> None:
     basket.complete = basket.found_count > 0 and basket.missing == 0
     if basket.unchecked_count and basket.found_count == 0 and basket.not_found_count == 0:
         basket.status = "unchecked"
-    failure = info.failure
+    failure = info.failure or info.notice
     if failure is not None and (basket.unchecked_count or basket.stale_count):
         reason = failure.problem if failure.status == "ok" else failure.status
         basket.reason = reason
@@ -678,6 +681,8 @@ async def _search_retailer(
     for item in todo:
         if cache_only or info.failure is not None:
             result = await cached_result(key, item.query, settings, info.failure, run.now)
+            if info.notice is None and result.status in FAILED:
+                info.notice = result
         else:
             result = await search_store(key, item.query, refresh, settings=settings, priority="basket")
             info.failure = _failure_of(result)
@@ -698,7 +703,7 @@ async def _search_retailer(
             await _emit(
                 on_event, "line", {"store": key, "item_id": item.id, "line": line, "done": run.done, "total": run.total}
             )
-    failure = info.failure
+    failure = info.failure or info.notice
     await _emit(
         on_event,
         "store",
