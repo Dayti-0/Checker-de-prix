@@ -14,6 +14,7 @@ huile, tournesol, pirate, tomate, vinaigre, pois, crème).
 Each test starts with no saved list, no usual item and no last basket.
 """
 
+import re
 import sqlite3
 from pathlib import Path
 
@@ -77,3 +78,46 @@ def install(fake, mp) -> None:
         reset_p5()
 
     mp.setattr(fake, "reset", reset)
+
+
+# --- Helpers of the P5 E2E tests (tests/e2e/test_p5_*.py) ----------------------
+
+HEADERS = {"X-PrixMalin": "1"}
+STORES = ["aldi", "lidl", "carrefour", "intermarche", "coursesu"]
+
+
+def call(page, method: str, path: str, body=None):
+    """JSON answer of the PrixMalin API, through the context of ``page``."""
+    response = page.request.fetch(f"{page.base}{path}", method=method, data=body, headers=HEADERS)
+    assert response.ok, f"{method} {path}: {response.status} {response.text()}"
+    return response.json() if response.status != 204 else None
+
+
+def add(page, query: str, **body) -> dict:
+    return call(page, "POST", "/api/list", {"query": query, **body})
+
+
+def demo_list(page) -> list[dict]:
+    """« beurre, sucre, lessive, jus d'orange (6 L) ».
+
+    Carrefour has everything, Lidl has no orange juice, Aldi no washing liquid.
+    """
+    for query in ("beurre", "sucre", "lessive"):
+        add(page, query)
+    add(page, "jus d'orange", target="6 L")
+    return call(page, "GET", "/api/list")
+
+
+def compare(page, stores=STORES) -> dict:
+    """The basket compared by the server (as « Comparer mon panier »), kept as the last basket."""
+    return call(page, "POST", "/api/basket/compare", {"stores": list(stores)})
+
+
+def horizontal_overflow(page) -> int:
+    """Pixels the page can be scrolled sideways (0: none)."""
+    return page.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+
+
+def pdf_pages(page) -> int:
+    """Number of A4 pages of the printed page (css/print.css)."""
+    return len(re.findall(rb"/Type\s*/Page\b", page.pdf(format="A4")))

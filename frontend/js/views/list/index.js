@@ -105,7 +105,7 @@ function aisles(items) {
         const n = group.items.length;
         return html`<section class="aisle" data-key="aisle-${group.name}" data-patch>
             <h2 class="aisle-head" data-key="head">
-                <button type="button" class="aisle-toggle" data-aisle="${group.name}" data-focus="aisle-${group.name}" aria-expanded="${open}" aria-controls="${id}">
+                <button type="button" class="aisle-toggle" data-aisle="${group.name}" data-focus="aisle-${group.name}" aria-expanded="${open ? "true" : "false"}" aria-controls="${id}">
                     ${icon("chevron-down")}<span class="aisle-name">${group.name}</span>
                     <span class="aisle-count">${n}<span class="visually-hidden"> ${n >= 2 ? "articles" : "article"}</span></span>
                 </button>

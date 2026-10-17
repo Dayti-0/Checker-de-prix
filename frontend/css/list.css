@@ -16,6 +16,7 @@
     min-height: 2.75rem;
     text-decoration: none;
     text-align: center;
+    white-space: normal; /* large text on a small screen: on two lines rather than out of the screen */
 }
 :is(.list-page, .basket-page, .trip-page, .p5-sheet, .list-card) :is(button, a, input, select, textarea, summary):focus-visible {
     outline: none;
@@ -82,7 +83,7 @@
 .list-help p { margin: 0; }
 .list-help-title { display: flex; align-items: center; gap: var(--space-2); margin: 0; font-size: var(--text-100); color: var(--primary-text); }
 
-.list-form { display: flex; gap: var(--space-3); }
+.list-form { display: flex; flex-wrap: wrap; gap: var(--space-3); }
 .list-form input {
     min-width: 0;
     min-height: 3rem;
@@ -93,7 +94,7 @@
     font-size: var(--text-105);
 }
 .list-form input:focus { border-color: var(--primary); }
-#list-input { flex: 1 1 auto; }
+#list-input { flex: 1 1 10rem; }
 #list-qty { flex: none; width: 4.5rem; text-align: center; font-variant-numeric: tabular-nums; }
 .list-form .btn-primary { min-height: 3rem; }
 
@@ -172,17 +173,17 @@
     border-radius: var(--radius);
     box-shadow: var(--shadow);
 }
+/* The buttons go under the name when the text is large on a small screen */
 .list-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas: "head actions" "tags tags" "picks picks" "note note";
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 0 var(--space-4);
     padding: var(--space-3) var(--space-5);
     border-bottom: 1px solid var(--border);
 }
 .list-row:last-child { border-bottom: 0; }
-.row-head { grid-area: head; display: flex; align-items: center; flex-wrap: wrap; gap: 0 var(--space-3); min-width: 0; }
+.row-head { flex: 1 1 8rem; display: flex; align-items: center; flex-wrap: wrap; gap: 0 var(--space-3); min-width: 0; }
 .row-title {
     display: inline-flex;
     align-items: center;
@@ -202,7 +203,7 @@
 .row-title .icon { color: var(--muted); width: 1rem; height: 1rem; }
 .row-title:hover .row-query { text-decoration: underline; }
 .row-qty { color: var(--primary-text); font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.row-actions { grid-area: actions; display: flex; align-items: center; gap: var(--space-2); }
+.row-actions { flex: none; margin-left: auto; display: flex; align-items: center; gap: var(--space-2); }
 .row-stepper { display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: var(--radius-70); overflow: hidden; }
 .row-stepper button {
     display: inline-flex;
@@ -228,8 +229,8 @@
     color: var(--danger-text);
 }
 .row-delete:hover { border-color: var(--danger-text); }
-.row-tags { grid-area: tags; display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-1) 0; }
-.row-picks { grid-area: picks; list-style: none; margin: var(--space-1) 0; padding: 0; display: grid; gap: var(--space-1); }
+.row-tags { flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-1) 0; }
+.row-picks { flex: 1 1 100%; list-style: none; margin: var(--space-1) 0; padding: 0; display: grid; gap: var(--space-1); }
 .row-pick { display: flex; align-items: baseline; gap: var(--space-2); font-size: var(--text-95); }
 .row-pick .dot { flex: none; transform: translateY(-.05rem); }
 .pick-text {
@@ -244,7 +245,7 @@
 .pick-store { font-weight: 700; }
 .pick-note { color: var(--warn); font-size: var(--text-85); }
 .pick-price { flex: none; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.row-note { grid-area: note; margin: 0 0 var(--space-1); color: var(--muted); font-style: italic; font-size: var(--text-90); overflow-wrap: anywhere; }
+.row-note { flex: 1 1 100%; margin: 0 0 var(--space-1); color: var(--muted); font-style: italic; font-size: var(--text-90); overflow-wrap: anywhere; }
 .list-row.is-checked .row-query { text-decoration: line-through; color: var(--muted); }
 
 .list-tools { display: flex; flex-wrap: wrap; gap: var(--space-3); padding-top: var(--space-2); border-top: 1px solid var(--border); }
@@ -320,7 +321,7 @@
 /* « Coller une liste » */
 .paste-preview:empty { display: none; }
 .paste-preview { display: grid; gap: var(--space-2); }
-.paste-lines { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); max-height: 14rem; overflow: auto; }
+.paste-lines { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); }
 .paste-lines li { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3); padding: var(--space-2) var(--space-3); border-radius: var(--radius-55); background: var(--surface-2); }
 .paste-query { font-weight: 600; overflow-wrap: anywhere; }
 .paste-meta { color: var(--muted); font-size: var(--text-85); }

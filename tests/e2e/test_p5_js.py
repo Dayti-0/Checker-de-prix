@@ -99,7 +99,8 @@ def test_verdict_is_honest(page):
     aldi = store("aldi", "Aldi", total=9.88, found_count=3, missing=1, estimated=True, estimated_total=15.12)
     complete = {"item_count": 4, "best_store": "carrefour", "stores": [carrefour, aldi]}
     v = js_eval(page, BASKET, "verdict", complete)
-    assert (v["kind"], v["label"], v["storeLabel"], v["value"]) == ("best", "Panier le moins cher", "Carrefour", "19,39 €")
+    assert (v["kind"], v["label"]) == ("best", "Panier le moins cher")
+    assert (v["storeLabel"], v["value"]) == ("Carrefour", "19,39 €")
     assert v["sub"] == "Seule enseigne avec tous les articles"
 
     lidl = store("lidl", "Lidl", total=7.77, found_count=3, missing=1, estimated=True, estimated_total=15.57)

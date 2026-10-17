@@ -379,6 +379,6 @@ a.cell-name:hover { text-decoration-color: currentColor; }
     .verdict { padding: var(--space-4) var(--space-5); }
     .verdict-value { font-size: var(--text-160); }
     .basket-actions { width: 100%; }
-    .basket-actions > * { flex: 1 1 auto; white-space: nowrap; }
+    .basket-actions > * { flex: 1 1 auto; }
     .offer { grid-template-columns: 5.75rem minmax(0, 1fr); padding: var(--space-4); }
 }
