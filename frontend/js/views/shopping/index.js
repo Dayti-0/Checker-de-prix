@@ -354,6 +354,8 @@ function remember() {
 async function show(p) {
     params = p || {};
     trip = null;
+    // The messages (« Annuler ») show above the bar of the trip, when there is one
+    document.documentElement.classList.toggle("has-trip-bar", wantsTrip(params));
     draw();
     if (wantsTrip(params)) {
         await sync();
@@ -391,7 +393,6 @@ export function render(container, p) {
     setHtml(root, html``);
     root.addEventListener("click", onClick);
     root.addEventListener("change", onChange);
-    document.documentElement.classList.add("has-trip-bar");
     const online = () => sync();
     window.addEventListener("online", online);
     document.addEventListener("visibilitychange", onVisible);

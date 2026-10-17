@@ -8,6 +8,7 @@ LIST = "/static/js/views/list/model.js"
 BASKET = "/static/js/views/basket/model.js"
 SHARE = "/static/js/views/list/share-sheet.js"
 EDIT = "/static/js/views/list/edit-sheet.js"
+SHOPPING = "/static/js/views/shopping/index.js"
 
 OCT_3 = 1791028800  # 3 October 2026, noon (UTC)
 NOV_14 = 1794657600
@@ -261,3 +262,21 @@ def test_only_the_changed_fields_are_sent(page):
     chosen = {**item, "category": "Hygiène", "category_set": True, "target": "2 L"}
     back = {**same, "category": "", "target": ""}
     assert js_eval(page, EDIT, "changes", chosen, back) == {"category": "", "target": ""}
+
+
+def test_title_of_a_trip(page):
+    def group(key, label):
+        return {"store": key, "label": label, "aisles": []}
+
+    other = group(None, "Autres articles")
+    pair = {"plan": 1, "store": None, "unknown": False, "stores": [group("lidl", "Lidl"), group("aldi", "Aldi"), other]}
+    assert js_eval(page, SHOPPING, "tripTitle", pair) == "Lidl + Aldi"
+    single = {**pair, "plan": 0, "stores": [group("carrefour", "Carrefour"), other]}
+    assert js_eval(page, SHOPPING, "tripTitle", single) == "Chez Carrefour"
+    one = {"plan": None, "store": "aldi", "unknown": False, "stores": [group("aldi", "Aldi")]}
+    assert js_eval(page, SHOPPING, "tripTitle", one) == "Chez Aldi"
+    # A plan no longer in the last basket, or no plan at all: the whole list by aisle
+    gone = {"plan": 3, "store": None, "unknown": True, "stores": [group(None, "Ma liste")]}
+    assert js_eval(page, SHOPPING, "tripTitle", gone) == "Ma liste par rayon"
+    whole = {"plan": None, "store": None, "unknown": False, "stores": [group(None, "Ma liste")]}
+    assert js_eval(page, SHOPPING, "tripTitle", whole) == "Ma liste par rayon"

@@ -337,7 +337,7 @@
 .template-info { display: grid; gap: var(--space-1); }
 .template-name { overflow-wrap: anywhere; }
 .template-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-.template-actions .icon-btn { width: 2.75rem; height: 2.75rem; color: var(--danger-text); }
+.template-actions .icon-btn { width: 2.75rem; height: 2.75rem; margin-left: auto; color: var(--danger-text); }
 
 /* « Partager ou imprimer » */
 .share-body { display: grid; gap: var(--space-5); }
