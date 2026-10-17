@@ -59,6 +59,7 @@
     }
     .row-title { min-height: 0; }
     .row-title > .icon { display: none; }
+    .row-qty { display: inline; }
     .row-picks, .row-tags, .row-note { padding-left: 1.6rem; }
     .tag { border-color: GrayText; }
 

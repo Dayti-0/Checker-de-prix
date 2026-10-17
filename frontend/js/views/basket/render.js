@@ -104,6 +104,9 @@ export function storeCard(comparison, s) {
     </li>`;
 }
 
+// What the user can do for a retailer that failed while the others still answer
+const LIVE_ACTIONS = { store_required: "choose_store", blocked: "unblock" };
+
 // While the retailers answer: what was read so far
 export function liveStoreCard(view, s, state) {
     const read = view.items.filter((i) => view.cell(s.store, i.id)).length;
@@ -117,8 +120,9 @@ export function liveStoreCard(view, s, state) {
                 ? html`<p class="store-reason">${icon("triangle-alert")}${reasonLabel(state.status)}</p>${state.message ? html`<p class="store-message">${state.message}</p>` : ""}`
                 : html`<p class="store-count"><strong>${found}/${plural(view.items.length, "article")}</strong> trouvés</p>
         <progress class="store-progress" value="${read}" max="${view.items.length || 1}" aria-label="Articles lus chez ${s.label}">${read}/${view.items.length}</progress>
-        <p class="store-notes">${read < view.items.length ? `${read} lus sur ${view.items.length}` : "Tous les articles sont lus"}</p>`
+        <p class="store-notes">${read < view.items.length ? `${plural(read, "lu", "lus")} sur ${view.items.length}` : "Tous les articles sont lus"}</p>`
         }
+        ${failed ? html`<div class="store-card-actions">${actionMarkup({ ...s, action: LIVE_ACTIONS[state.status] })}</div>` : ""}
     </li>`;
 }
 
@@ -178,6 +182,13 @@ export function cellBody(view, item, s, line, low, where = "t") {
     return html`<span class="cell-state muted">${reason ? reasonLabel(reason) : "Pas comparé"}</span>`;
 }
 
+// Lowest price of an item, once every retailer has answered for it (while the
+// comparison runs, the first price read is not « le moins cher »)
+function lowest(view, lines) {
+    if (view.live && lines.some((l) => !l)) return null;
+    return cheapest(lines);
+}
+
 // ---------------------------------------------------------------- table (computer)
 
 // Column of a retailer that could not be searched at all (left out of the printed page)
@@ -207,7 +218,7 @@ export function tableMarkup(view) {
             )}</tr></thead>
             <tbody>${view.items.map((item) => {
                 const lines = view.stores.map((s) => view.cell(s.store, item.id));
-                const low = cheapest(lines);
+                const low = lowest(view, lines);
                 return html`<tr data-key="row-${item.id}">
                     <th scope="row">${itemTitle(item)}</th>
                     ${view.stores.map((s, i) => {
@@ -240,7 +251,7 @@ export function itemCardsMarkup(view) {
         : "";
     return html`<ul class="item-cards" data-testid="basket-items">${view.items.map((item) => {
         const offers = itemOffers(stores, item.id, view.cell);
-        const low = cheapest(offers.map((o) => o.line));
+        const low = lowest(view, offers.map((o) => o.line));
         return html`<li class="item-card" data-key="card-${item.id}" data-item-card="${item.id}">
             <h3 class="item-card-title">${itemTitle(item)}</h3>
             <ol class="offers">${offers.map(({ store, label, line }) => {

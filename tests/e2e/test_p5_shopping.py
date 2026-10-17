@@ -110,6 +110,35 @@ def test_ticks_without_network_are_kept_then_sent(mobile):
     page.errors[:] = [e for e in page.errors if "ERR_INTERNET_DISCONNECTED" not in e]
 
 
+def test_quick_ticks_online_never_say_offline(mobile):
+    """Ticks made while the previous one is on its way are sent after it: no « Hors connexion »."""
+    page = mobile
+    demo_list(page)
+    compare(page)
+    follow_carrefour(page)
+    page.evaluate(
+        """() => {
+            window.__offlineSeen = false;
+            new MutationObserver(() => {
+                if (document.body.textContent.includes("Hors connexion")) window.__offlineSeen = true;
+            }).observe(document.body, { childList: true, subtree: true, characterData: true });
+        }"""
+    )
+    # Four taps in a row, before the first tick has reached the server
+    page.evaluate(
+        """() => {
+            for (let i = 0; i < 4; i++) {
+                [...document.querySelectorAll("[data-check]")].find((box) => !box.checked).click();
+            }
+        }"""
+    )
+    expect(page.get_by_test_id("trip-bar")).to_contain_text("4/4")
+    for query in ("beurre", "sucre", "lessive", "jus d'orange"):
+        assert wait_until(lambda q=query: checked(page.base, q)), query
+    page.wait_for_function("() => JSON.parse(localStorage.getItem('prixmalin.pendingChecks') || '[]').length === 0")
+    assert page.evaluate("() => window.__offlineSeen") is False
+
+
 @pytest.mark.parametrize("scheme", ["light", "dark"])
 def test_one_hand_on_a_small_phone(chromium, server, scheme):
     from tests.e2e.conftest import open_page

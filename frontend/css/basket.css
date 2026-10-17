@@ -140,7 +140,8 @@
 .store-totals .amount { font-size: var(--text-130); font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .store-totals .estimate .amount { font-size: var(--text-105); font-weight: 700; }
 .store-missing { color: var(--warn); font-weight: 600; }
-.store-saving { display: flex; align-items: center; gap: var(--space-2); color: var(--best-text); font-weight: 600; }
+.store-saving { display: flex; align-items: flex-start; gap: var(--space-2); color: var(--best-text); font-weight: 600; }
+.store-saving .icon, .plan-saving .icon { flex: none; margin-top: .15em; }
 .store-notes, .store-message { color: var(--muted); font-size: var(--text-85); }
 .store-reason { display: flex; align-items: center; gap: var(--space-2); color: var(--warn); font-weight: 700; }
 .store-card-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: auto; padding-top: var(--space-1); }
@@ -181,7 +182,7 @@
 .plan-title { margin: 0; font-size: var(--text-110); overflow-wrap: anywhere; }
 .plan-total { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .plan-total strong { font-size: var(--text-130); }
-.plan-saving { display: flex; align-items: center; gap: var(--space-2); color: var(--best-text); font-weight: 600; }
+.plan-saving { display: flex; align-items: flex-start; gap: var(--space-2); color: var(--best-text); font-weight: 600; }
 .plan-missing { color: var(--warn); font-weight: 600; overflow-wrap: anywhere; }
 .plan-ok { color: var(--best-text); font-weight: 600; }
 .plan-stores { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
@@ -197,20 +198,21 @@
 .basket-legend .icon { color: var(--primary-text); }
 
 /* Content of a cell (table) or of an offer (card on a phone): the price and
-   « Changer » side by side, then the product and its notes */
+   « Changer » side by side (centred on the same line), then the packs, the
+   product and its notes under them */
 .cell-body, .offer-body {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas: "price button" "packs button" "product product" "notes notes";
+    grid-template-areas: "price button" "packs packs" "product product" "notes notes";
     align-items: start;
     column-gap: var(--space-3);
     min-width: 0;
 }
-:is(.cell-body, .offer-body) > :is(.cell-price, .cell-state, .cell-wait, .cell-empty) { grid-area: price; }
+:is(.cell-body, .offer-body) > :is(.cell-price, .cell-state, .cell-wait, .cell-empty) { grid-area: price; align-self: center; }
 :is(.cell-body, .offer-body) > .cell-packs { grid-area: packs; }
 :is(.cell-body, .offer-body) > .cell-product { grid-area: product; margin-top: var(--space-1); }
 :is(.cell-body, .offer-body) > :is(.cell-notes, .note) { grid-area: notes; }
-:is(.cell-body, .offer-body) > .cell-btn { grid-area: button; }
+:is(.cell-body, .offer-body) > .cell-btn { grid-area: button; align-self: center; }
 .cell-price { display: block; font-size: var(--text-110); font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .cell-price.low { color: var(--best-text); }
 .cell-packs { display: block; color: var(--muted); font-size: var(--text-85); font-variant-numeric: tabular-nums; }
@@ -352,6 +354,42 @@ a.cell-name:hover { text-decoration-color: currentColor; }
     .detail-table { display: block; }
     .detail-cards { display: none; }
 }
+
+/* --- Sheet « Changer » (js/views/basket/change-sheet.js) --- */
+
+.change-intro { margin: 0; color: var(--muted); }
+.cand-box { display: grid; gap: var(--space-3); min-width: 0; }
+.cand-box > p { margin: 0; }
+.cand-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.cand-btn {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--space-4);
+    width: 100%;
+    min-height: 3.25rem;
+    padding: var(--space-3) var(--space-4);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-70);
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.cand-btn:hover { border-color: var(--primary-text); }
+.cand.current .cand-btn { background: var(--best-bg); border-color: var(--accent-best); box-shadow: inset 0 0 0 1px var(--accent-best); }
+.cand-main { display: grid; gap: var(--space-1); min-width: 0; }
+.cand-name { font-weight: 600; overflow-wrap: anywhere; }
+.cand.unavailable .cand-name { color: var(--muted); }
+.cand-meta { color: var(--muted); font-size: var(--text-85); overflow-wrap: anywhere; }
+.cand-tags { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.cand-tags:empty { display: none; }
+.cand-price { display: grid; justify-items: end; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cand-price strong { font-size: var(--text-110); }
+.cand-unit { color: var(--muted); font-size: var(--text-85); }
+.change-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.manual-form { display: grid; gap: var(--space-5); }
 
 /* --- Settings of the basket --- */
 

@@ -202,7 +202,8 @@
 .row-query { min-width: 0; overflow-wrap: anywhere; }
 .row-title .icon { color: var(--muted); width: 1rem; height: 1rem; }
 .row-title:hover .row-query { text-decoration: underline; }
-.row-qty { color: var(--primary-text); font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* The quantity is in the stepper on screen; « × 2 » is for the printed list */
+.row-qty { display: none; color: var(--primary-text); font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .row-actions { flex: none; margin-left: auto; display: flex; align-items: center; gap: var(--space-2); }
 .row-stepper { display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: var(--radius-70); overflow: hidden; }
 .row-stepper button {

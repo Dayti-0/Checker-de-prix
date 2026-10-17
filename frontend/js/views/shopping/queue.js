@@ -21,9 +21,11 @@ export function queueCheck(id, checked) {
 
 let sending = null;
 
-// Sends the waiting ticks; true when none is left
+// Sends the waiting ticks: true when the server took them (or none was
+// waiting), false when it could not be reached. A tick made while a request is
+// on its way is sent right after it.
 export function flush() {
-    if (sending) return sending;
+    if (sending) return sending.then(() => flush());
     sending = (async () => {
         const queue = pending();
         if (!queue.length) return true;
@@ -38,7 +40,7 @@ export function flush() {
             KEY,
             pending().filter((c) => sent.get(c.id) !== c.checked_at),
         );
-        return pending().length === 0;
+        return true;
     })().finally(() => {
         sending = null;
     });

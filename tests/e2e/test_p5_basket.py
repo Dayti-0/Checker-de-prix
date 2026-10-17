@@ -74,10 +74,17 @@ def test_live_comparison_then_an_honest_verdict(desktop, gate):
     expect(progress).to_contain_text(re.compile(r"Comparaison en cours : \d+/20 recherches"))
     expect(page.get_by_role("button", name="Arrêter")).to_be_visible()
     expect(card(page, "aldi")).to_contain_text("Tous les articles sont lus")
+    expect(card(page, "lidl")).to_contain_text("0 lu sur 4")
     expect(cell(page, "aldi", "beurre")).to_contain_text("1,89 €")
     expect(cell(page, "lidl", "beurre").get_by_text("En attente")).to_have_count(1)
     expect(page.get_by_test_id("basket-verdict")).to_contain_text("Comparaison en cours")
     expect(page.get_by_text("Panier le moins cher")).to_have_count(0)
+    # No price is « le moins cher » while Lidl has not answered for its item
+    expect(page.locator("td.cell.low")).to_have_count(0)
+    expect(page.get_by_text("(le moins cher)")).to_have_count(0)
+    # A retailer that cannot be searched says so, with its action, before the end
+    expect(card(page, "intermarche").get_by_role("link", name="Choisir mon magasin Intermarché")).to_be_visible()
+    expect(card(page, "coursesu").get_by_role("button", name="Ouvrir le site Courses U")).to_be_visible()
     assert_accessible(page, "panier en cours")
 
     gate.release()
@@ -88,6 +95,7 @@ def test_live_comparison_then_an_honest_verdict(desktop, gate):
     expect(verdict).to_contain_text("Panier complet : 4/4 articles")
     expect(page.get_by_role("button", name="Actualiser les prix")).to_be_visible()
     expect(page.locator("#live-region")).to_contain_text("Comparaison terminée")
+    expect(cell(page, "lidl", "beurre")).to_have_class(re.compile(r"\blow\b"))
 
     # Ranked by complete basket, then estimated total: Lidl (cheaper on what it has) after Aldi
     order = page.locator("[data-store-card]").evaluate_all("(cards) => cards.map((c) => c.dataset.storeCard)")
@@ -303,6 +311,18 @@ def test_on_a_computer_a_table_in_dark_mode(dark):
     assert sticky == "sticky"
     expect(table.locator("tfoot")).to_contain_text("17,39 €")
     assert_accessible(page, "panier en sombre")
+
+    # The sheet « Changer » is drawn by css/basket.css (not the browser's buttons)
+    page.get_by_role("button", name="Changer le produit jus d'orange chez Aldi").click()
+    sheet = page.get_by_role("dialog", name="« jus d'orange » chez Aldi")
+    choice = sheet.get_by_role("button", name=re.compile(r"^Choisir Jus d'orange 6x1L"))
+    expect(choice).to_be_visible()
+    style = choice.evaluate(
+        "(b) => ({ list: getComputedStyle(b.closest('ul')).listStyleType, align: getComputedStyle(b).textAlign,"
+        " height: b.getBoundingClientRect().height })"
+    )
+    assert style["list"] == "none" and style["align"] == "left" and style["height"] >= 44, style
+    assert_accessible(page, "feuille « Changer » en sombre")
 
 
 def test_second_store_when_it_is_worth_the_trip(desktop):

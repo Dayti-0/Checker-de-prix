@@ -245,7 +245,7 @@ function tripMarkup() {
         </div>
         ${trip.unknown ? html`<div class="notice warn trip-note" data-key="unknown"><p>Ce choix n'est plus dans le dernier panier : comparez à nouveau votre panier.</p><div class="actions"><button type="button" class="btn-primary small" data-compare>Comparer mon panier</button></div></div>` : ""}
         ${trip.outdated && !trip.unknown ? html`<div class="notice warn trip-note" data-key="outdated"><p>Votre liste a changé depuis la comparaison : produits et prix peuvent ne plus correspondre.</p><div class="actions"><button type="button" class="btn-primary small" data-compare>Comparer à nouveau</button></div></div>` : ""}
-        ${offline || waiting ? html`<p class="notice warn trip-offline" data-key="offline" role="status">${icon("wifi-off")}Hors connexion : ${plural(waiting, "coche sera envoyée", "coches seront envoyées")} au retour du réseau.</p>` : ""}
+        ${offline && waiting ? html`<p class="notice warn trip-offline" data-key="offline" role="status">${icon("wifi-off")}Hors connexion : ${plural(waiting, "coche sera envoyée", "coches seront envoyées")} au retour du réseau.</p>` : ""}
         ${!items.length ? html`<div class="list-empty" data-key="empty"><h2 class="list-empty-title">Votre liste est vide</h2><a class="btn-primary" href="#/liste">Ajouter des articles</a></div>` : ""}
         <div class="trip-stores" data-key="stores" data-patch>${trip.stores.filter((s) => s.aisles.length).map((s) => storeSection(s, many))}</div>
         <div class="trip-bar" data-key="bar" data-testid="trip-bar">
