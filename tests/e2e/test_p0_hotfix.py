@@ -94,7 +94,10 @@ def test_hostile_texts_are_shown_as_text(desktop):
     expect(sheet.get_by_text(XSS_NAME)).to_be_visible()  # P2: sheet « Ajouter à ma liste »
     sheet.get_by_role("button", name="Ajouter").click()
     page.get_by_role("link", name=re.compile("Ma liste")).click()
-    expect(page.get_by_text(f"Aldi : {XSS_NAME} (1,00 €)")).to_be_visible()
+    picks = page.get_by_role("list", name="Produits choisis pour pirate")  # P5: « Aldi · … · 1,00 € »
+    expect(picks.get_by_text(XSS_NAME)).to_be_visible()
+    expect(picks).to_contain_text(f"Aldi · {XSS_NAME}")
+    expect(picks).to_contain_text("1,00 €")
     page.get_by_role("button", name="Comparer mon panier").click()
     expect(page.get_by_role("table")).to_contain_text(XSS_NAME)
     assert page.locator("main img, a[href^='javascript' i]").count() == 0

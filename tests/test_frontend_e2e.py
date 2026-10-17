@@ -261,13 +261,13 @@ def test_list_compares_the_basket(page):
 
     page.click(".nav-link[data-nav=list]")
     expect(page).to_have_url(f"{page.base}/#/liste")
-    expect(page.locator(".list-item")).to_have_count(1)
-    expect(page.locator(".pick")).to_contain_text("Carrefour : Farine fluide Francine 1kg")
+    expect(page.locator(".list-row")).to_have_count(1)
+    expect(page.locator(".row-pick")).to_contain_text("Carrefour · Farine fluide Francine 1kg")
 
     page.fill("#list-input", "farine de blé")
     page.fill("#list-qty", "2")
     page.click("#list-form button[type=submit]")
-    expect(page.locator(".list-item")).to_have_count(2)
+    expect(page.locator(".list-row")).to_have_count(2)
     expect(page.locator(".nav-link[data-nav=list] .count")).to_have_text("2")
 
     # Courses U unticked here, then searched without it, then ticked again here:
@@ -280,12 +280,15 @@ def test_list_compares_the_basket(page):
     page.click(".nav-link[data-nav=list]")
     page.locator(".store-toggle", has_text="Courses U").click()
 
-    page.click("#compare-btn")
-    expect(page.locator(".basket-card")).to_have_count(5)
-    best = page.locator(".basket-card.best")
-    expect(best).to_contain_text("Panier le moins cher")
-    expect(best.locator(".badge")).to_have_text("Lidl")
-    expect(page.locator(".basket-split")).to_contain_text("2,25 €")  # 0,75 + 2 × 0,75
+    # P5: the comparison has its own page (#/panier)
+    page.get_by_role("button", name="Comparer mon panier").click()
+    expect(page).to_have_url(f"{page.base}/#/panier")
+    expect(page.locator(".store-card")).to_have_count(5)
+    verdict = page.get_by_test_id("basket-verdict")
+    expect(verdict).to_contain_text("Panier le moins cher")
+    expect(verdict.locator(".badge")).to_have_text("Lidl")
+    expect(verdict).to_contain_text("2,25 €")  # 0,75 + 2 × 0,75
+    expect(page.locator(".store-card.best .badge")).to_have_text("Lidl")
     expect(page.locator(".basket-table tbody tr")).to_have_count(2)
 
     # The results and the comparison survive a trip between the views
@@ -294,8 +297,9 @@ def test_list_compares_the_basket(page):
     expect(page.locator(".column")).to_have_count(5)
     expect(page.locator(".column[data-store=coursesu] .price")).to_have_text(["0,95 €"])
     page.go_back()
-    expect(page).to_have_url(f"{page.base}/#/liste")
-    expect(page.locator(".basket-card")).to_have_count(5)
+    expect(page).to_have_url(f"{page.base}/#/panier")
+    expect(page.locator(".store-card")).to_have_count(5)
+    expect(page.get_by_test_id("basket-verdict")).to_contain_text("2,25 €")
 
 
 def test_settings_page(page):

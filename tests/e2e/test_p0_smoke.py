@@ -61,12 +61,19 @@ def test_add_to_list_and_compare_the_basket(page):
     page.get_by_role("link", name=re.compile("Ma liste")).click()
     expect(page).to_have_url(re.compile(r"#/liste$"))
     expect(page).to_have_title("Ma liste · PrixMalin")
-    expect(page.get_by_text("Lidl : Farine de blé T45 (0,75 €)")).to_be_visible()
+    # P5: « ● Lidl · Farine de blé T45 · 0,75 € » under the item
+    picks = page.get_by_role("list", name="Produits choisis pour farine")
+    expect(picks).to_contain_text("Lidl · Farine de blé T45")
+    expect(picks).to_contain_text("0,75 €")
 
     page.get_by_role("button", name="Comparer mon panier").click()
-    expect(page.get_by_text("Panier le moins cher")).to_be_visible()
-    expect(page.get_by_text("En achetant chaque article là où il est le moins cher")).to_contain_text("0,75 €")
-    expect(page.get_by_role("table")).to_contain_text("Farine de blé T45")
+    # P5: the comparison page, its verdict and its plans (no more mixed total)
+    expect(page).to_have_url(re.compile(r"#/panier$"))
+    verdict = page.get_by_test_id("basket-verdict")
+    expect(verdict).to_contain_text("Panier le moins cher")
+    expect(verdict).to_contain_text("0,75 €")
+    expect(page.get_by_test_id("plans")).to_contain_text("Tout chez Lidl")
+    expect(page.get_by_test_id("basket-detail")).to_contain_text("Farine de blé T45")
 
 
 def test_settings_open(page):

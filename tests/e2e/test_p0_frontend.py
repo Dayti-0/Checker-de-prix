@@ -30,11 +30,13 @@ def test_routes_table(desktop):
     )
     assert [r["path"] for r in routes] == ROUTE_PATHS
     enabled = {r["path"]: r["nav"] for r in routes if r["enabled"]}
-    # P4 fills #/etat and #/bienvenue (no entry in the navigation)
+    # P4 fills #/etat and #/bienvenue, P5 #/panier and #/courses (no entry in the navigation)
     assert enabled == {
         "/": "Rechercher",
         "/recherche": None,
         "/liste": "Ma liste",
+        "/panier": None,
+        "/courses": None,
         "/reglages": "Réglages",
         "/etat": None,
         "/bienvenue": None,
@@ -43,7 +45,7 @@ def test_routes_table(desktop):
 
 def test_hidden_routes_lead_to_the_home_page(desktop):
     page = desktop
-    for path in ("/panier", "/courses", "/suivis", "/historique", "/produit/aldi/123", "/x"):
+    for path in ("/suivis", "/historique", "/produit/aldi/123", "/x"):
         page.goto(f"{page.base}/#{path}")
         expect(page).to_have_url(f"{page.base}/#/")
         expect(page.get_by_text("Tapez un produit pour comparer")).to_be_visible()
@@ -245,6 +247,7 @@ def test_home_cards_and_settings_sections(desktop):
     expect(page.get_by_role("button", name="Farine")).to_be_visible()
     assert page.evaluate("() => [...document.querySelectorAll('[data-card]')].map((c) => c.dataset.card)") == [
         "recent",
+        "list",  # P5 (hidden while the list is empty)
         "status",  # P4
         "setup",
     ]
