@@ -1,0 +1,38 @@
+/* « Ma liste » (js/views/list/): form and lines of the shopping list */
+
+.list-form { display: flex; gap: .55rem; max-width: 54rem; }
+.list-form input { padding: .7rem .85rem; border: 1px solid var(--border); border-radius: var(--radius-70); background: var(--surface); min-width: 0; }
+.list-form input:first-child { flex: 1; }
+.list-form input[type=number] { width: 5rem; }
+
+.list-items { list-style: none; padding: 0; margin: 1rem 0; max-width: 54rem; }
+.list-item {
+    display: flex;
+    gap: .85rem;
+    align-items: center;
+    padding: .9rem 1rem;
+    margin-bottom: .55rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+.list-main { flex: 1; min-width: 0; }
+.list-main strong { font-size: var(--text-110); }
+.picks { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .4rem; }
+.pick {
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+    max-width: 100%;
+    padding: .2rem .3rem .2rem .6rem;
+    border-radius: var(--radius-pill);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    font-size: var(--text-875);
+}
+.pick span.txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pick button { border: 0; background: none; color: var(--muted); padding: 0 .3rem; }
+.qty { display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: var(--radius-70); overflow: hidden; }
+.qty button { border: 0; background: var(--surface-2); width: 2.4rem; height: 2.4rem; font-size: var(--text-115); }
+.qty span { min-width: 2.2rem; text-align: center; font-weight: 700; }
+.list-actions { display: flex; flex-wrap: wrap; gap: .55rem; margin-bottom: 1.1rem; }

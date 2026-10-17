@@ -1,0 +1,39 @@
+/* Reset and utilities */
+
+* { box-sizing: border-box; }
+
+/* Every size is in rem: the A− / A+ buttons change --ui-scale (css/tokens.css) */
+html {
+    -webkit-text-size-adjust: 100%;
+    font-size: calc(16px * var(--ui-scale));
+}
+
+body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: var(--text-100);
+    line-height: 1.4;
+    color: var(--text);
+    background: var(--bg);
+}
+
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+[hidden] { display: none !important; }
+a { color: inherit; }
+
+.muted { color: var(--muted); }
+.small { font-size: var(--text-875); }
+
+/* Read by screen readers, not shown (#live-region) */
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}

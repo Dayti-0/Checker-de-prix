@@ -1,72 +1,72 @@
+"""PrixMalin web server: ``python -m backend.main`` (or ``run()``).
+
+``create_app()`` assembles the app: routers of backend/api/, error handlers,
+security headers, static files. Code of an area goes in its own router,
+service or startup hook (backend/services/hooks.py), not here.
+"""
+
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI, Query
-from fastapi.responses import FileResponse, Response
-from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI
+from fastapi.middleware.gzip import GZipMiddleware
 
-from backend.config import BASE_DIR
-from backend.database import close_db
-from backend.models import AppConfig, LocationConfig, SearchResponse
-from backend.services.location import get_app_config, set_postal_code
-from backend.services.search import search_all
+from backend import __version__, config, database, instance, logging_setup, security
+from backend.api import api_router, errors, pages_router, system
+from backend.browser import browser
+from backend.services import hooks, warmup
+from backend.services import settings as settings_service
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
+logger = logging.getLogger("prixmalin")
+
+
+async def _run_startup_hook(fn) -> None:
+    try:
+        await fn()
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001 (a startup hook never stops the app)
+        logger.exception("Startup hook %r failed", fn)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    current = await settings_service.load_settings()
+    browser.show_browser = current.show_browser
+    # Startup hooks (warm-up of the sites...) run in the background
+    tasks = [asyncio.create_task(_run_startup_hook(fn)) for fn in hooks.startup_hooks()]
     yield
-    await close_db()
+    for task in tasks:
+        task.cancel()
+    await browser.shutdown()
+    await database.close_db()
 
 
-app = FastAPI(title="PrixMalin", version="1.0.0", lifespan=lifespan)
+def create_app() -> FastAPI:
+    app = FastAPI(title="PrixMalin", version=__version__, lifespan=lifespan)
+    hooks.on_startup(warmup.warmup)
+    errors.install(app)
+    security.install(app)
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
+    # Every /api route lives in backend/api/ (one router per area)
+    app.include_router(api_router)
+    app.include_router(pages_router)
+    system.mount_frontend(app)
+    return app
 
 
-# --- API routes ---
+app = create_app()
 
 
-@app.get("/api/search", response_model=SearchResponse)
-async def api_search(
-    q: str = Query(..., min_length=1, description="Product search query"),
-    stores: str | None = Query(None, description="Comma-separated store names"),
-):
-    store_list = [s.strip() for s in stores.split(",") if s.strip()] if stores else None
-    return await search_all(q, store_list)
-
-
-@app.post("/api/config/location", response_model=AppConfig)
-async def api_set_location(body: LocationConfig):
-    return await set_postal_code(body.postal_code)
-
-
-@app.get("/api/config/stores", response_model=AppConfig)
-async def api_get_stores():
-    return await get_app_config()
-
-
-# --- Static files (frontend) ---
-
-FRONTEND_DIR = BASE_DIR / "frontend"
-
-
-@app.get("/")
-async def index():
-    return FileResponse(FRONTEND_DIR / "index.html")
-
-
-@app.get("/favicon.ico")
-async def favicon():
-    # Return an empty 204 to suppress browser 404 requests
-    return Response(status_code=204)
-
-
-app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
+def run() -> None:
+    instance.ensure_single_instance()
+    logging_setup.configure()
+    # No auto-reload: it would start a second browser and breaks Playwright on Windows
+    print(f"\n  PrixMalin : http://localhost:{config.PORT}\n")
+    uvicorn.run(app, host=config.HOST, port=config.PORT, log_level="info")
 
 
 if __name__ == "__main__":
-    uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=True)
+    run()

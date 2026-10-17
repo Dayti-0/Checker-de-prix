@@ -1,138 +1,94 @@
-import asyncio
-import logging
-import re
+"""Aldi: the product tiles of the search page (rendered by the site from Algolia).
 
-from backend.models import ScrapedProduct
+A « Voir plus » button or a link to the next page is followed once, in the first
+half of the search (``extract.read_more``). Fallbacks: the Algolia answers seen
+by the page, the generic cards, the JSON-LD.
+"""
+
+import logging
+from urllib.parse import quote
+
+from backend.models import Product, StoreSelection
 from backend.scrapers.base import BaseScraper
-from backend.scrapers.browser import create_stealth_browser, accept_cookies
+from backend.scrapers.common import accept_cookies, save_debug_snapshot, wait_for_clearance
+from backend.scrapers.extract import (
+    PageBudget,
+    extract_cards,
+    extract_json_ld,
+    merge_pages,
+    products_from_json,
+    read_more,
+)
 
 logger = logging.getLogger(__name__)
 
-SEARCH_URL = "https://www.aldi.fr/recherche.html?query={query}"
+BASE_URL = "https://www.aldi.fr"
+SEARCH_URL = BASE_URL + "/recherche.html?query={query}"
+
+# Product tiles of aldi.fr (rendered client-side from Algolia)
+TILE_OPTIONS = {
+    "cardSelector": ".product-tile",
+    "nameSelector": ".product-tile__content__upper__product-name",
+    "brandSelector": ".product-tile__content__upper__brand-name",
+    "priceSelector": "[data-testid$='tag-current-price-amount'], .tag__label--price",
+    "unitSelector": ".tag__marker--base-price",
+    "quantitySelector": ".tag__marker--salesunit",
+    # Tiles read at most (two pages)
+    "limit": 120,
+}
 
 
 class AldiScraper(BaseScraper):
-    store_name = "Aldi"
+    key = "aldi"
+    label = "Aldi"
+    home_url = BASE_URL + "/"
+    store_hint = "Prix nationaux : rien à configurer."
 
-    async def search(self, query: str) -> list[ScrapedProduct]:
-        """Run the synchronous scraper in a thread to avoid asyncio subprocess issues."""
-        return await asyncio.to_thread(self._search_sync, query)
+    async def search(self, page, query: str, store: StoreSelection | None) -> list[Product]:
+        self.last_source = None
+        budget = PageBudget(self.key)
+        algolia_responses = []
 
-    def _search_sync(self, query: str) -> list[ScrapedProduct]:
-        """Synchronous Playwright scraping (runs in a thread)."""
-        url = SEARCH_URL.format(query=query)
-        products: list[ScrapedProduct] = []
+        def on_response(response) -> None:
+            if "algolia" in response.url:
+                algolia_responses.append(response)
 
-        with create_stealth_browser() as (browser, context, page):
+        page.on("response", on_response)
+        try:
+            await page.goto(SEARCH_URL.format(query=quote(query)), wait_until="domcontentloaded", timeout=30000)
+            await wait_for_clearance(page, self.label)
+            await accept_cookies(page)
             try:
-                page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                accept_cookies(page)
-
-                # Wait for product tiles (loaded via Algolia client-side)
-                try:
-                    page.wait_for_selector(".product-tile", timeout=12000)
-                except Exception:
-                    logger.warning("Aldi: no product tiles for '%s'", query)
-                    return products
-
-                page.wait_for_timeout(1000)
-                tiles = page.query_selector_all(".product-tile")
-
-                for tile in tiles:
-                    try:
-                        product = self._parse_tile(tile)
-                        if product:
-                            products.append(product)
-                    except Exception as e:
-                        logger.debug("Aldi: tile parse error: %s", e)
-
-            except Exception as e:
-                logger.error("Aldi scraper error: %s", e)
-
-        return products
-
-    def _parse_tile(self, tile) -> ScrapedProduct | None:
-        # Product name
-        name_el = tile.query_selector(
-            ".product-tile__content__upper__product-name"
-        )
-        if not name_el:
-            return None
-        name = name_el.inner_text().strip()
-        if not name:
-            return None
-
-        # Brand
-        brand_el = tile.query_selector(
-            ".product-tile__content__upper__brand-name"
-        )
-        if brand_el:
-            brand = brand_el.inner_text().strip()
-            if brand:
-                name = f"{name} - {brand}"
-
-        # Price
-        price = None
-        price_el = tile.query_selector("[data-testid$='tag-current-price-amount']")
-        if not price_el:
-            price_el = tile.query_selector(".tag__label--price")
-        if price_el:
-            price_text = price_el.inner_text().strip()
-            price = self._parse_price(price_text)
-
-        # Price per unit (e.g. "KG = 0.69")
-        price_per_unit = None
-        unit_el = tile.query_selector(".tag__marker--base-price")
-        if unit_el:
-            price_per_unit = unit_el.inner_text().strip()
-
-        # Sales unit (e.g. "1KG")
-        sales_unit_el = tile.query_selector(".tag__marker--salesunit")
-        if sales_unit_el:
-            sales_unit = sales_unit_el.inner_text().strip()
-            if price_per_unit:
-                price_per_unit = f"{price_per_unit} ({sales_unit})"
-            else:
-                price_per_unit = sales_unit
-
-        # Image
-        image_url = None
-        img = tile.query_selector(".product-tile__image-section img")
-        if img:
-            image_url = img.get_attribute("src")
-
-        # Product URL
-        product_url = ""
-        link = tile.query_selector("a[href]")
-        if link:
-            href = link.get_attribute("href")
-            if href:
-                product_url = (
-                    href
-                    if href.startswith("http")
-                    else f"https://www.aldi.fr{href}"
+                await page.wait_for_selector(
+                    ".product-tile, [class*='no-result' i], [class*='noresult' i], [class*='empty-result' i]",
+                    timeout=12000,
                 )
+            except Exception:  # noqa: BLE001 (timeout: the page is read anyway)
+                logger.info("Aldi: no product tile for '%s'", query)
+            await page.wait_for_timeout(500)
 
-        return ScrapedProduct(
-            name=name,
-            price=price,
-            price_per_unit=price_per_unit,
-            image_url=image_url,
-            product_url=product_url,
-            store_name=self.store_name,
-        )
+            def tiles():
+                return extract_cards(page, self.key, BASE_URL, **TILE_OPTIONS)
 
-    @staticmethod
-    def _parse_price(text: str) -> float | None:
-        """Parse a price string like '2,49' or '0.69' into a float."""
-        text = text.replace("\xa0", " ").strip()
-        match = re.search(r"(\d+)[.,](\d{1,2})", text)
-        if match:
-            return float(f"{match.group(1)}.{match.group(2)}")
-        match = re.search(r"(\d+)", text)
-        if match:
-            return float(match.group(1))
-        return None
-
-    async def setup_location(self, postal_code: str) -> bool:
-        return True
+            products = self.found(await tiles(), "html")
+            if products:
+                more = await read_more(page, tiles, budget, card_selector=TILE_OPTIONS["cardSelector"])
+                return self.found(merge_pages(products, more), "html")
+            if not products:
+                # Tiles changed: use the search API responses captured meanwhile
+                for response in algolia_responses:
+                    try:
+                        products += products_from_json(await response.json(), self.key, BASE_URL)
+                    except Exception as e:  # noqa: BLE001 (body unavailable or not JSON)
+                        logger.debug("Aldi: Algolia response skipped: %s", e)
+                self.found(products, "generic")
+            if not products:
+                link = r"/(fiches-produits|produits?)/"
+                products = self.found(await extract_cards(page, self.key, BASE_URL, linkPattern=link), "generic")
+            if not products:
+                products = self.found(await extract_json_ld(page, self.key, BASE_URL), "json-ld")
+            if not products:
+                await save_debug_snapshot(page, self.key)
+            return products
+        finally:
+            page.remove_listener("response", on_response)

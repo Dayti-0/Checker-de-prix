@@ -1,0 +1,15 @@
+/* Basket comparison (js/views/list/, later js/views/basket/): totals and table */
+
+.basket-cards { display: grid; gap: .7rem; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); margin-bottom: .9rem; }
+.basket-card { padding: .9rem 1.1rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.basket-card.best { border: 2px solid var(--best); background: var(--best-bg); }
+.basket-card .total { font-size: var(--text-180); font-weight: 800; margin: .4rem 0 .15rem; }
+.basket-split { margin: 0 0 .9rem; font-size: var(--text-100); }
+.table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.basket-table { border-collapse: collapse; width: 100%; font-size: var(--text-95); }
+.basket-table th, .basket-table td { padding: .6rem .8rem; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+.basket-table td.cell { min-width: 10rem; }
+.basket-table .cell-price { font-weight: 700; }
+.basket-table .cell-name { color: var(--muted); font-size: var(--text-85); display: block; max-width: 16rem; }
+.basket-table td.cheapest .cell-price { color: var(--best-text); }
+.basket-table tfoot td { font-weight: 800; font-size: var(--text-105); }

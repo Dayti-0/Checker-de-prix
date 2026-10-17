@@ -29,31 +29,30 @@ if not exist "venv" (
     echo [1/4] Environnement virtuel existant detecte.
 )
 
-REM Activer l'environnement virtuel
 call venv\Scripts\activate.bat
 
-REM Installer les dependances
 echo [2/4] Installation des dependances...
-pip install -r requirements.txt --quiet
+python -m pip install --upgrade -r requirements.txt --quiet
 if errorlevel 1 (
     echo [ERREUR] Echec de l'installation des dependances.
     pause
     exit /b 1
 )
 
-REM Installer le navigateur Playwright
-echo [3/4] Installation du navigateur Playwright (Chromium)...
-playwright install chromium --quiet 2>nul
+REM Chromium sert de secours si Chrome ou Edge ne sont pas utilisables
+echo [3/4] Verification du navigateur Chromium...
+python -m playwright install chromium
 if errorlevel 1 (
-    python -m playwright install chromium
+    echo [ATTENTION] Chromium n'a pas pu etre installe. PrixMalin utilisera Chrome ou Edge.
 )
 
-REM Lancer l'application
-echo [4/4] Demarrage du serveur...
+echo [4/4] Demarrage de PrixMalin...
 echo.
-echo   L'application est accessible sur : http://localhost:8000
-echo   Appuyez sur Ctrl+C pour arreter le serveur.
+echo   L'application s'ouvre dans votre navigateur : http://localhost:8000
+echo   Depuis un telephone sur le meme Wi-Fi : http://ADRESSE-IP-DU-PC:8000
+echo   Fermez cette fenetre (ou Ctrl+C) pour arreter PrixMalin.
 echo.
 
+start "" cmd /c "timeout /t 4 >nul & start http://localhost:8000"
 python -m backend.main
 pause
