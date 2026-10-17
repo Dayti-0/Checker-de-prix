@@ -62,11 +62,12 @@ export function verdict(comparison) {
         const s = storeOf(comparison, comparison.most_items_store);
         return {
             kind: "most",
-            label: "Aucune enseigne n'a tout",
+            label: "Paniers incomplets",
             store: s.store,
             storeLabel: s.label,
             value: s.estimated_total != null ? euros(s.estimated_total) : euros(s.total),
-            valueLabel: s.estimated ? "estimé" : "",
+            // Never a bare amount for an incomplete basket
+            valueLabel: s.estimated ? "estimé" : `pour ${plural(s.found_count, "article")}`,
             text: `Aucune enseigne n'a tout : ${s.label} en a le plus (${s.found_count}/${n})`,
             sub: s.missing ? `${missingText(s.missing)} chez ${s.label}` : "",
         };

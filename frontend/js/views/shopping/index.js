@@ -117,9 +117,15 @@ function chooserMarkup() {
         </div>`;
     } else {
         const ranked = c.stores.filter((s) => s.ranked);
+        const plans = c.plans || [];
         fromBasket = html`${c.outdated ? html`<div class="notice warn trip-note"><p>Votre liste a changé depuis la dernière comparaison : produits et prix peuvent ne plus correspondre.</p><div class="actions"><button type="button" class="btn-primary small" data-compare>Comparer à nouveau</button></div></div>` : ""}
-            <h2 class="trip-h2">Suivre un plan du panier</h2>
-            <ul class="trip-choices">${(c.plans || []).map(
+            ${
+                plans.length
+                    ? ""
+                    : html`<p class="notice trip-note">Aucune enseigne n'a assez d'articles de votre liste pour proposer un plan : suivez votre liste par rayon.</p>`
+            }
+            ${plans.length ? html`<h2 class="trip-h2">Suivre un plan du panier</h2>` : ""}
+            <ul class="trip-choices"${attr({ hidden: !plans.length })}>${plans.map(
                 (plan, i) => html`<li><a class="trip-choice" href="#/courses?plan=${i}">
                     <span class="trip-choice-title">${planTitle(plan)}</span>
                     <span class="trip-choice-meta">${euros(plan.estimated ? plan.estimated_total : plan.total)}${plan.estimated ? " estimé" : ""} · ${plan.complete ? "tous les articles" : plural(plan.missing, "article introuvable", "articles introuvables")}</span>
@@ -155,13 +161,12 @@ function chooserMarkup() {
 
 // ---------------------------------------------------------------- markup: the trip
 
-function tripTitle(t) {
-    if (t.plan !== null && t.plan !== undefined) {
-        const names = t.stores.filter((s) => s.store).map((s) => s.label);
-        return names.length > 1 ? names.join(" + ") : `Chez ${names[0] || "…"}`;
-    }
-    if (t.store) return `Chez ${(t.stores.find((s) => s.store === t.store) || t.stores[0] || { label: t.store }).label}`;
-    return "Ma liste par rayon";
+export function tripTitle(t) {
+    // A plan or a retailer no longer in the last basket: the whole list by aisle
+    const names = t.stores.filter((s) => s.store).map((s) => s.label);
+    if (t.unknown || !names.length) return "Ma liste par rayon";
+    if (t.plan !== null && t.plan !== undefined) return names.length > 1 ? names.join(" + ") : `Chez ${names[0]}`;
+    return `Chez ${(t.stores.find((s) => s.store === t.store) || { label: names[0] }).label}`;
 }
 
 function row(it, storeLabel) {

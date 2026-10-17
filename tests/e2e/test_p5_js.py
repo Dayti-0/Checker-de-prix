@@ -107,10 +107,15 @@ def test_verdict_is_honest(page):
     partial = {"item_count": 4, "best_store": None, "most_items_store": "aldi", "stores": [aldi, lidl]}
     v = js_eval(page, BASKET, "verdict", partial)
     assert v["kind"] == "most"
-    assert v["label"] == "Aucune enseigne n'a tout"
+    assert v["label"] == "Paniers incomplets"
     assert v["text"] == "Aucune enseigne n'a tout : Aldi en a le plus (3/4)"
     assert (v["value"], v["valueLabel"], v["sub"]) == ("15,12 €", "estimé", "1 article introuvable chez Aldi")
     assert "Panier le moins cher" not in str(v)
+
+    # No retailer with half of the items: the amount says what it covers
+    few = store("carrefour", "Carrefour", total=18.24, found_count=5, missing=6, estimated=False, estimated_total=18.24)
+    v = js_eval(page, BASKET, "verdict", {"item_count": 11, "most_items_store": "carrefour", "stores": [few]})
+    assert (v["value"], v["valueLabel"]) == ("18,24 €", "pour 5 articles")
 
     nothing = {"item_count": 4, "best_store": None, "most_items_store": None, "stores": []}
     assert js_eval(page, BASKET, "verdict", nothing)["kind"] == "none"

@@ -320,6 +320,7 @@
 .edit-pick-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-size: var(--text-95); }
 
 /* « Coller une liste » */
+.paste-form textarea { font-family: inherit; }
 .paste-preview:empty { display: none; }
 .paste-preview { display: grid; gap: var(--space-2); }
 .paste-lines { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); }

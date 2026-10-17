@@ -210,6 +210,23 @@ def test_list_by_aisle_without_a_comparison(desktop):
     expect(page.get_by_role("link", name="Reprendre : Ma liste par rayon")).to_be_visible()
 
 
+def test_no_plan_when_no_retailer_could_be_compared(desktop):
+    page = desktop
+    demo_list(page)
+    compare(page, stores=["intermarche", "coursesu"])  # a store to choose, an anti-robot check
+    page.goto(f"{page.base}/#/courses")
+    chooser = page.get_by_test_id("trip-chooser")
+    expect(chooser).to_contain_text("Aucune enseigne n'a assez d'articles de votre liste pour proposer un plan")
+    expect(chooser.get_by_role("heading", name="Suivre un plan du panier")).to_have_count(0)
+    expect(chooser.get_by_role("link", name=re.compile(r"^Ma liste par rayon"))).to_be_visible()
+
+    # An old link to a plan: the whole list by aisle, and why
+    page.goto(f"{page.base}/#/courses?plan=0")
+    expect(page.get_by_role("heading", name="Ma liste par rayon", level=1)).to_be_visible()
+    expect(page.get_by_text("Ce choix n'est plus dans le dernier panier")).to_be_visible()
+    expect(page.get_by_role("checkbox")).to_have_count(4)
+
+
 def test_the_list_changed_since_the_comparison(desktop):
     page = desktop
     demo_list(page)

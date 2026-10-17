@@ -150,7 +150,7 @@
 }
 .trip-counter { display: grid; min-width: 0; font-variant-numeric: tabular-nums; }
 .trip-counter strong { font-size: var(--text-130); }
-.trip-counter-sub { color: var(--muted); font-size: var(--text-90); }
+.trip-counter-sub { color: var(--muted); font-size: var(--text-90); white-space: nowrap; }
 .trip-bar .btn-primary { min-height: 3.25rem; padding: 0 var(--space-8); font-size: var(--text-105); }
 /* The messages (« Annuler ») show above the bar */
 .has-trip-bar .toast { bottom: calc(6.5rem + var(--bottom-bar-h)); }
@@ -165,4 +165,5 @@
     .trip-check input { left: var(--space-4); }
     .trip-query { font-size: var(--text-110); }
     .trip-bar { margin: 0 calc(-1 * var(--space-3)); padding-left: var(--space-5); padding-right: var(--space-5); }
+    .trip-bar .btn-primary { padding: 0 var(--space-6); }
 }

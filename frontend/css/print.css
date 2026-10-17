@@ -31,8 +31,8 @@
     .topbar, .primary-nav, #search-form, #store-filters, #setup-banner, #toast-region,
     dialog, .p5-sheet, .spinner,
     .list-cta, .list-help-box, .list-form, .list-usual-box, .list-tools, .row-actions, .aisle-toggle > .icon,
-    .basket-actions, .basket-status, .basket-progress, .basket-prefs, .basket-legend, .store-card-actions,
-    .cell-btn, .plan-follow, .store-progress, .store-card.unchecked, .col-off, .plans > p, .basket-help,
+    .basket-actions, .basket-status, .basket-progress, .basket-prefs, .basket-legend,
+    .cell-btn, .plan-follow, .store-cards, .col-off, .plans > p, .basket-help,
     .basket-skipped, .item-cards-note,
     .trip-top > a, .trip-offline, .trip-note .actions, .trip-bar .btn-primary, .trip-intro {
         display: none !important;
@@ -63,20 +63,18 @@
     .row-picks, .row-tags, .row-note { padding-left: 1.6rem; }
     .tag { border-color: GrayText; }
 
-    /* « Mon panier »: the table, whole, and compact cards */
-    .basket-summary, .verdict, .store-card, .plan { border-color: GrayText; break-inside: avoid; }
-    .basket-summary { padding: var(--space-3); gap: var(--space-3); }
+    /* « Mon panier »: the verdict, the plans and the table, whole (its last row
+       gives the total and the count of each retailer: no cards) */
+    .basket-summary, .verdict, .plan { border-color: GrayText; break-inside: avoid; }
+    .basket-summary { padding: 0; gap: var(--space-3); border: 0; box-shadow: none; }
     .verdict { padding: var(--space-2) var(--space-4); }
     .verdict-main { margin: 0; }
-    .store-cards { grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: var(--space-2); }
-    .store-card { padding: var(--space-3); }
     .plan-list { gap: var(--space-2); }
     .plan { padding: var(--space-3) var(--space-4); }
     /* One plan only: the verdict already says it */
     .plans:has(.plan:only-child) { display: none; }
     .verdict-value { font-size: var(--text-150); }
     .store-totals .amount { font-size: var(--text-110); }
-    .store-card { gap: var(--space-1); }
     .detail-table { display: block !important; }
     .detail-cards { display: none !important; }
     .table-scroll { max-height: none; overflow: visible; border-color: GrayText; }

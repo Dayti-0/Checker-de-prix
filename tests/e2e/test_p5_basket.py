@@ -373,6 +373,8 @@ def test_empty_list(desktop):
 def test_printed_basket_fits_on_one_a4_page(desktop):
     page = desktop
     demo_list(page)
+    for query in ("café", "riz", "pâtes", "yaourts", "pommes", "papier toilette"):  # not sold anywhere here
+        add(page, query)
     compare(page)
     open_basket(page)
     page.emulate_media(media="print")
