@@ -32,7 +32,7 @@
     dialog, .p5-sheet, .spinner,
     .list-cta, .list-help-box, .list-form, .list-usual-box, .list-tools, .row-actions, .aisle-toggle > .icon,
     .basket-actions, .basket-status, .basket-progress, .basket-prefs, .basket-legend, .store-card-actions,
-    .cell-btn, .plan-follow, .store-progress, .store-card.unchecked, .col-off, .plans > p, .verdict-help,
+    .cell-btn, .plan-follow, .store-progress, .store-card.unchecked, .col-off, .plans > p, .basket-help,
     .basket-skipped, .item-cards-note,
     .trip-top > a, .trip-offline, .trip-note .actions, .trip-bar .btn-primary, .trip-intro {
         display: none !important;

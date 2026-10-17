@@ -149,7 +149,9 @@ def test_no_complete_basket_is_never_called_the_cheapest(mobile):
     expect(verdict).to_contain_text("Aucune enseigne n'a tout : Aldi en a le plus (4/5)")
     expect(verdict).to_contain_text("17,31 €")
     expect(verdict).to_contain_text("estimé")
-    expect(verdict).to_contain_text("Total estimé : les articles introuvables sont comptés au prix médian")
+    expect(
+        page.get_by_text(re.compile("^Total estimé : chaque article introuvable est compté au prix médian"))
+    ).to_be_visible()
     expect(page.get_by_text("Panier le moins cher")).to_have_count(0)
     # Lidl, 2 items missing, cheaper on what it has, is not shown as cheaper than Aldi
     expect(card(page, "aldi")).to_contain_text("1er")

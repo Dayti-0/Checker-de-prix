@@ -22,7 +22,7 @@ import { patch } from "../search/patch.js";
 import { openSite } from "../status/shared.js";
 import { openChangeSheet } from "./change-sheet.js";
 import { progressText, verdict } from "./model.js";
-import { itemCardsMarkup, liveStoreCard, plansMarkup, storeCard, tableMarkup, verdictMarkup } from "./render.js";
+import { itemCardsMarkup, liveStoreCard, plansMarkup, storeCard, tableMarkup, totalsHelp, verdictMarkup } from "./render.js";
 import { compareNow, loadLast, recompare, run, stop, subscribe, tickedStores } from "./runner.js";
 
 export const enabled = true;
@@ -181,6 +181,7 @@ function mainMarkup() {
         <div class="basket-summary" data-key="summary" data-patch>
             <div class="verdict-box" data-key="verdict">${view.live ? waitingVerdict() : verdictMarkup(c)}</div>
             <ul class="store-cards" data-key="cards" data-patch data-testid="store-cards" aria-label="Paniers par enseigne">${cards}</ul>
+            ${view.live ? "" : totalsHelp(c)}
         </div>
         ${!view.live ? html`<div class="plans-box" data-key="plans">${plansMarkup(c, view.items)}</div>` : ""}
         <section class="basket-detail" data-key="detail" data-patch aria-labelledby="detail-title" data-testid="basket-detail">

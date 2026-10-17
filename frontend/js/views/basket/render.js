@@ -11,7 +11,7 @@ import { euros, plural } from "../../core/fmt.js";
 import { attr, html, safeUrl } from "../../core/html.js";
 import { icon } from "../../core/icons.js";
 import { brandText } from "../search/product-row.js";
-import { cellNotes, cheapest, itemOffers, planTitle, reasonLabel, storeTexts, verdict } from "./model.js";
+import { cellNotes, cheapest, commonText, itemOffers, planTitle, reasonLabel, storeTexts, verdict } from "./model.js";
 
 export function itemTitle(item) {
     if (item.target) return html`${item.query} <span class="item-qty">(${item.target})</span>`;
@@ -32,8 +32,20 @@ export function verdictMarkup(comparison) {
         }
         <p class="verdict-text">${v.text}</p>
         ${v.sub ? html`<p class="verdict-sub">${v.sub}</p>` : ""}
-        ${v.kind === "most" ? html`<p class="verdict-help">Total estimé : les articles introuvables sont comptés au prix médian des autres enseignes.</p>` : ""}
     </section>`;
+}
+
+// What « Total estimé » and « articles communs » mean, under the cards that show them
+export function totalsHelp(comparison) {
+    const ranked = (comparison.stores || []).filter((s) => s.ranked);
+    const parts = [];
+    if (ranked.some((s) => s.estimated)) {
+        parts.push("Total estimé : chaque article introuvable est compté au prix médian des autres enseignes.");
+    }
+    if (ranked.some((s) => commonText(comparison, s))) {
+        parts.push("Articles communs : ceux que toutes les enseignes classées ont, pour comparer à égalité.");
+    }
+    return parts.length ? html`<p class="basket-help" data-key="help">${parts.join(" ")}</p>` : "";
 }
 
 // ---------------------------------------------------------------- retailer cards

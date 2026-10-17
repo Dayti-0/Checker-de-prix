@@ -97,8 +97,6 @@
 .verdict-text { font-size: var(--text-105); font-weight: 600; overflow-wrap: anywhere; }
 .verdict-sub { color: var(--best-text); font-size: var(--text-95); font-weight: 600; }
 .verdict.partial .verdict-sub { color: var(--warn); }
-.verdict-help { color: var(--muted); font-size: var(--text-85); }
-.verdict.partial .verdict-help { color: var(--warn); }
 .verdict.waiting .verdict-text { font-weight: 400; color: var(--muted); }
 
 .store-cards {
@@ -148,6 +146,7 @@
 .store-card-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: auto; padding-top: var(--space-1); }
 .store-card-actions:empty { display: none; }
 .store-card .spinner { flex: none; }
+.basket-help { margin: 0; color: var(--muted); font-size: var(--text-85); }
 
 @media (min-width: 900px) {
     .basket-summary { padding: var(--space-6); }
