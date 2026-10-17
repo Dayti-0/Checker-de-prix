@@ -320,9 +320,13 @@ async def apply_checks(checks: list[CheckUpdate]) -> list[ListItem]:
 
 
 async def finish(mode: str) -> list[ListItem]:
-    """End of the shopping: untick everything, or remove the ticked items."""
+    """End of the shopping: untick everything, or remove the ticked items (kept a
+    while for « Annuler », like any deleted line)."""
     if mode == "remove":
-        await repo.delete_checked()
+        async with transaction() as db:
+            taken = [raw for raw in await repo.list_items() if raw.get("checked")]
+            await repo.delete_checked(db=db)
+            await repo.trash_items(taken, time.time(), TRASH_SECONDS, db=db)
     else:
         await repo.uncheck_all()
     return await get_list()

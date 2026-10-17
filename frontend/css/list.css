@@ -1,38 +1,388 @@
-/* « Ma liste » (js/views/list/): form and lines of the shopping list */
+/* « Ma liste » (js/views/list/), and what the views of P5 share: buttons of
+   44 px, tags, fields, sheets (.p5-sheet), empty state, home card « Ma liste ». */
 
-.list-form { display: flex; gap: .55rem; max-width: 54rem; }
-.list-form input { padding: .7rem .85rem; border: 1px solid var(--border); border-radius: var(--radius-70); background: var(--surface); min-width: 0; }
-.list-form input:first-child { flex: 1; }
-.list-form input[type=number] { width: 5rem; }
+/* --- Shared by the pages of P5 --- */
 
-.list-items { list-style: none; padding: 0; margin: 1rem 0; max-width: 54rem; }
-.list-item {
-    display: flex;
-    gap: .85rem;
+.list-page, .basket-page, .trip-page { --tap: 2.75rem; }
+.list-page :is(.btn-primary, .btn-ghost),
+.basket-page :is(.btn-primary, .btn-ghost),
+.trip-page :is(.btn-primary, .btn-ghost),
+.p5-sheet :is(.btn-primary, .btn-ghost),
+.list-card :is(.btn-primary, .btn-ghost) {
+    display: inline-flex;
     align-items: center;
-    padding: .9rem 1rem;
-    margin-bottom: .55rem;
+    justify-content: center;
+    gap: var(--space-2);
+    min-height: 2.75rem;
+    text-decoration: none;
+    text-align: center;
+}
+:is(.list-page, .basket-page, .trip-page, .p5-sheet, .list-card) :is(button, a, input, select, textarea, summary):focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+.btn-primary.big, .btn-ghost.big { min-height: 3rem; padding: 0 var(--space-7); font-size: var(--text-105); }
+
+.tag {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: .1rem var(--space-3);
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text);
+    font-size: var(--text-80);
+    font-weight: 600;
+    white-space: nowrap;
+}
+.tag .icon { width: .95rem; height: .95rem; }
+.tag.muted { color: var(--muted); }
+.tag.warn { background: var(--warn-bg); border-color: transparent; color: var(--warn); }
+.tag.ok, .tag.done { background: var(--best-bg); border-color: transparent; color: var(--best-text); }
+
+/* --- Empty state (list, basket, shopping) --- */
+
+.list-empty { display: grid; justify-items: center; gap: var(--space-4); padding: var(--space-8) var(--space-6); text-align: center; color: var(--muted); }
+.list-empty p { margin: 0; max-width: 32rem; }
+.list-empty-art {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 5rem;
+    height: 5rem;
+    border-radius: var(--radius-round);
+    background: var(--best-bg);
+    color: var(--best-text);
+}
+.list-empty-art .icon { width: 2.5rem; height: 2.5rem; }
+.list-empty-title { margin: 0; font-size: var(--text-130); color: var(--text); }
+.quick-add { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-3); }
+
+/* --- Page « Ma liste » --- */
+
+.list-page { max-width: 52rem; margin: 0 auto; display: grid; gap: var(--space-6); }
+.list-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-4); }
+.list-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--space-1) var(--space-4); }
+.list-title { margin: 0; font-size: var(--text-160); }
+.list-count { color: var(--muted); font-size: var(--text-100); }
+.list-cta { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.list-help-box:empty, .list-usual-box:empty { display: none; }
+
+.list-help {
+    display: grid;
+    gap: var(--space-3);
+    justify-items: start;
+    padding: var(--space-5) var(--space-6);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--primary);
+    border-radius: var(--radius-70);
+}
+.list-help p { margin: 0; }
+.list-help-title { display: flex; align-items: center; gap: var(--space-2); margin: 0; font-size: var(--text-100); color: var(--primary-text); }
+
+.list-form { display: flex; gap: var(--space-3); }
+.list-form input {
+    min-width: 0;
+    min-height: 3rem;
+    padding: 0 var(--space-5);
+    border: 2px solid var(--border);
+    border-radius: var(--radius-70);
+    background: var(--surface);
+    font-size: var(--text-105);
+}
+.list-form input:focus { border-color: var(--primary); }
+#list-input { flex: 1 1 auto; }
+#list-qty { flex: none; width: 4.5rem; text-align: center; font-variant-numeric: tabular-nums; }
+.list-form .btn-primary { min-height: 3rem; }
+
+/* « Vos habituels » */
+.usual-title { display: flex; align-items: center; gap: var(--space-2); margin: 0 0 var(--space-3); font-size: var(--text-95); color: var(--muted); }
+.usual-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.usual-chip { display: inline-flex; align-items: stretch; border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface); }
+.usual-add {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    min-height: 2.75rem;
+    padding: 0 var(--space-5);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    background: var(--surface);
+    font-weight: 600;
+}
+.usual-chip .usual-add { border: 0; background: none; padding-right: var(--space-3); }
+.usual-add .icon { color: var(--primary-text); }
+.usual-add:hover { color: var(--primary-text); }
+.usual-forget {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.75rem;
+    border: 0;
+    border-left: 1px solid var(--border);
+    border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
+    background: none;
+    color: var(--muted);
+}
+.usual-forget:hover { color: var(--danger-text); }
+
+/* Aisles */
+.list-groups { display: grid; gap: var(--space-5); }
+.aisle-head { margin: 0 0 var(--space-2); font-size: var(--text-100); }
+.aisle-toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    width: 100%;
+    min-height: 2.75rem;
+    padding: 0 var(--space-2);
+    border: 0;
+    border-radius: var(--radius-60);
+    background: none;
+    color: var(--muted);
+    font-size: var(--text-95);
+    font-weight: 700;
+    letter-spacing: .02em;
+    text-align: left;
+}
+.aisle-toggle:hover { color: var(--text); }
+.aisle-toggle .icon { transition: transform .15s ease; }
+.aisle-toggle[aria-expanded="false"] .icon { transform: rotate(-90deg); }
+.aisle-count {
+    margin-left: auto;
+    min-width: 1.6rem;
+    padding: 0 var(--space-2);
+    border-radius: var(--radius-pill);
+    background: var(--border);
+    color: var(--text);
+    font-size: var(--text-80);
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Lines of the list */
+.list-rows {
+    list-style: none;
+    margin: 0;
+    padding: 0;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
+    box-shadow: var(--shadow);
 }
-.list-main { flex: 1; min-width: 0; }
-.list-main strong { font-size: var(--text-110); }
-.picks { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .4rem; }
-.pick {
+.list-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "head actions" "tags tags" "picks picks" "note note";
+    align-items: center;
+    gap: var(--space-1) var(--space-4);
+    padding: var(--space-3) var(--space-5);
+    border-bottom: 1px solid var(--border);
+}
+.list-row:last-child { border-bottom: 0; }
+.row-head { grid-area: head; display: flex; align-items: center; flex-wrap: wrap; gap: 0 var(--space-3); min-width: 0; }
+.row-title {
     display: inline-flex;
     align-items: center;
-    gap: .4rem;
+    gap: var(--space-1);
+    min-height: 2.75rem;
+    min-width: 0;
     max-width: 100%;
-    padding: .2rem .3rem .2rem .6rem;
-    border-radius: var(--radius-pill);
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    font-size: var(--text-875);
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text);
+    font-size: var(--text-110);
+    font-weight: 700;
+    text-align: left;
 }
-.pick span.txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pick button { border: 0; background: none; color: var(--muted); padding: 0 .3rem; }
-.qty { display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: var(--radius-70); overflow: hidden; }
-.qty button { border: 0; background: var(--surface-2); width: 2.4rem; height: 2.4rem; font-size: var(--text-115); }
-.qty span { min-width: 2.2rem; text-align: center; font-weight: 700; }
-.list-actions { display: flex; flex-wrap: wrap; gap: .55rem; margin-bottom: 1.1rem; }
+.row-query { min-width: 0; overflow-wrap: anywhere; }
+.row-title .icon { color: var(--muted); width: 1rem; height: 1rem; }
+.row-title:hover .row-query { text-decoration: underline; }
+.row-qty { color: var(--primary-text); font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.row-actions { grid-area: actions; display: flex; align-items: center; gap: var(--space-2); }
+.row-stepper { display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: var(--radius-70); overflow: hidden; }
+.row-stepper button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    border: 0;
+    background: var(--surface-2);
+}
+.row-stepper button:disabled { color: var(--muted); cursor: default; opacity: .5; }
+.row-stepper button:focus-visible { box-shadow: inset var(--focus-ring); }
+.qty-value { min-width: 2rem; text-align: center; font-weight: 700; font-variant-numeric: tabular-nums; }
+.row-delete {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-70);
+    background: var(--surface);
+    color: var(--danger-text);
+}
+.row-delete:hover { border-color: var(--danger-text); }
+.row-tags { grid-area: tags; display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.row-picks { grid-area: picks; list-style: none; margin: 0 0 var(--space-1); padding: 0; display: grid; gap: var(--space-1); }
+.row-pick { display: flex; align-items: baseline; gap: var(--space-2); font-size: var(--text-95); }
+.row-pick .dot { flex: none; transform: translateY(-.05rem); }
+.pick-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow-wrap: anywhere;
+}
+.pick-store { font-weight: 700; }
+.pick-note { color: var(--warn); font-size: var(--text-85); }
+.pick-price { flex: none; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.row-note { grid-area: note; margin: 0 0 var(--space-1); color: var(--muted); font-style: italic; font-size: var(--text-90); overflow-wrap: anywhere; }
+.list-row.is-checked .row-query { text-decoration: line-through; color: var(--muted); }
+
+.list-tools { display: flex; flex-wrap: wrap; gap: var(--space-3); padding-top: var(--space-2); border-top: 1px solid var(--border); }
+
+/* --- Sheets (js/views/list/sheet.js) --- */
+
+.p5-sheet {
+    width: min(34rem, calc(100vw - 2rem));
+    max-height: calc(100vh - 2rem);
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: var(--shadow-toast);
+    overflow: auto;
+    overscroll-behavior: contain;
+}
+.p5-sheet::backdrop { background: rgba(15, 20, 25, .55); }
+.p5-sheet-box { display: grid; gap: var(--space-5); padding: var(--space-6) var(--space-7) var(--space-7); }
+.p5-sheet-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
+.p5-sheet-title { margin: 0; font-size: var(--text-120); overflow-wrap: anywhere; }
+.p5-sheet-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 2.75rem;
+    height: 2.75rem;
+    margin-right: calc(-1 * var(--space-3));
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: none;
+    color: var(--muted);
+}
+.p5-sheet-close:hover { background: var(--surface-2); color: var(--text); }
+.p5-sheet-content { display: grid; gap: var(--space-5); min-width: 0; }
+.p5-sheet-content > form { display: grid; gap: var(--space-5); }
+
+.field { display: grid; gap: var(--space-2); min-width: 0; }
+.field label, .template-save label { font-weight: 600; }
+.field input, .field select, .field textarea, .inline-field input {
+    width: 100%;
+    min-height: 2.75rem;
+    padding: var(--space-2) var(--space-4);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-60);
+    background: var(--surface);
+    color: var(--text);
+    font-size: var(--text-100);
+}
+.field textarea { resize: vertical; line-height: 1.45; }
+.field-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: var(--space-4); }
+.field-help { margin: 0; color: var(--muted); font-size: var(--text-85); }
+.form-error { margin: 0; color: var(--danger-text); font-weight: 600; }
+.check-field {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-4);
+    padding: var(--space-4);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-60);
+    cursor: pointer;
+}
+.check-field input { flex: none; width: 1.4rem; height: 1.4rem; margin: .1rem 0 0; accent-color: var(--primary); }
+.sheet-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-3); }
+.edit-sub { margin: 0; font-size: var(--text-100); }
+.edit-picks { display: grid; gap: var(--space-2); }
+.edit-pick-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.edit-pick-list li { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); border-radius: var(--radius-60); background: var(--surface-2); }
+.edit-pick-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-size: var(--text-95); }
+
+/* « Coller une liste » */
+.paste-preview:empty { display: none; }
+.paste-preview { display: grid; gap: var(--space-2); }
+.paste-lines { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); max-height: 14rem; overflow: auto; }
+.paste-lines li { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3); padding: var(--space-2) var(--space-3); border-radius: var(--radius-55); background: var(--surface-2); }
+.paste-query { font-weight: 600; overflow-wrap: anywhere; }
+.paste-meta { color: var(--muted); font-size: var(--text-85); }
+
+/* « Listes enregistrées » */
+.template-save { display: grid; gap: var(--space-2); }
+.inline-field { display: flex; gap: var(--space-3); }
+.inline-field input { flex: 1 1 auto; min-width: 0; }
+.template-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-3); }
+.template { display: grid; gap: var(--space-3); padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-70); }
+.template-info { display: grid; gap: var(--space-1); }
+.template-name { overflow-wrap: anywhere; }
+.template-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.template-actions .icon-btn { width: 2.75rem; height: 2.75rem; color: var(--danger-text); }
+
+/* « Partager ou imprimer » */
+.share-body { display: grid; gap: var(--space-5); }
+.share-text { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: var(--text-875); }
+.share-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+
+@media (max-width: 520px) {
+    .list-page { gap: var(--space-5); }
+    .list-title { font-size: var(--text-140); }
+    .list-cta { width: 100%; }
+    .list-cta > * { flex: 1 1 10rem; }
+    .list-row { padding: var(--space-2) var(--space-4); column-gap: var(--space-3); }
+    .row-title { font-size: var(--text-105); }
+    .list-form .btn-primary { padding: 0 var(--space-5); }
+
+    /* A sheet at the bottom of the screen */
+    .p5-sheet {
+        width: 100vw;
+        max-width: 100vw;
+        max-height: 92vh;
+        margin: auto 0 0;
+        border-radius: var(--radius) var(--radius) 0 0;
+        border-bottom: 0;
+    }
+    .p5-sheet-box { padding: var(--space-5) var(--space-6) calc(var(--space-6) + env(safe-area-inset-bottom)); }
+    .sheet-buttons > * { flex: 1 1 8rem; }
+}
+
+/* --- Home card « Ma liste » (js/views/home/cards/list.js) --- */
+
+.list-card {
+    max-width: 46rem;
+    margin: var(--space-6) auto 0;
+    padding: var(--space-6) var(--space-7);
+    display: grid;
+    gap: var(--space-3);
+    text-align: left;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+.list-card-title { display: flex; align-items: center; gap: var(--space-2); margin: 0; font-size: var(--text-110); }
+.list-card-items { margin: 0; color: var(--muted); overflow-wrap: anywhere; }
+.list-card-last { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); }
+.list-card-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-1); }
+
+@media (prefers-reduced-motion: reduce) {
+    .aisle-toggle .icon { transition: none; }
+}
