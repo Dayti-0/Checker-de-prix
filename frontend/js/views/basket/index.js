@@ -54,6 +54,10 @@ export function buildView() {
             }),
             stores: run.stores,
             cell: (store, id) => run.cells[`${store}:${id}`],
+            reason: (store) => {
+                const st = run.storeStates[store];
+                return st && st.status !== "ok" && st.status !== "empty" ? st.status : null;
+            },
             comparison: null,
             canChange: false,
         };
@@ -68,6 +72,7 @@ export function buildView() {
         items: (first ? first.lines : []).map((l) => ({ id: l.item_id, query: l.query, quantity: l.quantity, target: l.target })),
         stores: c.stores.map((s) => ({ store: s.store, label: s.label })),
         cell: (store, id) => lines.get(`${store}:${id}`),
+        reason: (store) => (c.stores.find((s) => s.store === store) || {}).reason || null,
         comparison: c,
         canChange: !run.updating && !c.outdated,
     };
@@ -177,7 +182,7 @@ function mainMarkup() {
             <ul class="store-cards" data-key="cards" data-patch data-testid="store-cards" aria-label="Paniers par enseigne">${cards}</ul>
         </div>
         ${!view.live ? html`<div class="plans-box" data-key="plans">${plansMarkup(c, view.items)}</div>` : ""}
-        <section class="basket-detail" data-key="detail" data-patch aria-labelledby="detail-title">
+        <section class="basket-detail" data-key="detail" data-patch aria-labelledby="detail-title" data-testid="basket-detail">
             <h2 id="detail-title" class="basket-h2" data-key="title">Prix par article</h2>
             <div class="detail-table" data-key="table" data-patch>${tableMarkup(view)}</div>
             <div class="detail-cards" data-key="cards" data-patch>${itemCardsMarkup(view)}</div>
@@ -247,7 +252,8 @@ function onRunChange(event) {
     if ((event === "done" || event === "updated") && run.comparison) {
         announcedStart = false;
         const v = verdict(run.comparison);
-        const what = v.kind === "best" ? `${v.label} : ${v.storeLabel}, ${v.value}` : v.text;
+        // Not the words of the verdict shown (« Panier le moins cher »): said differently
+        const what = v.kind === "best" ? `Le moins cher pour tout le panier : ${v.storeLabel}, ${v.value}.` : `${v.text}.`;
         announce(event === "done" ? `Comparaison terminée. ${what}` : `Panier mis à jour. ${what}`);
     }
     if (event === "stopped") announce("Comparaison arrêtée");

@@ -160,8 +160,8 @@ export function cellBody(view, item, s, line, low) {
             line.estimate != null ? html`<span class="note muted">compté ${euros(line.estimate)} dans l'estimation</span>` : ""
         }${changeButton(view, item, s, line)}`;
     }
-    const state = view.comparison ? (view.comparison.stores.find((x) => x.store === s.store) || {}).reason : null;
-    return html`<span class="cell-state muted">—<span class="cell-reason">${state ? reasonLabel(state) : "Pas comparé"}</span></span>`;
+    const reason = view.reason(s.store);
+    return html`<span class="cell-state muted">${reason ? reasonLabel(reason) : "Pas comparé"}</span>`;
 }
 
 // ---------------------------------------------------------------- table (computer)
@@ -192,7 +192,7 @@ export function tableMarkup(view) {
                     ${view.stores.map((s, i) => {
                         const line = lines[i];
                         const best = line && line.status === "found" && line.line_total === low;
-                        return html`<td class="cell ${line ? line.status : "wait"}${best ? " low" : ""}" data-cell="${s.store}:${item.id}">${cellBody(view, item, s, line, low)}</td>`;
+                        return html`<td class="cell ${line ? line.status : "wait"}${best ? " low" : ""}" data-cell="${s.store}:${item.id}"><div class="cell-body">${cellBody(view, item, s, line, low)}</div></td>`;
                     })}
                 </tr>`;
             })}</tbody>
@@ -203,9 +203,22 @@ export function tableMarkup(view) {
 
 // ---------------------------------------------------------------- cards (phone)
 
+// Retailers that could not be searched at all are said once, under the cards
+// (their card above gives the reason and the action), not in every card
+function searchedStores(view) {
+    if (!view.comparison) return { stores: view.stores, left: [] };
+    const out = new Set(view.comparison.stores.filter((s) => s.status === "unchecked").map((s) => s.store));
+    return { stores: view.stores.filter((s) => !out.has(s.store)), left: view.stores.filter((s) => out.has(s.store)) };
+}
+
 export function itemCardsMarkup(view) {
+    const { stores, left } = searchedStores(view);
+    const names = left.map((s) => s.label);
+    const note = names.length
+        ? html`<p class="item-cards-note">${names.length >= 2 ? `${names.slice(0, -1).join(", ")} et ${names.at(-1)} ne sont pas comparées` : `${names[0]} n'est pas comparée`} : voir leur carte plus haut.</p>`
+        : "";
     return html`<ul class="item-cards" data-testid="basket-items">${view.items.map((item) => {
-        const offers = itemOffers(view.stores, item.id, view.cell);
+        const offers = itemOffers(stores, item.id, view.cell);
         const low = cheapest(offers.map((o) => o.line));
         return html`<li class="item-card" data-key="card-${item.id}" data-item-card="${item.id}">
             <h3 class="item-card-title">${itemTitle(item)}</h3>
@@ -217,7 +230,7 @@ export function itemCardsMarkup(view) {
                 </li>`;
             })}</ol>
         </li>`;
-    })}</ul>`;
+    })}</ul>${note}`;
 }
 
 // ---------------------------------------------------------------- plans (optimizer, B61)

@@ -1,1 +1,87 @@
-/* Impression de la liste (P5). Empty for now. */
+/* Printing « Ma liste », « Mon panier » and « En magasin » (B69): the page
+   alone, black on white, smaller text, nothing to click, the folded aisles
+   open, the table of the basket rather than its cards; a box to tick in front
+   of each item of the list. A list of a few dozen items fits on one A4 page. */
+
+@media print {
+    @page { size: A4; margin: 12mm; }
+
+    :root, :root[data-theme="dark"] {
+        color-scheme: light only;
+        --ui-scale: .78;
+        --bg: Canvas;
+        --surface: Canvas;
+        --surface-2: Canvas;
+        --text: CanvasText;
+        --muted: GrayText;
+        --border: GrayText;
+        --best-bg: Canvas;
+        --warn-bg: Canvas;
+        --best-text: CanvasText;
+        --primary-text: CanvasText;
+        --warn: CanvasText;
+        --shadow: none;
+        --shadow-toast: none;
+    }
+    body { background: Canvas; color: CanvasText; }
+    main { max-width: none; padding: 0; }
+    a { text-decoration: none; }
+
+    /* Everything that is not the page itself */
+    .topbar, .primary-nav, #search-form, #store-filters, #setup-banner, #toast-region,
+    dialog, .p5-sheet, .spinner,
+    .list-cta, .list-help-box, .list-form, .list-usual-box, .list-tools, .row-actions, .aisle-toggle > .icon,
+    .basket-actions, .basket-status, .basket-progress, .basket-prefs, .basket-legend, .store-card-actions,
+    .cell-btn, .plan-follow, .store-progress,
+    .trip-top > a, .trip-offline, .trip-note .actions, .trip-bar .btn-primary, .trip-intro {
+        display: none !important;
+    }
+
+    .list-page, .basket-page, .basket-main, .trip-page { max-width: none; gap: var(--space-4); }
+
+    /* « Ma liste »: every aisle open, a box in front of each item */
+    .list-rows[hidden] { display: block !important; }
+    .list-groups { gap: var(--space-3); }
+    .aisle-head { margin: 0 0 var(--space-1); }
+    .aisle-toggle { min-height: 0; padding: 0; color: CanvasText; }
+    .aisle-count { background: none; }
+    .list-rows { border-radius: 0; border-width: 1px 0 0; }
+    .list-row { padding: var(--space-2) 0; break-inside: avoid; }
+    .row-head::before {
+        content: "";
+        flex: none;
+        width: 1rem;
+        height: 1rem;
+        margin-right: var(--space-2);
+        border: 1.5px solid CanvasText;
+        border-radius: var(--radius-35);
+    }
+    .row-title { min-height: 0; }
+    .row-title > .icon { display: none; }
+    .row-picks, .row-tags, .row-note { padding-left: 1.6rem; }
+    .tag { border-color: GrayText; }
+
+    /* « Mon panier »: the table, whole, and compact cards */
+    .basket-summary, .verdict, .store-card, .plan { border-color: GrayText; break-inside: avoid; }
+    .basket-summary { padding: var(--space-3); gap: var(--space-3); }
+    .verdict { padding: var(--space-3) var(--space-4); }
+    .store-cards { grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: var(--space-2); }
+    .store-card { padding: var(--space-3); }
+    .plan-list { gap: var(--space-2); }
+    .detail-table { display: block !important; }
+    .detail-cards { display: none !important; }
+    .table-scroll { max-height: none; overflow: visible; border-color: GrayText; }
+    .basket-table thead th, .basket-table tbody th, .basket-table tfoot th, .basket-table tfoot td, .basket-table thead th.corner { position: static; }
+    .basket-table th, .basket-table td { padding: var(--space-2) var(--space-3); border-color: GrayText; }
+    .basket-table td.cell { min-width: 0; }
+    .basket-table td.cell.low { box-shadow: none; font-weight: 700; }
+    .basket-table td.cell.low .cell-price { text-decoration: underline; }
+    .basket-table tr { break-inside: avoid; }
+    .badge { border: 1px solid CanvasText; background: Canvas !important; color: CanvasText !important; }
+
+    /* « En magasin » */
+    .trip-bar { position: static; margin: 0; box-shadow: none; border-radius: 0; }
+    .trip-check { min-height: 0; padding: var(--space-2) var(--space-3); }
+    .trip-box { width: 1.4rem; height: 1.4rem; border-width: 1.5px; }
+    .trip-row { break-inside: avoid; }
+}

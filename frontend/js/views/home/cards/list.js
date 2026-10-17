@@ -18,7 +18,7 @@ export const enabled = true;
 function lastLine(c) {
     if (!c) return "";
     const v = verdict(c);
-    const when = c.created_at ? ` · ${relativeTime(c.created_at)}` : "";
+    const when = c.created_at ? ` · comparé ${relativeTime(c.created_at)}` : "";
     if (c.outdated) return html`<p class="list-card-last muted">Votre liste a changé depuis la dernière comparaison.</p>`;
     if (v.kind === "best") {
         return html`<p class="list-card-last">${v.label} : ${retailerBadge(v.store, v.storeLabel)} <strong>${v.value}</strong><span class="muted">${when}</span></p>`;

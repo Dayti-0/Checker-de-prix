@@ -42,7 +42,9 @@ export function openSheet({ id, title, body, onClose = null }) {
         if (onClose) onClose();
         let back = opener;
         if ((!back || !back.isConnected) && focusKey) {
-            back = document.querySelector(`[data-focus="${CSS.escape(focusKey)}"]`);
+            // The one shown (the basket draws a table and cards, one of them hidden)
+            const same = [...document.querySelectorAll(`[data-focus="${CSS.escape(focusKey)}"]`)];
+            back = same.find((el) => el.getClientRects().length > 0) || same[0];
         }
         if (back && back.isConnected && typeof back.focus === "function") {
             back.focus({ preventScroll: true });

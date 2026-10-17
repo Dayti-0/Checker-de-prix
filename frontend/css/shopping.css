@@ -1,1 +1,168 @@
-/* Mode « En magasin » (P5: js/views/shopping/). Empty for now. */
+/* Mode « En magasin » (js/views/shopping/): where to shop (plan of the last
+   basket, one retailer, the list by aisle), then the list to tick with one
+   hand: rows of at least 3.5 rem, boxes of 56 px, ticked items at the bottom,
+   the counter « 3/7 · 12,40 € » and « Terminer » stuck at the bottom. */
+
+/* Boxes of 56 px at least, whatever the text size */
+.trip-page {
+    --trip-box: max(56px, 3.5rem);
+    max-width: 44rem;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-6);
+}
+.trip-page p { margin: 0; }
+.trip-title { margin: 0; font-size: var(--text-160); overflow-wrap: anywhere; }
+.trip-intro, .trip-sub { color: var(--muted); }
+.trip-h2 { margin: var(--space-2) 0 0; font-size: var(--text-110); }
+.trip-top { display: grid; gap: var(--space-3); justify-items: start; }
+
+/* --- Where to shop --- */
+
+.trip-choices { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-3); }
+.trip-choice {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "title chevron" "meta chevron";
+    align-items: center;
+    gap: var(--space-1) var(--space-4);
+    min-height: 4rem;
+    padding: var(--space-4) var(--space-6);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-85);
+    box-shadow: var(--shadow);
+    text-decoration: none;
+}
+.trip-choice:hover { border-color: var(--primary-text); }
+.trip-choice:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.trip-choice-title, .trip-choice .badge { grid-area: title; justify-self: start; font-weight: 700; font-size: var(--text-105); overflow-wrap: anywhere; }
+.trip-choice-meta { grid-area: meta; color: var(--muted); font-size: var(--text-90); font-variant-numeric: tabular-nums; }
+.trip-choice > .icon { grid-area: chevron; color: var(--muted); }
+.trip-resume { justify-self: start; }
+
+/* --- The list to tick --- */
+
+.trip-stores { display: grid; gap: var(--space-7); }
+.trip-store { display: grid; gap: var(--space-4); }
+.trip-store-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2) var(--space-4);
+    margin: 0;
+    padding-bottom: var(--space-2);
+    border-bottom: 2px solid var(--border);
+    font-size: var(--text-120);
+}
+.trip-store-head .badge { font-size: var(--text-105); }
+.trip-store-sum { color: var(--muted); font-size: var(--text-95); font-weight: 600; font-variant-numeric: tabular-nums; }
+.trip-aisles { display: grid; gap: var(--space-5); }
+.trip-aisle { display: grid; gap: var(--space-2); }
+.trip-aisle-name {
+    margin: 0;
+    padding: 0 var(--space-2);
+    color: var(--muted);
+    font-size: var(--text-90);
+    font-weight: 800;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+}
+.trip-rows {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+.trip-row { border-bottom: 1px solid var(--border); }
+.trip-row:last-child { border-bottom: 0; }
+.trip-check {
+    position: relative;
+    display: grid;
+    grid-template-columns: var(--trip-box) minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--space-5);
+    min-height: calc(var(--trip-box) + 2 * var(--space-4));
+    padding: var(--space-4) var(--space-5);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+/* The real box covers the drawn one: a tap anywhere on the row ticks it */
+.trip-check input {
+    position: absolute;
+    left: var(--space-5);
+    top: 50%;
+    width: var(--trip-box);
+    height: var(--trip-box);
+    margin: 0;
+    transform: translateY(-50%);
+    opacity: 0;
+    cursor: pointer;
+}
+.trip-box {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--trip-box);
+    height: var(--trip-box);
+    border: 3px solid var(--muted);
+    border-radius: var(--radius-70);
+    background: var(--surface);
+    color: transparent;
+}
+.trip-box .icon { width: 2rem; height: 2rem; }
+.trip-check input:checked + .trip-box { background: var(--primary); border-color: var(--primary); color: var(--on-accent); }
+.trip-check input:focus-visible + .trip-box { box-shadow: var(--focus-ring); }
+.trip-check:hover .trip-box { border-color: var(--primary-text); }
+.trip-text { display: grid; gap: var(--space-1); min-width: 0; }
+.trip-query { font-size: var(--text-120); font-weight: 700; overflow-wrap: anywhere; }
+.trip-qty { color: var(--primary-text); white-space: nowrap; }
+.trip-detail { color: var(--muted); font-size: var(--text-95); overflow-wrap: anywhere; }
+.trip-detail em { color: var(--text); }
+.trip-price { font-size: var(--text-110); font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.trip-row.is-checked .trip-query, .trip-row.is-checked .trip-price { color: var(--muted); text-decoration: line-through; }
+.trip-row.is-checked .trip-detail { opacity: .8; }
+.trip-aisle.done .trip-rows { background: var(--surface-2); box-shadow: none; }
+.trip-all-done { display: flex; align-items: center; gap: var(--space-2); color: var(--best-text); font-weight: 600; }
+.trip-offline { display: flex; align-items: center; gap: var(--space-3); border-radius: var(--radius-70); }
+
+/* Counter and « Terminer », stuck at the bottom of the screen */
+.trip-bar {
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    margin: 0 calc(-1 * var(--space-4));
+    padding: var(--space-4) var(--space-6) calc(var(--space-4) + env(safe-area-inset-bottom));
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius) var(--radius) 0 0;
+    box-shadow: var(--shadow-toast);
+}
+.trip-counter { display: grid; min-width: 0; font-variant-numeric: tabular-nums; }
+.trip-counter strong { font-size: var(--text-130); }
+.trip-counter-sub { color: var(--muted); font-size: var(--text-90); }
+.trip-bar .btn-primary { min-height: 3.25rem; padding: 0 var(--space-8); font-size: var(--text-105); }
+/* The messages (« Annuler ») show above the bar */
+.has-trip-bar .toast { bottom: calc(6.5rem + var(--bottom-bar-h)); }
+
+.finish-choices { display: grid; gap: var(--space-3); }
+.finish-choices > * { width: 100%; white-space: normal; }
+.p5-sheet .finish-choices .btn-primary, .p5-sheet .finish-choices .btn-ghost { min-height: 3.25rem; }
+
+@media (max-width: 520px) {
+    .trip-title { font-size: var(--text-140); }
+    .trip-check { gap: var(--space-4); padding: var(--space-3) var(--space-4); }
+    .trip-check input { left: var(--space-4); }
+    .trip-query { font-size: var(--text-110); }
+    .trip-bar { margin: 0 calc(-1 * var(--space-3)); padding-left: var(--space-5); padding-right: var(--space-5); }
+}

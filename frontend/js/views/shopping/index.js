@@ -171,7 +171,8 @@ function row(it, storeLabel) {
     const name = qty ? `${item.query} ${qty}` : item.query;
     let detail = "";
     if (it.status === "found" && it.product) {
-        const packs = it.packs > 1 ? ` · ${it.packs} × ${euros(it.product.price)}` : "";
+        // « 2 × 1,15 € » never cut at the end of a line
+        const packs = it.packs > 1 ? ` · ${`${it.packs} × ${euros(it.product.price)}`.replace(/ /g, "\u00a0")}` : "";
         detail = `${it.picked ? "★ " : ""}${it.product.name}${it.product.quantity_label ? ` (${it.product.quantity_label})` : ""}${packs}`;
     } else if (it.status === "not_found") {
         detail = `Introuvable chez ${storeLabel} : à chercher ailleurs`;
