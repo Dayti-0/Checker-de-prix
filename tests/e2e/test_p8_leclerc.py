@@ -209,6 +209,7 @@ def test_assistant_proposes_three_lists(desktop):
     leclerc = page.locator(".onb-stores[data-retailer=leclerc]")
     expect(leclerc.locator("legend")).to_contain_text("Drive E.Leclerc")
     expect(leclerc.get_by_role("radio")).to_have_count(4)  # the 3 nearest, « Ne pas choisir maintenant »
+    expect(leclerc.locator(".onb-store").first).to_contain_text("Montpellier Comédie · retrait piéton")
     # Three lists side by side
     tops = {round(box.bounding_box()["y"]) for box in lists.all()}
     assert len(tops) == 1

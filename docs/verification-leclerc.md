@@ -18,7 +18,7 @@ Les fichiers utiles sont dans le dossier `data\debug` de PrixMalin, et dans le *
 - `leclerc-…-empty.html` : une recherche sans produit ;
 - `leclerc-…-stores.json` : une liste des drives que PrixMalin n'a pas su lire ;
 - `leclerc-…-sample.html` : des pages de recherche gardées exprès (voir l'étape 6) ;
-- `leclerc-…-error.html` ou `-blocked.html` : une recherche en erreur ou bloquée.
+- `leclerc-…-error.html`, `leclerc-…-error.txt` (la réponse brute du site) ou `-blocked.html` : une recherche en erreur ou bloquée.
 
 Ces fichiers ne contiennent pas vos identifiants : le panier d'un drive où vous n'êtes pas connecté est vide.
 

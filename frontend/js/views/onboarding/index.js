@@ -109,9 +109,12 @@ function storeChoices(key) {
     } else {
         body = html`${list.stores.map((s, i) => {
             const distance = distanceText(s);
+            const services = s.services || [];
+            // E.Leclerc: a pedestrian pick-up point is not a drive (never chosen automatically)
+            const pickup = services.includes("Retrait piéton") && !services.includes("Drive");
             return html`<label class="onb-store">
                 <input type="radio" name="onb-${key}" value="${i}"${list.choice === i ? html` checked` : ""}>
-                <span class="onb-store-text"><strong>${s.name || "Magasin choisi"}</strong>${distance && html` <span class="muted">· ${distance}</span>`}
+                <span class="onb-store-text"><strong>${s.name || "Magasin choisi"}</strong>${pickup && html` <span class="muted">· retrait piéton</span>`}${distance && html` <span class="muted">· ${distance}</span>`}
                     ${s.current && html` <span class="onb-store-tag">Magasin actuel</span>`}
                     ${s.address && html`<span class="onb-store-address">${s.address}</span>`}</span>
             </label>`;
