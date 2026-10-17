@@ -74,7 +74,8 @@ export function buildView() {
         cell: (store, id) => lines.get(`${store}:${id}`),
         reason: (store) => (c.stores.find((s) => s.store === store) || {}).reason || null,
         comparison: c,
-        canChange: !run.updating && !c.outdated,
+        // Kept while the basket is updated (the focus stays on « Changer »), ignored meanwhile
+        canChange: !c.outdated,
     };
 }
 
@@ -270,6 +271,7 @@ async function onClick(e) {
     else if (d.retry) compareNow();
     else if (d.setup) await openSite(d.setup);
     else if (d.change) {
+        if (run.updating) return;
         const view = buildView();
         const id = Number(d.change);
         const item = view && view.items.find((i) => i.id === id);

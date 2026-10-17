@@ -8,7 +8,7 @@
 
 import { retailerBadge } from "../../components/retailer-badge.js";
 import { euros, plural } from "../../core/fmt.js";
-import { html, safeUrl } from "../../core/html.js";
+import { attr, html, safeUrl } from "../../core/html.js";
 import { icon } from "../../core/icons.js";
 import { brandText } from "../search/product-row.js";
 import { cellNotes, cheapest, itemOffers, planTitle, reasonLabel, storeTexts, verdict } from "./model.js";
@@ -129,16 +129,18 @@ function productName(line) {
     }${meta ? html`<span class="cell-meta">${meta}</span>` : ""}</span>`;
 }
 
-function changeButton(view, item, s, line) {
+// `where`: "t" (table) or "c" (cards), so that the focus comes back to the one shown
+function changeButton(view, item, s, line, where) {
     if (!view.canChange || !line || line.status === "unchecked") return "";
+    const focus = `change-${where}-${s.store}-${item.id}`;
     if (line.status === "not_found") {
-        return html`<button type="button" class="cell-btn" data-change="${item.id}" data-store="${s.store}" data-mode="manual" data-focus="change-${s.store}-${item.id}" aria-label="Saisir le prix de ${item.query} chez ${s.label}">Saisir le prix</button>`;
+        return html`<button type="button" class="cell-btn" data-change="${item.id}" data-store="${s.store}" data-mode="manual" data-focus="${focus}" aria-label="Saisir le prix de ${item.query} chez ${s.label}">Saisir le prix</button>`;
     }
-    return html`<button type="button" class="cell-btn" data-change="${item.id}" data-store="${s.store}" data-focus="change-${s.store}-${item.id}" aria-label="Changer le produit ${item.query} chez ${s.label}">Changer</button>`;
+    return html`<button type="button" class="cell-btn" data-change="${item.id}" data-store="${s.store}" data-focus="${focus}" aria-label="Changer le produit ${item.query} chez ${s.label}">Changer</button>`;
 }
 
 // Content of a cell (table) or of an offer (card): price, product, notes, button
-export function cellBody(view, item, s, line, low) {
+export function cellBody(view, item, s, line, low, where = "t") {
     if (!line) {
         return view.running
             ? html`<span class="cell-wait"><span class="spinner" aria-hidden="true"></span><span class="visually-hidden">En attente</span></span>`
@@ -150,15 +152,15 @@ export function cellBody(view, item, s, line, low) {
             ${line.packs > 1 ? html`<span class="cell-packs">${line.packs} × ${euros(line.product.price)}</span>` : ""}
             ${productName(line)}
             ${notesMarkup(line)}
-            ${changeButton(view, item, s, line)}`;
+            ${changeButton(view, item, s, line, where)}`;
     }
     if (line.status === "excluded") {
-        return html`<span class="cell-state">Pas disponible ici</span>${changeButton(view, item, s, line)}`;
+        return html`<span class="cell-state">Pas disponible ici</span>${changeButton(view, item, s, line, where)}`;
     }
     if (line.status === "not_found") {
         return html`<span class="cell-state">Introuvable</span>${notesMarkup(line)}${
             line.estimate != null ? html`<span class="note muted">compté ${euros(line.estimate)} dans l'estimation</span>` : ""
-        }${changeButton(view, item, s, line)}`;
+        }${changeButton(view, item, s, line, where)}`;
     }
     const reason = view.reason(s.store);
     return html`<span class="cell-state muted">${reason ? reasonLabel(reason) : "Pas comparé"}</span>`;
@@ -166,10 +168,17 @@ export function cellBody(view, item, s, line, low) {
 
 // ---------------------------------------------------------------- table (computer)
 
+// Column of a retailer that could not be searched at all (left out of the printed page)
+function offColumn(view, s) {
+    if (!view.comparison) return false;
+    const c = view.comparison.stores.find((x) => x.store === s.store);
+    return Boolean(c && c.status === "unchecked");
+}
+
 function footCell(view, s) {
     if (view.live || !view.comparison) return html`<td class="foot-cell">…</td>`;
     const c = view.comparison.stores.find((x) => x.store === s.store);
-    if (!c || c.status === "unchecked") return html`<td class="foot-cell muted">—</td>`;
+    if (!c || c.status === "unchecked") return html`<td class="foot-cell muted col-off">—</td>`;
     return html`<td class="foot-cell${view.comparison.best_store === s.store ? " best" : ""}">
         <span class="foot-total">${euros(c.total)}</span>
         ${c.estimated && c.estimated_total != null ? html`<span class="foot-est">estimé ${euros(c.estimated_total)}</span>` : ""}
@@ -182,7 +191,7 @@ export function tableMarkup(view) {
         <table class="basket-table">
             <caption class="visually-hidden">Prix de chaque article dans chaque enseigne</caption>
             <thead><tr><th scope="col" class="corner">Article</th>${view.stores.map(
-                (s) => html`<th scope="col">${retailerBadge(s.store, s.label)}</th>`,
+                (s) => html`<th scope="col"${attr({ class: offColumn(view, s) ? "col-off" : null })}>${retailerBadge(s.store, s.label)}</th>`,
             )}</tr></thead>
             <tbody>${view.items.map((item) => {
                 const lines = view.stores.map((s) => view.cell(s.store, item.id));
@@ -192,7 +201,7 @@ export function tableMarkup(view) {
                     ${view.stores.map((s, i) => {
                         const line = lines[i];
                         const best = line && line.status === "found" && line.line_total === low;
-                        return html`<td class="cell ${line ? line.status : "wait"}${best ? " low" : ""}" data-cell="${s.store}:${item.id}"><div class="cell-body">${cellBody(view, item, s, line, low)}</div></td>`;
+                        return html`<td class="cell ${line ? line.status : "wait"}${best ? " low" : ""}${offColumn(view, s) ? " col-off" : ""}" data-cell="${s.store}:${item.id}"><div class="cell-body">${cellBody(view, item, s, line, low)}</div></td>`;
                     })}
                 </tr>`;
             })}</tbody>
@@ -226,7 +235,7 @@ export function itemCardsMarkup(view) {
                 const best = line && line.status === "found" && line.line_total === low;
                 return html`<li class="offer ${line ? line.status : "wait"}${best ? " low" : ""}" data-offer="${store}">
                     <span class="offer-store">${retailerBadge(store, label)}</span>
-                    <span class="offer-body">${cellBody(view, item, { store, label }, line, low)}</span>
+                    <span class="offer-body">${cellBody(view, item, { store, label }, line, low, "c")}</span>
                 </li>`;
             })}</ol>
         </li>`;

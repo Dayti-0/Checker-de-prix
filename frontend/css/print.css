@@ -8,7 +8,7 @@
 
     :root, :root[data-theme="dark"] {
         color-scheme: light only;
-        --ui-scale: .78;
+        --ui-scale: .72;
         --bg: Canvas;
         --surface: Canvas;
         --surface-2: Canvas;
@@ -32,12 +32,13 @@
     dialog, .p5-sheet, .spinner,
     .list-cta, .list-help-box, .list-form, .list-usual-box, .list-tools, .row-actions, .aisle-toggle > .icon,
     .basket-actions, .basket-status, .basket-progress, .basket-prefs, .basket-legend, .store-card-actions,
-    .cell-btn, .plan-follow, .store-progress,
+    .cell-btn, .plan-follow, .store-progress, .store-card.unchecked, .col-off, .plans > p, .verdict-help,
+    .basket-skipped, .item-cards-note,
     .trip-top > a, .trip-offline, .trip-note .actions, .trip-bar .btn-primary, .trip-intro {
         display: none !important;
     }
 
-    .list-page, .basket-page, .basket-main, .trip-page { max-width: none; gap: var(--space-4); }
+    .list-page, .basket-page, .basket-main, .trip-page, .basket-detail { max-width: none; gap: var(--space-3); }
 
     /* « Ma liste »: every aisle open, a box in front of each item */
     .list-rows[hidden] { display: block !important; }
@@ -64,24 +65,36 @@
     /* « Mon panier »: the table, whole, and compact cards */
     .basket-summary, .verdict, .store-card, .plan { border-color: GrayText; break-inside: avoid; }
     .basket-summary { padding: var(--space-3); gap: var(--space-3); }
-    .verdict { padding: var(--space-3) var(--space-4); }
+    .verdict { padding: var(--space-2) var(--space-4); }
+    .verdict-main { margin: 0; }
     .store-cards { grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: var(--space-2); }
     .store-card { padding: var(--space-3); }
     .plan-list { gap: var(--space-2); }
+    .plan { padding: var(--space-3) var(--space-4); }
+    /* One plan only: the verdict already says it */
+    .plans:has(.plan:only-child) { display: none; }
+    .verdict-value { font-size: var(--text-150); }
+    .store-totals .amount { font-size: var(--text-110); }
+    .store-card { gap: var(--space-1); }
     .detail-table { display: block !important; }
     .detail-cards { display: none !important; }
     .table-scroll { max-height: none; overflow: visible; border-color: GrayText; }
+    .basket-table { table-layout: fixed; }
     .basket-table thead th, .basket-table tbody th, .basket-table tfoot th, .basket-table tfoot td, .basket-table thead th.corner { position: static; }
-    .basket-table th, .basket-table td { padding: var(--space-2) var(--space-3); border-color: GrayText; }
-    .basket-table td.cell { min-width: 0; }
+    .basket-table th, .basket-table td { padding: var(--space-1) var(--space-3); border-color: GrayText; }
+    :is(.cell-body, .offer-body) > .cell-product { margin-top: 0; }
+    .basket-table td.cell, .basket-table th { min-width: 0; max-width: none; }
     .basket-table td.cell.low { box-shadow: none; font-weight: 700; }
     .basket-table td.cell.low .cell-price { text-decoration: underline; }
     .basket-table tr { break-inside: avoid; }
     .badge { border: 1px solid CanvasText; background: Canvas !important; color: CanvasText !important; }
 
     /* « En magasin » */
-    .trip-bar { position: static; margin: 0; box-shadow: none; border-radius: 0; }
-    .trip-check { min-height: 0; padding: var(--space-2) var(--space-3); }
-    .trip-box { width: 1.4rem; height: 1.4rem; border-width: 1.5px; }
+    .trip-page { --trip-box: 1.1rem; }
+    .trip-bar { position: static; margin: 0; padding: var(--space-2) 0; border: 0; box-shadow: none; }
+    .trip-check { min-height: 0; padding: var(--space-2) var(--space-3); gap: var(--space-4); }
+    .trip-box { border-width: 1.5px; border-color: CanvasText; border-radius: var(--radius-35); }
+    .trip-rows { border-radius: 0; }
+    .trip-box .icon { width: .9rem; height: .9rem; }
     .trip-row { break-inside: avoid; }
 }
