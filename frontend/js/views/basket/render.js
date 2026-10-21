@@ -134,14 +134,17 @@ function notesMarkup(line) {
     return html`<span class="cell-notes">${notes.map((n) => html`<span class="note ${n.kind}">${n.text}</span>`)}</span>`;
 }
 
-function productName(line) {
+function productName(line, storeLabel) {
     const p = line.product;
     const url = safeUrl(p.product_url);
     const brand = brandText(p.brand);
     const meta = [brand, p.quantity_label].filter(Boolean).join(" · ");
     const name = html`${line.picked ? html`${icon("star")}<span class="visually-hidden">Votre choix : </span>` : ""}${p.name}`;
+    // One name per link: « Beurre doux, Aldi (nouvel onglet) »
     return html`<span class="cell-product">${
-        url ? html`<a class="cell-name" href="${url}" target="_blank" rel="noopener noreferrer">${name}</a>` : html`<span class="cell-name">${name}</span>`
+        url
+            ? html`<a class="cell-name" href="${url}" target="_blank" rel="noopener noreferrer">${name}<span class="visually-hidden">, ${storeLabel} (nouvel onglet)</span></a>`
+            : html`<span class="cell-name">${name}</span>`
     }${meta ? html`<span class="cell-meta">${meta}</span>` : ""}</span>`;
 }
 
@@ -173,7 +176,7 @@ export function cellBody(view, item, s, line, low, where = "t") {
         const price = html`<span class="cell-price${best ? " low" : ""}">${euros(line.line_total)}${best ? html`<span class="visually-hidden"> (le moins cher)</span>` : ""}</span>`;
         return html`${cellTop(price, changeButton(view, item, s, line, where))}
             ${line.packs > 1 ? html`<span class="cell-packs">${line.packs} × ${euros(line.product.price)}</span>` : ""}
-            ${productName(line)}
+            ${productName(line, s.label)}
             ${notesMarkup(line)}`;
     }
     if (line.status === "excluded") {

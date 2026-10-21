@@ -290,6 +290,12 @@ def test_on_a_phone_one_card_per_item(mobile):
     expect(
         page.get_by_text("Intermarché et Courses U ne sont pas comparées : voir leur carte plus haut.")
     ).to_be_visible()
+    # One name per product link: « Beurre doux, Lidl (nouvel onglet) »
+    expect(beurre.get_by_role("link", name=re.compile(r"^Beurre doux ?, Lidl \(nouvel onglet\)$"))).to_be_visible()
+    names = page.locator("[data-item-card] a.cell-name").evaluate_all(
+        "(links) => links.map((a) => a.textContent.replace(/\\s+/g, ' ').trim())"
+    )
+    assert names and len(names) == len(set(names)), names
     assert_accessible(page, "panier sur téléphone")
     for width in (390, 360):
         page.set_viewport_size({"width": width, "height": 800})
