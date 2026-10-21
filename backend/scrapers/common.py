@@ -66,17 +66,27 @@ _CLOUDFLARE_MARKS = (
 )
 
 # DataDome's own block page: no captcha to solve, the connection is refused
-# (« Access blocked. … unusual activity from your device » on E.Leclerc Drive)
+# (« Access blocked. » on E.Leclerc Drive). Not « We detected unusual activity
+# from your device or network »: that footer is on every DataDome page, the
+# slider captcha the user can solve included
 _DATADOME_HARD_TEXT = re.compile(
     r"acc[eè]s temporairement restreint|temporairement restreint|you have been blocked|vous avez [eé]t[eé] bloqu[eé]"
-    r"|access blocked|access is temporarily restricted|unusual activity from your device|activit[eé] inhabituelle",
+    r"|access blocked|access is temporarily restricted",
+    re.I,
+)
+# A puzzle to solve (« Slide right to complete the puzzle », « Verification Required »)
+_DATADOME_PUZZLE_TEXT = re.compile(
+    r"slide right|faites glisser|glissez vers la droite|verification required|v[eé]rification requise",
     re.I,
 )
 
 
 def is_hard_block_text(text: str | None) -> bool:
-    """The text of a page says the connection is refused for a while (DataDome block page)."""
-    return bool(text) and bool(_DATADOME_HARD_TEXT.search(text))
+    """The text of a page says the connection is refused for a while (DataDome block page).
+
+    A text that also shows a puzzle to solve is a captcha, not a block.
+    """
+    return bool(text) and bool(_DATADOME_HARD_TEXT.search(text)) and not _DATADOME_PUZZLE_TEXT.search(text)
 
 
 def _datadome_url(text: str) -> str | None:
@@ -97,17 +107,23 @@ def classify_datadome(url: str | None, text: str | None = None) -> str | None:
 
     ``url`` is a page, iframe or JSON ``url`` value; ``text`` the text of the
     block page or the body of an API answer (``{"url": ...}``). ``t=bv`` in the
-    captcha URL, or the text « Accès temporairement restreint », is a hard block:
-    the connection is refused and there is nothing to solve. Any other
-    captcha-delivery.com URL is a captcha (or a check that passes by itself).
+    captcha URL, or the text « Accès temporairement restreint » / « Access
+    blocked », is a hard block: the connection is refused and there is nothing
+    to solve. A text showing a puzzle (« Slide right… ») is a captcha whatever
+    else it says; any other captcha-delivery.com URL is a captcha (or a check
+    that passes by itself).
     """
     url = url or _datadome_url(text or "") or ""
-    if text and _DATADOME_HARD_TEXT.search(text[:5000]):
+    head = (text or "")[:5000]
+    if "captcha-delivery.com" in url and "bv" in parse_qs(urlparse(url).query).get("t", []):
         return "hard_block"
-    if "captcha-delivery.com" not in url:
-        return "captcha" if "captcha-delivery.com" in (text or "")[:5000] else None
-    values = parse_qs(urlparse(url).query).get("t", [])
-    return "hard_block" if "bv" in values else "captcha"
+    if is_hard_block_text(head):
+        return "hard_block"
+    if "captcha-delivery.com" in url or "captcha-delivery.com" in head:
+        return "captcha"
+    if _DATADOME_HARD_TEXT.search(head):
+        return "captcha"  # a block text with a puzzle: the puzzle is shown
+    return None
 
 
 def classify_page(

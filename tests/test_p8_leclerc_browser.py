@@ -6,6 +6,7 @@ The window itself is covered by tests/test_p3_real_chrome.py.
 """
 
 import asyncio
+import contextlib
 import json
 import re
 
@@ -255,6 +256,103 @@ def test_hard_block_of_the_search(manager):
     assert len(searches) == 1  # never retried
 
 
+SLIDER_FRAME = """<html><body><h1>Verification Required</h1><canvas></canvas>
+<p>Slide right to complete the puzzle.</p><p>Why is this step needed?</p>
+<p>We detected unusual activity from your device or network. Reasons may include:</p>
+<ul><li>Rapid taps or clicks</li><li>Automated (bot) activity on your network</li></ul>
+<p>Need help? Submit feedback.</p></body></html>"""
+CAPTCHA_FRAME = re.compile(r"https://geo\.captcha-delivery\.com/captcha/.*")
+
+
+def test_slider_captcha_at_the_visit_is_a_check_not_a_block(manager):
+    """The text of the slider captcha (read in its frame) has the footer of the block page."""
+    scraper = lc.LeclercScraper()
+    frames = []
+
+    async def scenario(page):
+        await offline(page)
+        await page.route(HOME, html(fixtures.LECLERC_CAPTCHA_HTML, 403))
+        await page.route(CAPTCHA_FRAME, counter(html(SLIDER_FRAME), frames))
+        with pytest.raises(BlockedError) as error:
+            await scraper.search(page, "farine", BRUGES)
+        return error.value
+
+    error = run_scenario(manager, "leclerc-slider", scenario)
+    assert frames  # the frame was there, its text read
+    assert not isinstance(error, HardBlockError) and str(error) == lc.CAPTCHA_MESSAGE
+
+
+def test_plain_refusal_of_the_search_is_an_error_and_kept(manager):
+    """403 without any DataDome mark: nothing to validate in the window, the answer is kept."""
+    scraper = lc.LeclercScraper()
+    searches = []
+
+    async def scenario(page):
+        await offline(page)
+        await page.route(HOME, html(fixtures.LECLERC_HOME_HTML))
+        await page.route(SEARCH, counter(html("<html><body><h1>403 Forbidden</h1></body></html>", 403), searches))
+        with pytest.raises(lc.ScraperError) as error:
+            await scraper.search(page, "farine", BRUGES)
+        return error.value
+
+    error = run_scenario(manager, "leclerc-refused-403", scenario)
+    assert not isinstance(error, BlockedError) and str(error) == lc.REFUSED_MESSAGE
+    assert len(searches) == 1
+    saved = list(config.DEBUG_DIR.glob("leclerc-*-refused.json"))
+    assert len(saved) == 1
+    record = json.loads(saved[0].read_text(encoding="utf-8"))
+    assert record["status"] == 403 and "403 Forbidden" in record["body"]
+    assert "magasin-" not in saved[0].read_text(encoding="utf-8")  # not the address of the drive
+
+
+def test_page_that_is_no_page_of_the_drive_is_an_error(manager):
+    """A page of the site in 200 that is no page of the drive (error page): never « Aucun produit »."""
+    scraper = lc.LeclercScraper()
+    error_page = "<html><head><title>Erreur</title></head><body><h1>Une erreur est survenue</h1></body></html>"
+
+    async def scenario(page):
+        await offline(page)
+        await page.route(HOME, html(fixtures.LECLERC_HOME_HTML))
+        await page.route(SEARCH, html(error_page))
+        with pytest.raises(lc.ScraperError) as error:
+            await scraper.search(page, "farine", BRUGES)
+        return str(error.value)
+
+    assert run_scenario(manager, "leclerc-not-drive", scenario) == lc.SEARCH_FAILED
+    assert scraper.last_source is None
+    assert not list(config.DEBUG_DIR.glob("leclerc-*-empty.html"))
+    saved = list(config.DEBUG_DIR.glob("leclerc-*-error.html"))
+    assert len(saved) == 1 and "Une erreur est survenue" in saved[0].read_text(encoding="utf-8")
+
+
+def test_slow_fetch_is_a_timeout_without_new_visit(manager, monkeypatch):
+    """fetch() stopped by its own time limit: no new visit nor navigation (they would not fit in the time left)."""
+    monkeypatch.setattr(lc, "FETCH_TIMEOUT_MS", 300)
+    scraper = lc.LeclercScraper()
+    visits, searches = [], []
+    answered = asyncio.Event()
+
+    async def scenario(page):
+        await offline(page)
+        await page.route(HOME, counter(html(fixtures.LECLERC_HOME_HTML), visits))
+
+        async def slow(route, request):
+            searches.append(request.resource_type)
+            await answered.wait()  # the site answers only once the search has given up
+            with contextlib.suppress(Exception):  # the request was given up
+                await route.fulfill(status=200, content_type="text/html", body=fixtures.LECLERC_SEARCH_HTML)
+
+        await page.route(SEARCH, slow)
+        try:
+            with pytest.raises(TimeoutError):
+                await scraper.search(page, "eau", BRUGES)
+        finally:
+            answered.set()
+
+    run_scenario(manager, "leclerc-slow", scenario)
+    assert visits == [HOME] and searches == ["fetch"]
+
+
 def test_error_of_the_site_is_kept(manager):
     scraper = lc.LeclercScraper()
 
@@ -372,6 +470,25 @@ def test_find_stores_captcha_and_nothing(manager):
 
     assert run_scenario(manager, "leclerc-stores-bad", scenario) == []
     assert len(list(config.DEBUG_DIR.glob("leclerc-*-stores.json"))) == 1
+
+
+def test_find_stores_plain_refusal_is_an_error_and_kept(manager):
+    scraper = lc.LeclercScraper()
+
+    async def scenario(page):
+        await offline(page)
+        await page.route(PORTAL, html(fixtures.LECLERC_PORTAL_HTML))
+        await page.route(LOCATOR, json_answer({"Message": "Authorization has been denied for this request."}, 401))
+        with pytest.raises(lc.ScraperError) as error:
+            await scraper.find_stores(page, 43.6, 3.87, "34000")
+        return error.value
+
+    error = run_scenario(manager, "leclerc-stores-refused", scenario)
+    assert not isinstance(error, BlockedError) and str(error) == lc.LOCATOR_FAILED
+    saved = list(config.DEBUG_DIR.glob("leclerc-*-refused.json"))
+    assert len(saved) == 1
+    text = saved[0].read_text(encoding="utf-8")
+    assert json.loads(text)["status"] == 401 and "34000" not in text and "43.6" not in text
 
 
 def test_read_site_store_without_request(manager):

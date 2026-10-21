@@ -17,10 +17,12 @@ the site (hard block) never retried.
    the server;
 3. the products are the JSON of the widget
    ``Utilitaires.widget.initOptions('…pnlElementProduit', {objContenu, objContenuMDD})``
-   read by ``parse_search_html`` (pure). ``fetch`` refused (status 0) or
-   « session expirée »: the drive is visited again and the search page loaded
-   as a real page, once (its rendered tiles ``li.liWCRS310_Product`` are the
-   last fallback).
+   read by ``parse_search_html`` (pure). ``fetch`` refused (status 0,
+   « Failed to fetch ») or « session expirée »: the drive is visited again and
+   the search page loaded as a real page, once (its rendered tiles
+   ``li.liWCRS310_Product`` are the last fallback). A ``fetch`` that took too
+   long is a timeout, without a new visit; a page that is no page of the drive
+   (error page of the site) is an error, never « Aucun produit ».
 
 **Prices** (``element_to_product``, checked on real pages of 2025): ``nrPVUnitaireTTC``
 is the price; an immediate discount (« BRII », ``neTypeLotBrii`` 0) lowers it
@@ -75,6 +77,8 @@ QUERY_MAX = 40
 # The page of the drive is visited again after this time (the site sends an
 # idle session elsewhere after about 16 minutes)
 REVISIT_SECONDS = 15 * 60
+# Time limit of the fetch() of a search page (the search has 60 s in all)
+FETCH_TIMEOUT_MS = 30000
 # Pause between two calls of the store finder
 LOCATOR_PAUSE_SECONDS = 1.2
 # Longest address accepted for a drive (as StoreChoice)
@@ -87,7 +91,12 @@ STORE_GONE = "Ce drive n'existe plus sur E.Leclerc Drive : choisissez-en un autr
 OTHER_DRIVE = "E.Leclerc affiche un autre drive que celui choisi : choisissez de nouveau votre drive dans les réglages."
 NOT_A_DRIVE = "E.Leclerc n'a pas affiché la page du drive. Réessayez plus tard."
 SITE_ERROR = "E.Leclerc a renvoyé une erreur. Réessayez plus tard."
-SESSION_FAILED = "E.Leclerc n'a pas affiché la recherche. Réessayez dans un instant."
+SEARCH_FAILED = "E.Leclerc n'a pas affiché la recherche. Réessayez dans un instant."
+# A refusal (401, 403, 405) without any DataDome mark: nothing to validate in the window
+REFUSED_MESSAGE = (
+    "E.Leclerc a refusé la recherche. Réessayez dans un moment ; si cela se répète, "
+    "téléchargez le diagnostic depuis « État des enseignes » et envoyez-le."
+)
 CAPTCHA_MESSAGE = (
     "E.Leclerc demande une vérification : appuyez sur « Ouvrir le site », validez-la dans la "
     "fenêtre Chrome d'E.Leclerc ouverte par PrixMalin, puis appuyez sur « J'ai terminé »."
@@ -116,6 +125,10 @@ _SEGMENT = re.compile(r"^magasin-(\d{6})(?:-(\d{6}))?(?:-[\w%.'’-]*)?$")
 _WIDGET = re.compile(r"Utilitaires\.widget\.initOptions\(\s*'([^']+)'\s*,\s*")
 _CAPTCHA_URL = re.compile(r"https?://[\w.-]*captcha-delivery\.com/captcha/?\?[^\"'\s<>]*", re.I)
 _DD_HARD = re.compile(r"var\s+dd\s*=\s*\{[^}]*['\"]t['\"]\s*:\s*['\"]bv['\"]", re.I)
+# Any mark of a DataDome answer (its script, its iframe, its JSON)
+_DD_MARK = re.compile(r"var\s+dd\s*=\s*\{|captcha-delivery\.com", re.I)
+# fetch() stopped by its own time limit (page_fetch: « AbortError: signal is aborted… »)
+_ABORTED = re.compile(r"AbortError|aborted", re.I)
 _SESSION = re.compile(r"session a expir|sessionexpiree|session expir[ée]e", re.I)
 _LOT_END = re.compile(r"\s*,?\s*profitez[- ]en\s*!?\s*$", re.I)
 _TICKET = re.compile(r"\bticket\b|\bcarte\b", re.I)
@@ -693,25 +706,31 @@ def is_portal(url: str | None) -> bool:
 def classify_answer(status: int, final_url: str | None, text: str | None) -> str:
     """What an answer of the site means (pure).
 
-    ``"ok"`` (a page of the drive, products or none), ``"retry"`` (fetch refused,
-    status 0, or session expired: visit the drive again and load the page),
-    ``"portal"`` (sent back to www.leclercdrive.fr: the drive is closed),
-    ``"captcha"`` (DataDome check to validate in the window), ``"hard_block"``
-    (refused for a while: « Access blocked », « Accès temporairement
-    restreint », ``t=bv``, HTTP 429) or ``"error"``.
+    ``"ok"`` (an answer of the site, 2xx), ``"retry"`` (fetch refused, status 0
+    « Failed to fetch », or session expired: visit the drive again and load the
+    page), ``"timeout"`` (fetch stopped by its time limit), ``"portal"`` (sent
+    back to www.leclercdrive.fr: the drive is closed), ``"captcha"`` (DataDome
+    check to validate in the window), ``"hard_block"`` (refused for a while:
+    « Access blocked », « Accès temporairement restreint », ``t=bv``, HTTP
+    429), ``"refused"`` (401, 403, 405 without any DataDome mark: nothing to
+    validate) or ``"error"``.
     """
     text = text or ""
     head = text[:60000]
     if status == 429:
         return "hard_block"
     if status == 0:
-        return "retry"
+        return "timeout" if _ABORTED.search(text[:300]) else "retry"
     drive = "pnlElementProduit" in text or "lstProduitsLight" in text or "BandeauMultiUnivers" in text
     hard = bool(_DD_HARD.search(head)) or is_hard_block_text(head)
-    if status in (401, 403, 405) or (not drive and (hard or "captcha-delivery.com" in head)):
+    marked = hard or bool(_DD_MARK.search(head))
+    if status in (401, 403, 405) or (not drive and marked):
         if hard:
             return "hard_block"
-        return classify_datadome(captcha_url(head), head[:5000]) or "captcha"
+        kind = classify_datadome(captcha_url(head), head[:5000])
+        if kind:
+            return kind
+        return "captcha" if marked else "refused"
     if is_portal(final_url):
         return "portal"
     if not 200 <= status < 300:
@@ -721,6 +740,19 @@ def classify_answer(status: int, final_url: str | None, text: str | None) -> str
     return "ok"
 
 
+def refusal_record(status: int, content_type: str, text: str | None) -> str:
+    """JSON kept in data/debug for an answer that is not 2xx: status, type and start of the body.
+
+    Neither the URL (it holds the drive, or the postal code for the store
+    finder) nor the request headers.
+    """
+    return json.dumps(
+        {"status": status, "content_type": content_type, "body": (text or "")[:20000]},
+        ensure_ascii=False,
+        indent=1,
+    )
+
+
 def check_answer(status: int, final_url: str | None, text: str | None) -> str:
     """``"ok"`` or ``"retry"``; any other kind of answer raises the matching error (pure)."""
     kind = classify_answer(status, final_url, text)
@@ -728,6 +760,11 @@ def check_answer(status: int, final_url: str | None, text: str | None) -> str:
         raise HardBlockError(hard_block_message(LABEL), label=LABEL)
     if kind == "captcha":
         raise BlockedError(CAPTCHA_MESSAGE)
+    if kind == "timeout":
+        raise TimeoutError("E.Leclerc: fetch stopped by its time limit")
+    if kind == "refused":
+        logger.warning("E.Leclerc refused the request (HTTP %s): %s", status, (text or "")[:200])
+        raise ScraperError(REFUSED_MESSAGE)
     if kind == "portal":
         raise StoreRequiredError(STORE_GONE)
     if kind == "error":
@@ -943,23 +980,23 @@ class LeclercScraper(BaseScraper):
             raise StoreRequiredError(STORE_GONE)
         visit = await self._ensure_visit(page, ref)
         url = search_url(visit.base, query)
-        result = await page_fetch(page, url, headers={"accept": "text/html"}, timeout_ms=30000)
+        result = await page_fetch(page, url, headers={"accept": "text/html"}, timeout_ms=FETCH_TIMEOUT_MS)
         text = result.text
         loaded = False
-        if classify_answer(result.status, result.url, text) == "error":
-            # An answer of another kind: kept to see what the site says
-            save_debug_text(self.key, "error", (text or "")[:500_000], ".txt")
+        self._keep_answer(result.status, result.content_type, text)
         if check_answer(result.status, result.url, text) == "retry":
             # fetch refused (redirection elsewhere) or session expired: visit the
             # drive again, then load the search as a page (once)
             logger.info("E.Leclerc: %s for '%s', loading the search page", result.status or "fetch refused", query)
             self._visit = None
             visit = await self._ensure_visit(page, ref)
-            await page.goto(search_url(visit.base, query), wait_until="domcontentloaded", timeout=30000)
+            response = await page.goto(search_url(visit.base, query), wait_until="domcontentloaded", timeout=30000)
             await wait_for_clearance(page, self.label, CAPTCHA_MESSAGE)
             text = await page.content()
-            if check_answer(200, page.url, text) == "retry":
-                raise ScraperError(SESSION_FAILED)
+            status = response.status if response is not None else 200
+            self._keep_answer(status, "text/html", text)
+            if check_answer(status, page.url, text) == "retry":
+                raise ScraperError(SEARCH_FAILED)
             loaded = True
         parsed = parse_search_html(text, visit.base)
         if parsed.truncated:
@@ -970,9 +1007,24 @@ class LeclercScraper(BaseScraper):
             products = self.found(tiles_to_products(tiles, visit.base), "html")
         if debug_samples():
             save_debug_text(self.key, "sample", text, ".html")
+        if not products and not parsed.store_page:
+            # No page of the drive (error page of the site, maintenance...): not « Aucun produit »
+            logger.warning("E.Leclerc: the search '%s' gave no page of the drive", query)
+            save_debug_text(self.key, "error", text[:3_000_000], ".html")
+            self.last_source = None
+            raise ScraperError(SEARCH_FAILED)
         if not products:
             save_debug_text(self.key, "empty", text[:3_000_000], ".html")
         return products
+
+    def _keep_answer(self, status: int, content_type: str, text: str | None) -> None:
+        """Keep an answer that is not 2xx in data/debug (the diagnostic of « État des enseignes »)."""
+        if not status or 200 <= status < 300:
+            return
+        if classify_answer(status, None, text) == "error":
+            save_debug_text(self.key, "error", (text or "")[:500_000], ".txt")
+        else:
+            save_debug_text(self.key, "refused", refusal_record(status, content_type, text))
 
     async def _ensure_visit(self, page, ref: StoreRef) -> DriveVisit:
         if not needs_store_visit(self._visit, ref, page.url, time.monotonic()):
@@ -1020,16 +1072,23 @@ class LeclercScraper(BaseScraper):
         """JSON of the store finder, called from a leclercdrive.fr page; None for an answer
         of another shape (DataDome raises)."""
         result = await page_fetch(page, url, headers={"accept": "application/json"}, timeout_ms=20000)
-        if result.status == 0 and not is_portal(page.url):
+        kind = classify_answer(result.status, result.url, result.text)
+        if kind == "retry" and not is_portal(page.url):
             # Not allowed from this page: from the portal, as the site itself
             await self._open_portal(page)
             result = await page_fetch(page, url, headers={"accept": "application/json"}, timeout_ms=20000)
-        kind = classify_answer(result.status, result.url, result.text)
+            kind = classify_answer(result.status, result.url, result.text)
+        if result.status and not result.ok:
+            # The exact answer of a refusal (without the address: it holds the postal code)
+            save_debug_text(self.key, "refused", refusal_record(result.status, result.content_type, result.text))
         if kind == "hard_block":
             raise HardBlockError(hard_block_message(LABEL), label=LABEL)
         if kind == "captcha":
             raise BlockedError(CAPTCHA_MESSAGE)
-        if result.status == 0:
+        if kind == "timeout":
+            raise TimeoutError("E.Leclerc: store finder stopped by its time limit")
+        if kind == "refused" or result.status == 0:
+            logger.warning("E.Leclerc store finder refused (HTTP %s): %s", result.status, (result.text or "")[:200])
             raise ScraperError(LOCATOR_FAILED)
         if not result.ok:
             logger.info("E.Leclerc store finder answered HTTP %s for %s", result.status, url)
