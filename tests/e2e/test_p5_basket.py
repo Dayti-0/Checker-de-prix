@@ -154,7 +154,9 @@ def test_no_complete_basket_is_never_called_the_cheapest(mobile):
     add(page, "gâteau")  # only at Aldi: nobody has everything
     page.goto(f"{page.base}/#/panier")
     verdict = page.get_by_test_id("basket-verdict")
-    expect(verdict).to_contain_text("Aucune enseigne n'a tout : Aldi en a le plus (4/5)")
+    # Carrefour has as many items as Aldi (4/5): both are named
+    expect(verdict).to_contain_text("Aucune enseigne n'a tout : Aldi et Carrefour en ont le plus (4/5)")
+    expect(verdict).to_contain_text("Total estimé le plus bas : Aldi")
     expect(verdict).to_contain_text("17,31 €")
     expect(verdict).to_contain_text("estimé")
     expect(
@@ -297,6 +299,64 @@ def test_on_a_phone_one_card_per_item(mobile):
         page.reload()
         expect(page.get_by_test_id("basket-verdict")).to_be_visible()
         assert horizontal_overflow(page) == 0, scale
+
+
+# In each card: no retailer name cut, no price or state under its button (JS, one entry per fault)
+LAYOUT_FAULTS = """() => {
+    const faults = [];
+    for (const badge of document.querySelectorAll("[data-item-card] .offer-store .badge")) {
+        if (badge.scrollWidth > badge.clientWidth + 1) faults.push(`coupé : ${badge.textContent}`);
+    }
+    for (const top of document.querySelectorAll("[data-item-card] .cell-top")) {
+        const [main, button] = top.children;
+        if (!main || !button) continue;
+        const a = main.getBoundingClientRect();
+        const b = button.getBoundingClientRect();
+        const apart = a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top;
+        if (!apart) faults.push(`sous le bouton : ${main.textContent}`);
+    }
+    return faults;
+}"""
+
+
+def test_item_cards_never_cut_a_name_or_hide_a_price(mobile):
+    page = mobile
+    demo_list(page)
+    # Intermarché answers too: its name is the longest one of the cards
+    call(page, "PUT", "/api/retailers/intermarche/store", {"id": "08012", "name": "Intermarché Montpellier"})
+    compare(page)
+    open_basket(page)
+    sucre = page.locator("[data-item-card]").filter(has=page.get_by_role("heading", name="sucre"))
+    expect(sucre.locator("[data-offer=intermarche]")).to_contain_text("Introuvable")
+    expect(sucre.get_by_role("button", name="Saisir le prix de sucre chez Intermarché")).to_be_visible()
+    assert page.evaluate(LAYOUT_FAULTS) == []
+    for width, scale in ((360, "1"), (360, "1.6"), (390, "1.3")):
+        page.set_viewport_size({"width": width, "height": 800})
+        page.add_init_script(f"localStorage.setItem('prixmalin.textScale', '{scale}')")
+        page.reload()
+        expect(sucre.locator("[data-offer=intermarche]")).to_be_visible()
+        assert page.evaluate(LAYOUT_FAULTS) == [], (width, scale)
+        assert horizontal_overflow(page) == 0, (width, scale)
+
+
+def test_live_cards_say_once_the_retailers_that_failed(mobile, gate):
+    page = mobile
+    demo_list(page)
+    gate.held = {"lidl"}
+    page.goto(f"{page.base}/#/panier")  # no comparison yet: it starts by itself
+    expect(page.get_by_test_id("basket-progress")).to_be_visible()
+    expect(card(page, "intermarche")).to_contain_text("Magasin à choisir")
+    expect(card(page, "coursesu")).to_contain_text("Vérification requise")
+    beurre = page.locator("[data-item-card]").filter(has=page.get_by_role("heading", name="beurre"))
+    expect(beurre.locator("[data-offer=aldi]")).to_contain_text("1,89 €")
+    expect(beurre.get_by_text("En attente")).to_have_count(1)  # Lidl
+    expect(beurre.locator("[data-offer=intermarche], [data-offer=coursesu]")).to_have_count(0)
+    expect(
+        page.get_by_text("Intermarché et Courses U ne sont pas comparées : voir leur carte plus haut.")
+    ).to_be_visible()
+    gate.release()
+    expect(page.get_by_test_id("basket-verdict")).to_contain_text("Panier le moins cher")
+    expect(beurre.locator("[data-offer]")).to_have_count(3)
 
 
 def test_on_a_computer_a_table_in_dark_mode(dark):

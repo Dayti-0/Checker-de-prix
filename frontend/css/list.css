@@ -333,11 +333,20 @@
 .inline-field { display: flex; gap: var(--space-3); }
 .inline-field input { flex: 1 1 auto; min-width: 0; }
 .template-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-3); }
-.template { display: grid; gap: var(--space-3); padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-70); }
-.template-info { display: grid; gap: var(--space-1); }
+/* Name and date, the bin on their right; « Remplacer » and « Ajouter » under them */
+.template {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "info remove" "actions actions";
+    gap: var(--space-3);
+    padding: var(--space-4);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-70);
+}
+.template-info { grid-area: info; display: grid; gap: var(--space-1); }
 .template-name { overflow-wrap: anywhere; }
-.template-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-.template-actions .icon-btn { width: 2.75rem; height: 2.75rem; margin-left: auto; color: var(--danger-text); }
+.template-actions { grid-area: actions; display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.template-remove { grid-area: remove; align-self: start; width: 2.75rem; height: 2.75rem; color: var(--danger-text); }
 
 /* « Partager ou imprimer » */
 .share-body { display: grid; gap: var(--space-5); }

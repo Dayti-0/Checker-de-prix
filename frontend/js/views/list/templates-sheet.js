@@ -27,8 +27,8 @@ function savedList(templates) {
             <div class="template-actions">
                 <button type="button" class="btn-ghost small" data-apply="${t.id}" data-mode="replace" aria-label="Remplacer ma liste par ${t.name}">Remplacer ma liste</button>
                 <button type="button" class="btn-ghost small" data-apply="${t.id}" data-mode="merge" aria-label="Ajouter ${t.name} à ma liste">Ajouter à ma liste</button>
-                <button type="button" class="icon-btn small" data-remove="${t.id}" aria-label="Supprimer la liste enregistrée ${t.name}" title="Supprimer">${icon("trash-2")}</button>
             </div>
+            <button type="button" class="icon-btn small template-remove" data-remove="${t.id}" aria-label="Supprimer la liste enregistrée ${t.name}" title="Supprimer">${icon("trash-2")}</button>
         </li>`,
     )}</ul>`;
 }

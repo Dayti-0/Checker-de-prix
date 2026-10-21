@@ -104,7 +104,7 @@ def test_verdict_is_honest(page):
     assert (v["storeLabel"], v["value"]) == ("Carrefour", "19,39 €")
     assert v["sub"] == "Seule enseigne avec tous les articles"
 
-    lidl = store("lidl", "Lidl", total=7.77, found_count=3, missing=1, estimated=True, estimated_total=15.57)
+    lidl = store("lidl", "Lidl", total=5.20, found_count=2, missing=2, estimated=True, estimated_total=15.57)
     partial = {"item_count": 4, "best_store": None, "most_items_store": "aldi", "stores": [aldi, lidl]}
     v = js_eval(page, BASKET, "verdict", partial)
     assert v["kind"] == "most"
@@ -112,6 +112,13 @@ def test_verdict_is_honest(page):
     assert v["text"] == "Aucune enseigne n'a tout : Aldi en a le plus (3/4)"
     assert (v["value"], v["valueLabel"], v["sub"]) == ("15,12 €", "estimé", "1 article introuvable chez Aldi")
     assert "Panier le moins cher" not in str(v)
+
+    # Two retailers with as many items: both are named, the cheaper one leads
+    tied = store("lidl", "Lidl", total=7.77, found_count=3, missing=1, estimated=True, estimated_total=15.57)
+    blocked = store("coursesu", "Courses U", total=0, found_count=3, status="unchecked")
+    v = js_eval(page, BASKET, "verdict", {"item_count": 4, "most_items_store": "aldi", "stores": [aldi, tied, blocked]})
+    assert v["text"] == "Aucune enseigne n'a tout : Aldi et Lidl en ont le plus (3/4)"
+    assert v["sub"] == "Total estimé le plus bas : Aldi · 1 article introuvable chez Aldi"
 
     # No retailer with half of the items: the amount says what it covers
     few = store("carrefour", "Carrefour", total=18.24, found_count=5, missing=6, estimated=False, estimated_total=18.24)

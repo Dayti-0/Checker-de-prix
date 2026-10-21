@@ -155,7 +155,13 @@ function changeButton(view, item, s, line, where) {
     return html`<button type="button" class="cell-btn" data-change="${item.id}" data-store="${s.store}" data-focus="${focus}" aria-label="Changer le produit ${item.query} chez ${s.label}">Changer</button>`;
 }
 
-// Content of a cell (table) or of an offer (card): price, product, notes, button
+// First line of a cell: the price (or the state) and « Changer » / « Saisir le
+// prix » side by side; the button goes under them when the column is narrow
+function cellTop(main, button) {
+    return html`<span class="cell-top">${main}${button}</span>`;
+}
+
+// Content of a cell (table) or of an offer (card): price, button, product, notes
 export function cellBody(view, item, s, line, low, where = "t") {
     if (!line) {
         return view.running
@@ -164,19 +170,19 @@ export function cellBody(view, item, s, line, low, where = "t") {
     }
     if (line.status === "found") {
         const best = low != null && line.line_total === low;
-        return html`<span class="cell-price${best ? " low" : ""}">${euros(line.line_total)}${best ? html`<span class="visually-hidden"> (le moins cher)</span>` : ""}</span>
+        const price = html`<span class="cell-price${best ? " low" : ""}">${euros(line.line_total)}${best ? html`<span class="visually-hidden"> (le moins cher)</span>` : ""}</span>`;
+        return html`${cellTop(price, changeButton(view, item, s, line, where))}
             ${line.packs > 1 ? html`<span class="cell-packs">${line.packs} × ${euros(line.product.price)}</span>` : ""}
             ${productName(line)}
-            ${notesMarkup(line)}
-            ${changeButton(view, item, s, line, where)}`;
+            ${notesMarkup(line)}`;
     }
     if (line.status === "excluded") {
-        return html`<span class="cell-state">Pas disponible ici</span>${changeButton(view, item, s, line, where)}`;
+        return cellTop(html`<span class="cell-state">Pas disponible ici</span>`, changeButton(view, item, s, line, where));
     }
     if (line.status === "not_found") {
-        return html`<span class="cell-state">Introuvable</span>${notesMarkup(line)}${
+        return html`${cellTop(html`<span class="cell-state">Introuvable</span>`, changeButton(view, item, s, line, where))}${notesMarkup(line)}${
             line.estimate != null ? html`<span class="note muted">compté ${euros(line.estimate)} dans l'estimation</span>` : ""
-        }${changeButton(view, item, s, line, where)}`;
+        }`;
     }
     const reason = view.reason(s.store);
     return html`<span class="cell-state muted">${reason ? reasonLabel(reason) : "Pas comparé"}</span>`;
@@ -236,10 +242,13 @@ export function tableMarkup(view) {
 // ---------------------------------------------------------------- cards (phone)
 
 // Retailers that could not be searched at all are said once, under the cards
-// (their card above gives the reason and the action), not in every card
+// (their card above gives the reason and the action), not in every card; while
+// the comparison runs, the same for a retailer that failed before any product
 function searchedStores(view) {
-    if (!view.comparison) return { stores: view.stores, left: [] };
-    const out = new Set(view.comparison.stores.filter((s) => s.status === "unchecked").map((s) => s.store));
+    const failed = view.comparison
+        ? view.comparison.stores.filter((s) => s.status === "unchecked")
+        : view.stores.filter((s) => view.reason(s.store) && !view.items.some((i) => view.cell(s.store, i.id)?.status === "found"));
+    const out = new Set(failed.map((s) => s.store));
     return { stores: view.stores.filter((s) => !out.has(s.store)), left: view.stores.filter((s) => out.has(s.store)) };
 }
 

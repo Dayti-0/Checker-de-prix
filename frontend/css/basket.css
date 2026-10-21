@@ -198,21 +198,23 @@
 .basket-legend .icon { color: var(--primary-text); }
 
 /* Content of a cell (table) or of an offer (card on a phone): the price and
-   « Changer » side by side (centred on the same line), then the packs, the
-   product and its notes under them */
+   « Changer » side by side (the button goes under the price when the column is
+   too narrow for both), then the packs, the product and its notes */
 .cell-body, .offer-body {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas: "price button" "packs packs" "product product" "notes notes";
-    align-items: start;
-    column-gap: var(--space-3);
+    grid-template-columns: minmax(0, 1fr);
+    align-content: start;
     min-width: 0;
 }
-:is(.cell-body, .offer-body) > :is(.cell-price, .cell-state, .cell-wait, .cell-empty) { grid-area: price; align-self: center; }
-:is(.cell-body, .offer-body) > .cell-packs { grid-area: packs; }
-:is(.cell-body, .offer-body) > .cell-product { grid-area: product; margin-top: var(--space-1); }
-:is(.cell-body, .offer-body) > :is(.cell-notes, .note) { grid-area: notes; }
-:is(.cell-body, .offer-body) > .cell-btn { grid-area: button; align-self: center; }
+.cell-top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2) var(--space-3);
+    min-width: 0;
+}
+:is(.cell-body, .offer-body) > .cell-product { margin-top: var(--space-1); }
 .cell-price { display: block; font-size: var(--text-110); font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .cell-price.low { color: var(--best-text); }
 .cell-packs { display: block; color: var(--muted); font-size: var(--text-85); font-variant-numeric: tabular-nums; }
@@ -299,6 +301,10 @@ a.cell-name:hover { text-decoration-color: currentColor; }
 }
 .basket-table thead th.corner { z-index: 4; color: var(--muted); font-size: var(--text-85); text-transform: uppercase; letter-spacing: .03em; }
 .basket-table td.cell { min-width: 10.5rem; }
+/* In the table, the price and « Changer » always share a line (the column is as
+   wide as both); « Introuvable » or « Pas disponible ici » goes above its button */
+.basket-table .cell-top { flex-wrap: nowrap; }
+.basket-table :is(.cell.not_found, .cell.excluded) .cell-top { flex-direction: column; align-items: flex-start; }
 .basket-table td.cell.low { background: var(--best-bg); box-shadow: inset 3px 0 0 var(--accent-best); }
 .basket-table td.cell.unchecked, .basket-table td.cell.excluded { background: var(--surface-2); }
 .basket-table tbody tr:last-child > * { border-bottom: 0; }
@@ -335,19 +341,36 @@ a.cell-name:hover { text-decoration-color: currentColor; }
     font-size: var(--text-105);
     overflow-wrap: anywhere;
 }
-.offers { list-style: none; margin: 0; padding: 0; }
+/* Narrow card (small phone, large text): the retailer above its price */
+.item-card { container-type: inline-size; }
+.offers {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    column-gap: var(--space-4);
+}
 .offer {
     display: grid;
-    grid-template-columns: 6.5rem minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     align-items: start;
-    gap: var(--space-3);
+    row-gap: var(--space-2);
     padding: var(--space-4) var(--space-5);
     border-bottom: 1px solid var(--border);
 }
 .offer:last-child { border-bottom: 0; }
 .offer.low { background: var(--best-bg); box-shadow: inset 4px 0 0 var(--accent-best); }
-.offer-store { padding-top: .1rem; min-width: 0; }
+.offer-store { display: flex; align-items: center; min-width: 0; }
 .offer-store .badge { max-width: 100%; overflow: hidden; text-overflow: ellipsis; font-size: var(--text-85); }
+/* Wide enough: the retailers in a column as wide as the longest name (never
+   cut), aligned from one row to the next, each name level with its price */
+@container (min-width: 18rem) {
+    .offers { grid-template-columns: max-content minmax(0, 1fr); }
+    .offer { grid-column: 1 / -1; grid-template-columns: subgrid; }
+    .offer-store, .offer-body > :is(.cell-top, .cell-state, .cell-wait, .cell-empty) { min-height: 2.75rem; }
+    .offer-body > :is(.cell-state, .cell-wait, .cell-empty) { display: flex; align-items: center; }
+}
 .item-cards-note { margin: 0; color: var(--muted); font-size: var(--text-85); }
 
 @media (min-width: 900px) {
@@ -385,6 +408,8 @@ a.cell-name:hover { text-decoration-color: currentColor; }
 .cand-meta { color: var(--muted); font-size: var(--text-85); overflow-wrap: anywhere; }
 .cand-tags { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .cand-tags:empty { display: none; }
+/* « Retenu » stays a visible tag on the green of the product retained */
+.cand.current .tag.ok { background: var(--surface); }
 .cand-price { display: grid; justify-items: end; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .cand-price strong { font-size: var(--text-110); }
 .cand-unit { color: var(--muted); font-size: var(--text-85); }
@@ -417,5 +442,5 @@ a.cell-name:hover { text-decoration-color: currentColor; }
     .verdict-value { font-size: var(--text-160); }
     .basket-actions { width: 100%; }
     .basket-actions > * { flex: 1 1 auto; }
-    .offer { grid-template-columns: 5.75rem minmax(0, 1fr); padding: var(--space-4); }
+    .offer { padding: var(--space-4); }
 }

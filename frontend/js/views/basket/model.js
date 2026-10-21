@@ -60,6 +60,15 @@ export function verdict(comparison) {
     }
     if (comparison.most_items_store) {
         const s = storeOf(comparison, comparison.most_items_store);
+        // Other retailers with as many items: « Lidl et Aldi en ont le plus »
+        const tied = (comparison.stores || []).filter(
+            (o) => o.store !== s.store && o.status !== "unchecked" && o.found_count === s.found_count,
+        );
+        const names = [s.label, ...tied.map((o) => o.label)];
+        const who = tied.length ? `${names.slice(0, -1).join(", ")} et ${names.at(-1)} en ont` : `${s.label} en a`;
+        const sub = [];
+        if (tied.length) sub.push(s.estimated ? `Total estimé le plus bas : ${s.label}` : `Le moins cher : ${s.label}`);
+        if (s.missing) sub.push(`${missingText(s.missing)} chez ${s.label}`);
         return {
             kind: "most",
             label: "Paniers incomplets",
@@ -68,8 +77,8 @@ export function verdict(comparison) {
             value: s.estimated_total != null ? euros(s.estimated_total) : euros(s.total),
             // Never a bare amount for an incomplete basket
             valueLabel: s.estimated ? "estimé" : `pour ${plural(s.found_count, "article")}`,
-            text: `Aucune enseigne n'a tout : ${s.label} en a le plus (${s.found_count}/${n})`,
-            sub: s.missing ? `${missingText(s.missing)} chez ${s.label}` : "",
+            text: `Aucune enseigne n'a tout : ${who} le plus (${s.found_count}/${n})`,
+            sub: sub.join(" · "),
         };
     }
     return {
