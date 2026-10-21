@@ -349,6 +349,8 @@
     .list-title { font-size: var(--text-140); }
     .list-cta { width: 100%; }
     .list-cta > * { flex: 1 1 10rem; }
+    /* « Comparer mon panier » on one line, « En magasin » under it when they do not fit side by side */
+    .list-cta > .btn-primary { flex-basis: 15rem; }
     .list-row { padding: var(--space-2) var(--space-4); column-gap: var(--space-3); }
     .row-title { font-size: var(--text-105); }
     .list-form .btn-primary { padding: 0 var(--space-5); }
