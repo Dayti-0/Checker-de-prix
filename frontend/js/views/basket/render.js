@@ -8,7 +8,7 @@
 
 import { retailerBadge } from "../../components/retailer-badge.js";
 import { euros, plural } from "../../core/fmt.js";
-import { attr, html, safeUrl } from "../../core/html.js";
+import { html, safeUrl } from "../../core/html.js";
 import { icon } from "../../core/icons.js";
 import { brandText } from "../search/product-row.js";
 import { cellNotes, cheapest, commonText, itemOffers, planTitle, reasonLabel, storeTexts, verdict } from "./model.js";
@@ -198,19 +198,35 @@ function lowest(view, lines) {
     return cheapest(lines);
 }
 
-// ---------------------------------------------------------------- table (computer)
+// ---------------------------------------------------------------- retailers shown
 
-// Column of a retailer that could not be searched at all (left out of the printed page)
-function offColumn(view, s) {
-    if (!view.comparison) return false;
-    const c = view.comparison.stores.find((x) => x.store === s.store);
-    return Boolean(c && c.status === "unchecked");
+// Retailers that could not be searched at all are said once, above the prices
+// (their card gives the reason and the action), not in every row or card;
+// while the comparison runs, the same for a retailer that failed before any
+// product. { stores: searched, left: not compared }
+export function searchedStores(view) {
+    const failed = view.comparison
+        ? view.comparison.stores.filter((s) => s.status === "unchecked")
+        : view.stores.filter((s) => view.reason(s.store) && !view.items.some((i) => view.cell(s.store, i.id)?.status === "found"));
+    const out = new Set(failed.map((s) => s.store));
+    return { stores: view.stores.filter((s) => !out.has(s.store)), left: view.stores.filter((s) => out.has(s.store)) };
 }
+
+// « Intermarché et Courses U ne sont pas comparées : voir leur carte plus haut. »
+export function leftOutNote(view) {
+    const names = searchedStores(view).left.map((s) => s.label);
+    if (!names.length) return "";
+    const who = names.length >= 2 ? `${names.slice(0, -1).join(", ")} et ${names.at(-1)} ne sont pas comparées` : `${names[0]} n'est pas comparée`;
+    // Printed without the cards: « … ne sont pas comparées. »
+    return html`<p class="left-out-note" data-key="left-out">${icon("info")}<span>${who}<span class="see-cards"> : voir leur carte plus haut</span>.</span></p>`;
+}
+
+// ---------------------------------------------------------------- table (computer)
 
 function footCell(view, s) {
     if (view.live || !view.comparison) return html`<td class="foot-cell">…</td>`;
     const c = view.comparison.stores.find((x) => x.store === s.store);
-    if (!c || c.status === "unchecked") return html`<td class="foot-cell muted col-off">—</td>`;
+    if (!c || c.status === "unchecked") return html`<td class="foot-cell muted">—</td>`;
     return html`<td class="foot-cell${view.comparison.best_store === s.store ? " best" : ""}">
         <span class="foot-total">${euros(c.total)}</span>
         ${c.estimated && c.estimated_total != null ? html`<span class="foot-est">estimé ${euros(c.estimated_total)}</span>` : ""}
@@ -219,48 +235,34 @@ function footCell(view, s) {
 }
 
 export function tableMarkup(view) {
+    const { stores } = searchedStores(view);
+    if (!stores.length) return "";
     return html`<div class="table-scroll" tabindex="0" role="region" aria-label="Prix par article et par enseigne" data-testid="basket-table">
-        <table class="basket-table">
+        <table class="basket-table cols-${Math.min(stores.length, 6)}">
             <caption class="visually-hidden">Prix de chaque article dans chaque enseigne</caption>
-            <thead><tr><th scope="col" class="corner">Article</th>${view.stores.map(
-                (s) => html`<th scope="col"${attr({ class: offColumn(view, s) ? "col-off" : null })}>${retailerBadge(s.store, s.label)}</th>`,
-            )}</tr></thead>
+            <thead><tr><th scope="col" class="corner">Article</th>${stores.map((s) => html`<th scope="col">${retailerBadge(s.store, s.label)}</th>`)}</tr></thead>
             <tbody>${view.items.map((item) => {
-                const lines = view.stores.map((s) => view.cell(s.store, item.id));
+                const lines = stores.map((s) => view.cell(s.store, item.id));
                 const low = lowest(view, lines);
                 return html`<tr data-key="row-${item.id}">
                     <th scope="row">${itemTitle(item)}</th>
-                    ${view.stores.map((s, i) => {
+                    ${stores.map((s, i) => {
                         const line = lines[i];
                         const best = line && line.status === "found" && line.line_total === low;
-                        return html`<td class="cell ${line ? line.status : "wait"}${best ? " low" : ""}${offColumn(view, s) ? " col-off" : ""}" data-cell="${s.store}:${item.id}"><div class="cell-body">${cellBody(view, item, s, line, low)}</div></td>`;
+                        return html`<td class="cell ${line ? line.status : "wait"}${best ? " low" : ""}" data-cell="${s.store}:${item.id}"><div class="cell-body">${cellBody(view, item, s, line, low)}</div></td>`;
                     })}
                 </tr>`;
             })}</tbody>
-            <tfoot><tr><th scope="row">Total</th>${view.stores.map((s) => footCell(view, s))}</tr></tfoot>
+            <tfoot><tr><th scope="row">Total</th>${stores.map((s) => footCell(view, s))}</tr></tfoot>
         </table>
     </div>`;
 }
 
 // ---------------------------------------------------------------- cards (phone)
 
-// Retailers that could not be searched at all are said once, under the cards
-// (their card above gives the reason and the action), not in every card; while
-// the comparison runs, the same for a retailer that failed before any product
-function searchedStores(view) {
-    const failed = view.comparison
-        ? view.comparison.stores.filter((s) => s.status === "unchecked")
-        : view.stores.filter((s) => view.reason(s.store) && !view.items.some((i) => view.cell(s.store, i.id)?.status === "found"));
-    const out = new Set(failed.map((s) => s.store));
-    return { stores: view.stores.filter((s) => !out.has(s.store)), left: view.stores.filter((s) => out.has(s.store)) };
-}
-
 export function itemCardsMarkup(view) {
-    const { stores, left } = searchedStores(view);
-    const names = left.map((s) => s.label);
-    const note = names.length
-        ? html`<p class="item-cards-note">${names.length >= 2 ? `${names.slice(0, -1).join(", ")} et ${names.at(-1)} ne sont pas comparées` : `${names[0]} n'est pas comparée`} : voir leur carte plus haut.</p>`
-        : "";
+    const { stores } = searchedStores(view);
+    if (!stores.length) return "";
     return html`<ul class="item-cards" data-testid="basket-items">${view.items.map((item) => {
         const offers = itemOffers(stores, item.id, view.cell);
         const low = lowest(view, offers.map((o) => o.line));
@@ -274,7 +276,7 @@ export function itemCardsMarkup(view) {
                 </li>`;
             })}</ol>
         </li>`;
-    })}</ul>${note}`;
+    })}</ul>`;
 }
 
 // ---------------------------------------------------------------- plans (optimizer, B61)

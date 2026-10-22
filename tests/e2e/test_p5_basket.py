@@ -116,6 +116,13 @@ def test_live_comparison_then_an_honest_verdict(desktop, gate):
     expect(card(page, "coursesu")).to_contain_text("Vérification requise")
     expect(card(page, "coursesu").get_by_role("button", name="Ouvrir le site Courses U")).to_be_visible()
 
+    # Not compared at all: said once above the prices, no column of « Magasin à choisir »
+    table = page.get_by_role("table", name=re.compile("Prix de chaque article"))
+    expect(table.locator("thead th")).to_have_text(["Article", "Carrefour", "Aldi", "Lidl"])
+    expect(table).not_to_contain_text("Magasin à choisir")
+    left_out = page.get_by_text("Intermarché et Courses U ne sont pas comparées : voir leur carte plus haut.")
+    expect(left_out).to_be_visible()
+
     expect(cell(page, "lidl", "jus d'orange")).to_contain_text("Introuvable")
     expect(cell(page, "lidl", "jus d'orange")).to_contain_text("compté 7,80 € dans l'estimation")
     expect(cell(page, "aldi", "jus d'orange")).to_contain_text("6,90 €")  # 6 x 1 L for 6 L

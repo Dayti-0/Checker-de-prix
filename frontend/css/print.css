@@ -32,8 +32,8 @@
     dialog, .p5-sheet, .spinner,
     .list-cta, .list-help-box, .list-form, .list-usual-box, .list-tools, .row-actions, .aisle-toggle > .icon,
     .basket-actions, .basket-status, .basket-progress, .basket-prefs, .basket-legend,
-    .cell-btn, .plan-follow, .store-cards, .col-off, .plans > p, .basket-help,
-    .basket-skipped, .item-cards-note,
+    .cell-btn, .plan-follow, .store-cards, .plans > p, .basket-help,
+    .basket-skipped, .left-out-note .see-cards, .left-out-note .icon,
     .trip-top > a, .trip-offline, .trip-note .actions, .trip-bar .btn-primary, .trip-intro {
         display: none !important;
     }
@@ -78,7 +78,12 @@
     .detail-table { display: block !important; }
     .detail-cards { display: none !important; }
     .table-scroll { max-height: none; overflow: visible; border-color: GrayText; }
-    .basket-table { table-layout: fixed; }
+    .basket-table { table-layout: fixed; min-width: 0 !important; }
+    .basket-table thead th.corner { width: 8rem; }
+    /* The title, the retailers not compared and the table close together */
+    .basket-detail { gap: var(--space-2); }
+    .basket-h2 { font-size: var(--text-110); }
+    .left-out-note { font-size: var(--text-85); }
     .basket-table thead th, .basket-table tbody th, .basket-table tfoot th, .basket-table tfoot td, .basket-table thead th.corner { position: static; }
     .basket-table th, .basket-table td { padding: var(--space-1) var(--space-3); border-color: GrayText; }
     :is(.cell-body, .offer-body) > .cell-product { margin-top: 0; }

@@ -22,7 +22,16 @@ import { patch } from "../search/patch.js";
 import { openSite } from "../status/shared.js";
 import { openChangeSheet } from "./change-sheet.js";
 import { progressText, verdict } from "./model.js";
-import { itemCardsMarkup, liveStoreCard, plansMarkup, storeCard, tableMarkup, totalsHelp, verdictMarkup } from "./render.js";
+import {
+    itemCardsMarkup,
+    leftOutNote,
+    liveStoreCard,
+    plansMarkup,
+    storeCard,
+    tableMarkup,
+    totalsHelp,
+    verdictMarkup,
+} from "./render.js";
 import { compareNow, loadLast, recompare, run, stop, subscribe, tickedStores } from "./runner.js";
 
 export const enabled = true;
@@ -186,6 +195,7 @@ function mainMarkup() {
         ${!view.live ? html`<div class="plans-box" data-key="plans">${plansMarkup(c, view.items)}</div>` : ""}
         <section class="basket-detail" data-key="detail" data-patch aria-labelledby="detail-title" data-testid="basket-detail">
             <h2 id="detail-title" class="basket-h2" data-key="title">Prix par article</h2>
+            ${leftOutNote(view)}
             <div class="detail-table" data-key="table" data-patch>${tableMarkup(view)}</div>
             <div class="detail-cards" data-key="cards" data-patch>${itemCardsMarkup(view)}</div>
             <p class="basket-legend" data-key="legend">${icon("star")} votre choix · prix en vert : le moins cher de l'article · «&nbsp;Changer&nbsp;» pour prendre un autre produit.</p>
