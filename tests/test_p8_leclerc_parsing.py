@@ -262,10 +262,25 @@ def test_not_a_product():
         ("La bouteille de 1.75L", ("1.75L", None, "")),
         ("Marque Repère - Le paquet de 1kg", ("1kg", "Marque Repère", "")),
         ("", (None, None, "")),
+        # Real lines of 11/2025: a count and a weight or a volume, both kept as the site shows them
+        ("x8 - 320g", ("x8 - 320g", None, "")),
+        ("Gingembre Citron vert x20 - 36g", ("x20 - 36g", None, "Gingembre Citron vert")),
+        ("25 lavages - 1.25L", ("25 lavages - 1.25L", None, "")),
+        ("x30 pralines - 375g", ("x30 - 375g", None, "pralines")),
+        ("Extra fins x17 - 240g", ("x17 - 240g", None, "Extra fins")),
     ],
 )
 def test_split_line2(line, expected):
     assert split_line2(line) == expected
+
+
+def test_count_and_weight_give_the_price_per_kg():
+    """« x8 - 320g »: the weight is the quantity (price per kg), not 8 pieces."""
+    element = {"iIdProduit": 1, "sLibelleLigne1": "Croissants Epi d'Or", "sLibelleLigne2": "x8 - 320g"}
+    element["nrPVUnitaireTTC"] = 1.62
+    product = prepare_products([element_to_product(element, BASE)], "croissants")[0]
+    assert product.quantity_label == "x8 - 320g"
+    assert (product.unit, product.unit_price) == ("kg", 5.06)
 
 
 @pytest.mark.parametrize(

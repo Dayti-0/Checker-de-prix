@@ -407,8 +407,11 @@ def split_line2(text: str) -> tuple[str | None, str | None, str]:
     « Bouteille - 1,75L » → (« 1,75L », None, ""); « Bio Village - 1kg » →
     (« 1kg », « Bio Village », ""); « L'original Bio - 500g » → (« 500g », None,
     « L'original Bio »). Packaging words (bouteille, pack, lot…) are dropped.
+    Every quantity of the line is kept, as the site shows them: « x8 - 320g »
+    (``parsing.parse_pack`` reads the weight first: 320 g, not 8 pieces).
     """
-    quantity = brand = None
+    brand = None
+    quantities: list[str] = []
     rest: list[str] = []
     for piece in re.split(r"\s+-\s+|\s+-$|^-\s+", _text(text)):
         piece = piece.strip(" -")
@@ -416,10 +419,13 @@ def split_line2(text: str) -> tuple[str | None, str | None, str]:
             continue
         spans = quantity_spans(piece)
         if spans:
-            start, end = spans[0]
-            if quantity is None:
-                quantity = piece[start:end].strip()
-            piece = (piece[:start] + " " + piece[end:]).strip()
+            for start, end in spans:
+                found = piece[start:end].strip()
+                if found and found not in quantities:
+                    quantities.append(found)
+            for start, end in reversed(spans):
+                piece = piece[:start] + " " + piece[end:]
+            piece = clean_text(piece)
             if all(w in _PACKAGING for w in _words(piece)):
                 continue
         elif all(w in _PACKAGING for w in _words(piece)):
@@ -429,7 +435,7 @@ def split_line2(text: str) -> tuple[str | None, str | None, str]:
             brand = own  # « Bio village » → « Bio Village »
             continue
         rest.append(piece)
-    return quantity, brand, " ".join(rest)
+    return " - ".join(quantities) or None, brand, " ".join(rest)
 
 
 def _total_quantity(element: dict) -> str | None:
