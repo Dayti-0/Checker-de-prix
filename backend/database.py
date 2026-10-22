@@ -6,6 +6,11 @@ leaves no transaction open behind it. In the default mode of sqlite3 it did,
 and every later write of the app failed until a restart. Several statements
 that must be written together go in ``async with transaction() as db:``.
 
+While a transaction is open, the statements of the other tasks wait for its
+end (``SharedConnection``): otherwise the ``commit()`` of a cache write in the
+middle of it committed half of it, and a write of another task was undone
+with it.
+
 The tables are created and changed by the migrations of ``backend/migrations/``.
 The queries live in ``backend/repos/`` (one module per area); they are also
 reachable from here, e.g. ``database.get_cached(...)``, as before the split.
@@ -13,6 +18,7 @@ reachable from here, e.g. ``database.get_cached(...)``, as before the split.
 
 import asyncio
 import contextlib
+import contextvars
 import importlib
 from collections.abc import AsyncIterator
 
@@ -20,7 +26,7 @@ import aiosqlite
 
 from backend import config, migrations
 
-_db: aiosqlite.Connection | None = None
+_db: "SharedConnection | None" = None
 _lock: tuple[asyncio.AbstractEventLoop, asyncio.Lock] | None = None
 _write_lock: tuple[asyncio.AbstractEventLoop, asyncio.Lock] | None = None
 
@@ -70,7 +76,119 @@ def _transaction_lock() -> asyncio.Lock:
     return _write_lock[1]
 
 
-async def get_db() -> aiosqlite.Connection:
+# The transaction open in this context (copied by the tasks it creates), and the open one
+_owner: contextvars.ContextVar[object | None] = contextvars.ContextVar("prixmalin_transaction", default=None)
+_open_transaction: object | None = None
+
+
+def _in_open_transaction() -> bool:
+    owner = _owner.get()
+    return owner is not None and owner is _open_transaction
+
+
+async def _serialized(method, *args, **kwargs):
+    """``method(...)``, after the transaction of another task if one is open."""
+    if _in_open_transaction():
+        return await method(*args, **kwargs)
+    async with _transaction_lock():
+        return await method(*args, **kwargs)
+
+
+class _Cursor:
+    """A cursor whose reads also wait for the transaction of another task (no half-written rows)."""
+
+    def __init__(self, cursor: aiosqlite.Cursor):
+        self._cursor = cursor
+
+    def __getattr__(self, name: str):
+        return getattr(self._cursor, name)
+
+    async def fetchone(self):
+        return await _serialized(self._cursor.fetchone)
+
+    async def fetchmany(self, *args, **kwargs):
+        return await _serialized(self._cursor.fetchmany, *args, **kwargs)
+
+    async def fetchall(self):
+        return await _serialized(self._cursor.fetchall)
+
+    async def __aiter__(self):
+        for row in await self.fetchall():
+            yield row
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc) -> None:
+        await self._cursor.close()
+
+
+class _Statement:
+    """A statement of the shared connection, awaited or used with ``async with`` like aiosqlite's."""
+
+    def __init__(self, method, args, kwargs):
+        self._method, self._args, self._kwargs = method, args, kwargs
+        self._result = None
+
+    async def _run(self):
+        result = await _serialized(self._method, *self._args, **self._kwargs)
+        return _Cursor(result) if isinstance(result, aiosqlite.Cursor) else result
+
+    def __await__(self):
+        return self._run().__await__()
+
+    async def __aenter__(self):
+        self._result = await self._run()
+        return self._result
+
+    async def __aexit__(self, *exc) -> None:
+        close = getattr(self._result, "close", None)
+        if close is not None:
+            await close()
+
+
+class SharedConnection:
+    """The aiosqlite connection of the app: outside a transaction, a statement waits for the open one.
+
+    Inside a transaction, ``commit()`` does nothing (the transaction commits at
+    its end) and ``rollback()`` is refused (raise an exception instead).
+    """
+
+    def __init__(self, connection: aiosqlite.Connection):
+        object.__setattr__(self, "_connection", connection)
+
+    def __getattr__(self, name: str):
+        return getattr(self._connection, name)
+
+    def __setattr__(self, name: str, value) -> None:
+        setattr(self._connection, name, value)
+
+    def execute(self, *args, **kwargs) -> _Statement:
+        return _Statement(self._connection.execute, args, kwargs)
+
+    def executemany(self, *args, **kwargs) -> _Statement:
+        return _Statement(self._connection.executemany, args, kwargs)
+
+    def executescript(self, *args, **kwargs) -> _Statement:
+        return _Statement(self._connection.executescript, args, kwargs)
+
+    def execute_insert(self, *args, **kwargs) -> _Statement:
+        return _Statement(self._connection.execute_insert, args, kwargs)
+
+    def execute_fetchall(self, *args, **kwargs) -> _Statement:
+        return _Statement(self._connection.execute_fetchall, args, kwargs)
+
+    async def commit(self) -> None:
+        if not _in_open_transaction():
+            await _serialized(self._connection.commit)
+
+    async def rollback(self) -> None:
+        if _in_open_transaction():
+            raise RuntimeError("raise an exception to undo a transaction")
+        await _serialized(self._connection.rollback)
+
+
+async def get_db() -> SharedConnection:
     global _db
     if _db is not None:
         return _db
@@ -89,30 +207,42 @@ async def get_db() -> aiosqlite.Connection:
             except BaseException:
                 await db.close()
                 raise
-            _db = db
+            _db = SharedConnection(db)
     return _db
 
 
 @contextlib.asynccontextmanager
-async def transaction() -> AsyncIterator[aiosqlite.Connection]:
+async def transaction() -> AsyncIterator[SharedConnection]:
     """Several statements written together, or not at all.
 
-    One transaction at a time. The other statements of the app that run
-    meanwhile on the shared connection are part of it.
+    One transaction at a time: the statements of the other tasks wait for its
+    end. A transaction opened inside it (a helper of a repo) is part of it.
     """
+    global _open_transaction
     db = await get_db()
+    if _in_open_transaction():
+        yield db
+        return
+    raw = db._connection
     async with _transaction_lock():
-        await db.execute("BEGIN IMMEDIATE")
+        marker = object()
+        token = _owner.set(marker)
+        _open_transaction = marker
         try:
-            yield db
-        except BaseException:
-            await db.rollback()
-            raise
-        await db.commit()
+            await raw.execute("BEGIN IMMEDIATE")
+            try:
+                yield db
+            except BaseException:
+                await raw.rollback()
+                raise
+            await raw.commit()
+        finally:
+            _open_transaction = None
+            _owner.reset(token)
 
 
 async def close_db() -> None:
     global _db
     if _db is not None:
         db, _db = _db, None
-        await db.close()
+        await db._connection.close()
