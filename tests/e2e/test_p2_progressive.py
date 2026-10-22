@@ -81,7 +81,10 @@ def test_busy_state_and_announcements(desktop, delays):
 
 def test_usual_time_then_slow_retailer_can_be_ignored(desktop, delays):
     page = desktop
-    delays.update({"carrefour": 6})
+    # Real seconds on the server, while the page's clock is moved forward: far
+    # longer than the steps below even on a busy PC (Carrefour must still be
+    # searching when « Ignorer » is clicked; the request is dropped with the page)
+    delays.update({"carrefour": 60})
     page.clock.install()
     page.goto(page.base)
     page.evaluate("localStorage.setItem('prixmalin.durations', JSON.stringify({carrefour: [8000, 7000, 9000]}))")
