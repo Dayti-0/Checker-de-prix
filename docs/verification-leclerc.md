@@ -8,6 +8,8 @@ E.Leclerc Drive protège son site avec **DataDome**, le même service qu'Interma
 - Vous pouvez la réduire, mais **laissez-la ouverte**. Si vous la fermez, PrixMalin la rouvrira (réduite) à la prochaine recherche E.Leclerc.
 - PrixMalin ne clique jamais à votre place : ni sur le bandeau des cookies, ni sur une vérification.
 - Si E.Leclerc refuse la connexion (« Access blocked », « Accès temporairement restreint »), PrixMalin **s'arrête tout de suite** et ne contacte plus le site pendant un moment (30 minutes, puis 1 h, 2 h et au plus 4 h si cela recommence). Il ne réessaie jamais tout seul pendant ce temps.
+- Un petit puzzle à faire glisser (« Slide right… ») n'est pas un refus : PrixMalin affiche « Vérification requise », vous le faites vous-même dans la fenêtre E.Leclerc (« Ouvrir le site »), puis « J'ai terminé ».
+- Si le site refuse une recherche sans rien demander (« E.Leclerc a refusé la recherche »), il n'y a rien à faire dans la fenêtre : réessayez plus tard, et envoyez le diagnostic si cela se répète.
 
 Les structures du site utilisées par PrixMalin ont été relevées sur des pages réelles de **2025**. Le site a pu changer depuis : cette vérification sert à le savoir. Comptez une demi-heure.
 
@@ -18,7 +20,8 @@ Les fichiers utiles sont dans le dossier `data\debug` de PrixMalin, et dans le *
 - `leclerc-…-empty.html` : une recherche sans produit ;
 - `leclerc-…-stores.json` : une liste des drives que PrixMalin n'a pas su lire ;
 - `leclerc-…-sample.html` : des pages de recherche gardées exprès (voir l'étape 6) ;
-- `leclerc-…-error.html`, `leclerc-…-error.txt` (la réponse brute du site) ou `-blocked.html` : une recherche en erreur ou bloquée.
+- `leclerc-…-error.html`, `leclerc-…-error.txt` (la réponse brute du site) ou `-blocked.html` : une recherche en erreur ou bloquée ;
+- `leclerc-…-refused.json` : un refus du site (son code et le début de sa réponse, sans l'adresse du drive ni votre code postal).
 
 Ces fichiers ne contiennent pas vos identifiants : le panier d'un drive où vous n'êtes pas connecté est vide.
 

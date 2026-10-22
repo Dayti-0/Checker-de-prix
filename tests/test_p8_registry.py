@@ -97,3 +97,23 @@ def test_one_try_only_and_no_background_refresh(monkeypatch):
     calls.clear()
     run(search.search_store("aldi", "farine"))
     assert calls == ["aldi", "aldi"]
+
+
+def test_page_that_is_no_page_of_the_drive_is_not_cached(monkeypatch):
+    """The error of a page of the site that is no page of the drive: shown, never cached as « Aucun produit »."""
+    from backend.scrapers import leclerc as lc
+    from backend.scrapers.base import ScraperError
+    from backend.services import settings as settings_service
+
+    calls = []
+
+    async def no_drive_page(key, fn, *args, timeout=None, priority="interactive"):
+        calls.append(key)
+        raise ScraperError(lc.SEARCH_FAILED)
+
+    monkeypatch.setattr(search.browser, "run", no_drive_page)
+    run(settings_service.set_store("leclerc", StoreSelection(id="173301", url=fixtures.LECLERC_BASE)))
+    for _ in range(2):
+        result = run(search.search_store("leclerc", "farine"))
+        assert (result.status, result.message, result.cached) == ("error", lc.SEARCH_FAILED, False)
+    assert calls == ["leclerc", "leclerc"]  # asked again: nothing kept
