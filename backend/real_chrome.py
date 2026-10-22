@@ -15,7 +15,11 @@ retailers of ``config.REAL_CHROME_STORES`` get their own window instead:
   never headless, no stealth script, no user agent, language or window size
   change;
 - the port is a free port chosen by PrixMalin, remembered in
-  ``<profile>/PrixMalinDebugPort``. Not ``--remote-debugging-port=0``: Chrome
+  ``<profile>/PrixMalinDebugPort`` with the address of that browser
+  (``/devtools/browser/<id>``, new at each start): a Chrome found on that port
+  later is reused only if it is that same browser, never the window of another
+  retailer started on the same port since (nor a window another dedicated
+  window of this PrixMalin uses). Not ``--remote-debugging-port=0``: Chrome
   then sets ``navigator.webdriver`` to true (measured on Chromium 141), the
   first thing an anti-robot script reads;
 - PrixMalin attaches with patchright's ``connect_over_cdp`` (a Playwright that
@@ -42,6 +46,7 @@ import urllib.request
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from backend import config
 
@@ -191,6 +196,18 @@ def parse_port_file(text: str) -> int | None:
     return port if 0 < port < 65536 else None
 
 
+def parse_port_record(text: str) -> tuple[int | None, str | None]:
+    """``(port, browser address)`` of ``PrixMalinDebugPort`` or Chrome's ``DevToolsActivePort``.
+
+    « 9333\\n/devtools/browser/0b5c… »; the address is None in a file written by
+    an older PrixMalin (the port alone).
+    """
+    port = parse_port_file(text)
+    lines = [line.strip() for line in (text or "").strip().splitlines()]
+    path = lines[1] if port is not None and len(lines) > 1 and lines[1].startswith("/devtools/browser/") else None
+    return port, path
+
+
 def free_port() -> int:
     """A TCP port of 127.0.0.1 nobody listens on (Chrome opens its debugging port there)."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -255,6 +272,7 @@ class RealChrome:
         profile_dir: Path | None = None,
         on_closed: Callable[[str], None] | None = None,
         label: str | None = None,
+        taken: Callable[[str], bool] | None = None,
     ) -> None:
         self.key = key
         self.domain = domain
@@ -266,6 +284,10 @@ class RealChrome:
         # The site asked for a check through its API: « Ouvrir le site » reloads it
         self.challenge_pending = False
         self._on_closed = on_closed
+        # Is this websocket address the one another dedicated window uses?
+        self._taken = taken
+        # Websocket address of the Chrome this window is connected to
+        self.endpoint: str | None = None
         self._pw = None
         self._browser = None
         self._context = None
@@ -396,6 +418,7 @@ class RealChrome:
             await browser.close()
             raise ChromeUnavailable(start_failed(self.label))
         self._browser = browser
+        self.endpoint = endpoint
         self._context = browser.contexts[0]  # the profile's own context: never new_context()
         self._context.set_default_timeout(20000)
         browser.on("disconnected", lambda *_: self._disconnected(browser))
@@ -439,6 +462,9 @@ class RealChrome:
             proc = self._spawn(launch_args(path, profile, port, minimized=minimized, extra=config.CHROME_EXTRA_ARGS))
             try:
                 endpoint = await self._wait_endpoint(port, proc)
+                # The address of this very browser: a Chrome found later on this
+                # port is reused only if it is this one (see _running_endpoint)
+                (profile / PORT_FILE).write_text(f"{port}\n{urlsplit(endpoint).path}\n", encoding="utf-8")
             except ChromeUnavailable:
                 if proc.poll() is None:
                     # Started but the port was taken meanwhile: try another one
@@ -452,16 +478,28 @@ class RealChrome:
         raise ChromeUnavailable(start_failed(self.label))  # pragma: no cover (loop always returns or raises)
 
     async def _running_endpoint(self, profile: Path) -> str | None:
-        """Websocket URL of a dedicated Chrome still open (PrixMalin restarted), else None."""
+        """Websocket URL of a dedicated Chrome still open (PrixMalin restarted), else None.
+
+        Only the browser saved for this profile: the port of a window closed
+        since may be the one of another retailer's window now.
+        """
         for name in (PORT_FILE, "DevToolsActivePort"):
             try:
-                port = parse_port_file((profile / name).read_text(encoding="utf-8"))
+                port, path = parse_port_record((profile / name).read_text(encoding="utf-8"))
             except OSError:
                 continue
-            if port is not None:
-                endpoint = await self._endpoint(port)
-                if endpoint:
-                    return endpoint
+            if port is None:
+                continue
+            endpoint = await self._endpoint(port)
+            if not endpoint:
+                continue
+            if path is not None and urlsplit(endpoint).path != path:
+                logger.info("%s: the Chrome on port %s is another browser, not reused", self.key, port)
+                continue
+            if self._taken is not None and self._taken(endpoint):
+                logger.info("%s: the Chrome on port %s is the window of another retailer", self.key, port)
+                continue
+            return endpoint
         return None
 
     async def _endpoint(self, port: int) -> str | None:
@@ -557,6 +595,7 @@ class RealChrome:
                 self._on_closed(self.key)
 
     def _reset(self) -> None:
+        self.endpoint = None
         self._browser = None
         self._context = None
         self._page = None

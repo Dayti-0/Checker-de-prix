@@ -856,9 +856,18 @@ class BrowserManager:
             root = self.real_chrome_dir
             profile = root / f"chrome-{key}" if root is not None else config.real_chrome_profile_dir(key)
             real = self._real[key] = RealChrome(
-                key, domain, profile, on_closed=self._on_window_closed, label=SCRAPERS[key].label
+                key,
+                domain,
+                profile,
+                on_closed=self._on_window_closed,
+                label=SCRAPERS[key].label,
+                taken=lambda endpoint, key=key: self._window_taken(key, endpoint),
             )
         return real
+
+    def _window_taken(self, key: str, endpoint: str) -> bool:
+        """The Chrome at ``endpoint`` is the dedicated window of another retailer (two windows, P8)."""
+        return any(real.endpoint == endpoint for other, real in self._real.items() if other != key)
 
     async def _dedicated_page(self, key: str):
         from backend.real_chrome import ChromeUnavailable
