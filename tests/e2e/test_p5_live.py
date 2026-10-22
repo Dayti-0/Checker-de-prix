@@ -67,6 +67,26 @@ def test_demo_basket_is_honest(base):
     assert comparison["plans"][0]["kind"] == "single"
 
 
+def test_the_basket_never_takes_a_close_product(base):
+    """« huile de tournesol » with the real relevance (catalog_p2.py: tuna, sardines,
+    chips and mayonnaise in sunflower oil, cheaper than the oils): only oils are
+    taken, and a retailer without any oil leaves the item not found."""
+    add(base, "huile de tournesol")
+    comparison = httpx.post(
+        f"{base}/api/basket/compare", json={"stores": ["aldi", "lidl", "carrefour"]}, headers=HEADERS, timeout=30
+    ).json()
+    taken = {}
+    for basket in comparison["stores"]:
+        (line,) = basket["lines"]
+        assert line["status"] in ("found", "not_found"), line
+        if line["status"] == "found":
+            taken[basket["store"]] = line["product"]["name"]
+    assert taken, comparison
+    for store, name in taken.items():
+        assert "huile de tournesol" in name.lower(), (store, name)
+        assert not any(word in name.lower() for word in ("thon", "sardines", "chips", "mayonnaise")), (store, name)
+
+
 def test_live_basket_fills_cell_by_cell(base, monkeypatch):
     demo_list(base)
     monkeypatch.setitem(fake.DELAYS, "*", 0.2)
