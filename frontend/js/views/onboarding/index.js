@@ -7,7 +7,10 @@
 //   2. the 3 nearest Intermarché and Courses U stores and E.Leclerc drives
 //      (the retailers whose `finds_stores` is true), the nearest chosen
 //      (a store already chosen stays proposed and checked: started again from
-//      Réglages, the assistant never replaces it by itself);
+//      Réglages, the assistant never replaces it by itself; never an E.Leclerc
+//      pedestrian pick-up point). A store chosen automatically meanwhile
+//      (Courses U, E.Leclerc) replaces the proposal of a list not touched yet,
+//      and an untouched proposal is left to that automatic choice;
 //   3. a trial search « lait » showing the state of each retailer and how to
 //      fix it.
 // Then back to the home page. The end is saved in the preferences
@@ -22,7 +25,18 @@ import { navigate } from "../../core/router.js";
 import { emit, loadSettings, on, state } from "../../core/store.js";
 import { announce, notify } from "../../core/ui.js";
 import { mountLocationForm } from "../settings/sections/location.js";
-import { andList, distanceText, ofLabel, openSite, statePill, storeNoun, storeTitle } from "../status/shared.js";
+import {
+    andList,
+    autoPickOf,
+    autoPickStore,
+    autoStoreKeys,
+    distanceText,
+    ofLabel,
+    openSite,
+    statePill,
+    storeNoun,
+    storeTitle,
+} from "../status/shared.js";
 
 export const enabled = true;
 export const title = "Bienvenue";
@@ -50,7 +64,8 @@ function storeLabels() {
 let root = null;
 let step = 1;
 let cleanups = [];
-// Step 2: { key: { status, stores, error, choice } } (choice: index or "")
+// Step 2: { key: { status, nearest, stores, error, choice, touched } } (choice:
+// index or ""; touched: the user checked a choice himself)
 let lists = {};
 // Step 3: { key: StoreResult | "loading" | { status: "error", message } }
 let trial = {};
@@ -175,6 +190,7 @@ function stepBody() {
             ${nav({ back: false, skip: "Passer", nextDisabled: !(state.settings && state.settings.location) })}`;
     }
     if (step === 2) {
+        refreshProposals();
         if (!state.settings || !state.settings.location) {
             return html`<p class="notice warn">Sans code postal, PrixMalin ne peut pas proposer de magasins. Revenez à l'étape précédente ou choisissez-les plus tard dans les réglages.</p>
                 ${nav({ next: "Continuer" })}`;
@@ -223,6 +239,14 @@ function draw({ focus = false } = {}) {
             }),
         );
     }
+    if (step === 2) {
+        // A store chosen automatically meanwhile (first launch): shown and checked
+        cleanups.push(
+            on("settings:changed", () => {
+                if (refreshProposals()) drawLists();
+            }),
+        );
+    }
     if (focus) {
         root.querySelector("#onb-step-title").focus();
         announce(stepTitle());
@@ -253,7 +277,7 @@ async function loadLists() {
                 const nearest = await api(`/api/retailers/${key}/stores`, { timeout: 120000 });
                 const current = state.settings.stores && state.settings.stores[key];
                 const { stores, choice } = proposedStores(nearest, current);
-                lists[key] = { status: "done", stores, postal: location.postal_code, choice };
+                lists[key] = { status: "done", nearest, stores, postal: location.postal_code, choice, touched: false };
             } catch (err) {
                 lists[key] = { status: "error", stores: [], choice: "", error: err.message };
             }
@@ -267,9 +291,16 @@ function sameStore(a, b) {
     return a.url || b.url ? a.url === b.url : Boolean(a.id) && a.id === b.id;
 }
 
+// A store PrixMalin may propose by itself: not an E.Leclerc pedestrian
+// pick-up point (the same rule as services/stores.first_drive)
+function isDrive(store) {
+    const services = store.services || [];
+    return !services.length || services.includes("Drive");
+}
+
 // Stores proposed at step 2: the PROPOSED nearest, and the store chosen
 // already (`current`) when it is not among them, first. `choice`: index of the
-// store checked (the current one, else the nearest), "" without store.
+// store checked (the current one, else the nearest drive), "" without store.
 export function proposedStores(nearest, current) {
     let stores = (nearest || []).slice(0, PROPOSED);
     const index = stores.findIndex((s) => sameStore(s, current));
@@ -282,7 +313,25 @@ export function proposedStores(nearest, current) {
         const store = { ...current, ...(known || {}), id: (known || current).id || "", current: true };
         return { stores: [store, ...stores], choice: 0 };
     }
-    return { stores, choice: stores.length ? 0 : "" };
+    const drive = stores.findIndex(isDrive);
+    return { stores, choice: drive >= 0 ? drive : "" };
+}
+
+// The proposals of the lists the user did not touch, from the stores saved
+// now (a store chosen automatically meanwhile). True when one changed.
+function refreshProposals() {
+    let changed = false;
+    for (const key of storeKeys()) {
+        const list = lists[key];
+        if (!list || list.status !== "done" || list.touched) continue;
+        const current = state.settings && state.settings.stores && state.settings.stores[key];
+        const next = proposedStores(list.nearest, current);
+        if (JSON.stringify(next) === JSON.stringify({ stores: list.stores, choice: list.choice })) continue;
+        list.stores = next.stores;
+        list.choice = next.choice;
+        changed = true;
+    }
+    return changed;
 }
 
 // Step 2: only the lists change (the focus stays where it is)
@@ -307,6 +356,18 @@ async function saveStores() {
         const current = state.settings.stores && state.settings.stores[key];
         // The store already chosen stays as it is (chosen automatically or not)
         if (sameStore(store, current)) continue;
+        if (!list.touched && !current && autoStoreKeys().includes(key)) {
+            // The nearest proposed by the assistant: chosen by PrixMalin itself,
+            // so that it stays « choisi automatiquement » (a PUT would make it
+            // a choice of the user, never chosen again by itself)
+            const running = autoPickOf(key).status === "loading";
+            const result = running ? null : await autoPickStore(key);
+            if (running || (result && ["chosen", "kept"].includes(result.status))) {
+                saved += 1;
+                continue;
+            }
+            // No automatic choice now (site unavailable...): the proposal is saved
+        }
         const body = { id: store.id || null, name: store.name, address: store.address || null };
         if (store.url) body.url = store.url;
         if (store.distance_km != null) body.distance_km = store.distance_km;
@@ -373,7 +434,9 @@ export function render(el) {
         const input = e.target;
         if (input.type !== "radio" || !input.name.startsWith("onb-")) return;
         const key = input.name.slice(4);
-        if (lists[key]) lists[key].choice = input.value === "" ? "" : Number(input.value);
+        if (!lists[key]) return;
+        lists[key].choice = input.value === "" ? "" : Number(input.value);
+        lists[key].touched = true;
     });
 
     el.addEventListener("click", async (e) => {

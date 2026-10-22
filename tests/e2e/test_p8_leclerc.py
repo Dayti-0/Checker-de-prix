@@ -11,6 +11,7 @@ from playwright.sync_api import expect
 
 from tests.e2e import catalog_p8
 from tests.e2e.axe import assert_accessible
+from tests.e2e.helpers import js_eval
 from tests.e2e.p2_helpers import choose_view, close_toggle, no_horizontal_scroll, search
 
 BRUGES = "https://fd12-courses.leclercdrive.fr/magasin-173301-173301-Bruges.aspx"
@@ -221,3 +222,72 @@ def test_assistant_proposes_three_lists(desktop):
     expect(trial).to_contain_text("1 produit trouvé")
     saved = saved_drive(page)
     assert (saved["id"], saved["auto"]) == ("190601", False)
+
+
+def test_assistant_proposal_is_never_a_pickup_point(desktop):
+    """Without a drive yet, the nearest drive is checked: never a pedestrian pick-up point."""
+    page = desktop
+    page.goto(page.base)
+    onboarding = "/static/js/views/onboarding/index.js"
+    pickup = {"id": "093401", "url": f"{catalog_p8.HOST}/magasin-093401-193402", "services": ["Retrait piéton"]}
+    drive = {"id": "190501", "url": f"{catalog_p8.HOST}/magasin-190501-190501", "services": ["Drive"]}
+    assert js_eval(page, onboarding, "proposedStores", [pickup, drive], None)["choice"] == 1
+    assert js_eval(page, onboarding, "proposedStores", [pickup, pickup], None)["choice"] == ""
+    # Courses U and Intermarché stores have no services: the nearest one
+    assert js_eval(page, onboarding, "proposedStores", [{"id": "1"}, {"id": "2"}], None)["choice"] == 0
+
+
+@pytest.mark.parametrize("answered", ["at_step_2", "after_saving"])
+def test_assistant_keeps_the_drive_chosen_automatically(desktop, answered):
+    """First launch: the list of drives arrives before the automatic choice (same lock on the server).
+
+    The drive proposed is a drive, never the nearer pick-up point; « Enregistrer
+    et continuer » leaves it to the automatic choice, which stays automatic.
+    """
+    page = desktop
+    held, released = [], []
+
+    def hold(route):
+        if released:
+            route.continue_()
+        else:
+            held.append(route)
+
+    def release():
+        released.append(True)
+        while held:
+            held.pop().continue_()
+
+    page.route("**/api/retailers/leclerc/store/auto*", hold)
+    page.goto(f"{page.base}/#/bienvenue")
+    save_postal(page, "34000")
+    page.get_by_role("button", name="Continuer").click()
+    expect(page.get_by_role("heading", name="Étape 2 sur 3 : vos magasins")).to_be_visible()
+    leclerc = page.locator(".onb-stores[data-retailer=leclerc]")
+    expect(leclerc.get_by_role("radio")).to_have_count(4)
+    nearest_drive = leclerc.get_by_role("radio", name=re.compile("Saint-Jean-de-Védas"))
+    expect(nearest_drive).to_be_checked()
+    expect(leclerc.get_by_role("radio", name=re.compile("Montpellier Comédie"))).not_to_be_checked()
+    assert held and saved_drive(page) is None  # the automatic choice has not answered yet
+
+    if answered == "at_step_2":
+        release()
+        # Shown as the drive chosen now, still checked
+        expect(leclerc.locator(".onb-store").filter(has_text="Saint-Jean-de-Védas")).to_contain_text("Magasin actuel")
+        expect(nearest_drive).to_be_checked()
+        page.get_by_role("button", name="Enregistrer et continuer").click()
+        expect(page.get_by_role("heading", name="Étape 3 sur 3 : essai")).to_be_visible()
+    else:
+        page.get_by_role("button", name="Enregistrer et continuer").click()
+        expect(page.get_by_role("heading", name="Étape 3 sur 3 : essai")).to_be_visible()
+        assert saved_drive(page) is None  # no PUT: the automatic choice saves it
+        release()
+    page.wait_for_function(
+        """async () => {
+            const r = await fetch("/api/settings", {headers: {"X-PrixMalin": "1"}});
+            return Boolean((await r.json()).stores.leclerc);
+        }""",
+        polling=100,
+    )
+    saved = saved_drive(page)
+    assert (saved["id"], saved["name"], saved["auto"]) == ("190501", "E.Leclerc Drive Saint-Jean-de-Védas", True)
