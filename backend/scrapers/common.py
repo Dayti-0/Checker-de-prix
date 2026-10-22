@@ -49,6 +49,10 @@ async ({url, method, headers, body, timeoutMs}) => {
 
 # Time left to an anti-bot challenge to pass by itself (Cloudflare often does)
 CHALLENGE_WAIT_SECONDS = 15
+# Cloudflare says « Vérification réussie » but the page keeps waiting for the
+# site (coursesu.com, October 2026): reloaded once after this time
+PASSED_RELOAD_AFTER_SECONDS = 3
+_CHALLENGE_PASSED = re.compile(r"v[ée]rification r[ée]ussie|verification successful|success!", re.I)
 
 # Debug snapshots kept per retailer (data/debug/{key}-{AAAAMMJJ-HHMMSS}-{status}.html)
 SNAPSHOTS_KEPT = 5
@@ -281,17 +285,37 @@ def raise_for_block(kind: str, label: str, captcha_message: str | None = None) -
     raise BlockedError(captcha_message or blocked_message(label))
 
 
+def challenge_passed(text: str | None) -> bool:
+    """The text of a Cloudflare page says its check passed (« Vérification réussie »)."""
+    return bool(_CHALLENGE_PASSED.search(text or ""))
+
+
 async def wait_for_clearance(page, label: str, captcha_message: str | None = None) -> None:
     """Give an anti-bot challenge time to pass by itself, else raise BlockedError.
 
-    A hard block (nothing to solve) raises HardBlockError at once.
+    A hard block (nothing to solve) raises HardBlockError at once. A Cloudflare
+    check that passed but stays on « En attente de la réponse » is reloaded once.
     """
     kind = await detect_block(page)
     waited = 0.0
+    reloaded = False
     while kind and kind != "hard_block" and waited < CHALLENGE_WAIT_SECONDS:
         await page.wait_for_timeout(1000)
         waited += 1
         kind = await detect_block(page)
+        if kind == "cloudflare" and not reloaded and waited >= PASSED_RELOAD_AFTER_SECONDS:
+            try:
+                text = await page.evaluate("() => document.body ? document.body.innerText.slice(0, 2000) : ''")
+            except Exception:  # noqa: BLE001 (page navigating)
+                text = ""
+            if challenge_passed(text):
+                reloaded = True
+                logger.info("%s: the check passed but the page waits, reloading it", label)
+                try:
+                    await page.reload(wait_until="domcontentloaded", timeout=30000)
+                except Exception as e:  # noqa: BLE001 (read again below)
+                    logger.debug("reload after a passed check: %s", e)
+                kind = await detect_block(page)
     if kind:
         raise_for_block(kind, label, captcha_message)
 

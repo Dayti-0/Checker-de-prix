@@ -99,9 +99,14 @@ def needs_refresh(products: list, age: float) -> bool:
     return bool(products) and config.CACHE_REFRESH_AFTER_SECONDS < age < config.CACHE_TTL_SECONDS
 
 
-def final_status(scraper: BaseScraper, store: StoreSelection | None, products: list[Product]) -> tuple[str, str | None]:
-    """Status and message of a visit that returned ``products``."""
+def final_status(
+    scraper: BaseScraper, store: StoreSelection | None, products: list[Product], source: str | None = None
+) -> tuple[str, str | None]:
+    """Status and message of a visit that returned ``products`` (read by ``source``)."""
     if not products:
+        # The site's API answered without the product (Lidl: few foods online)
+        if scraper.empty_message and source == "api":
+            return "empty", scraper.empty_message
         return "empty", f"Aucun produit trouvé chez {scraper.label}."
     if scraper.needs_store and store is None and all(p.price is None for p in products):
         return "store_required", f"{scraper.label} n'affiche les prix qu'après le choix d'un magasin."
@@ -206,11 +211,11 @@ async def _visit(scraper: BaseScraper, query: str, store: StoreSelection | None,
         if visit.source and visit.source != PRIMARY_SOURCE.get(key, "api"):
             logger.warning("%s: products read by the fallback method %r", scraper.label, visit.source)
         visit.products = prepare_products(products, query)
-        visit.status, visit.message = final_status(scraper, store, visit.products)
+        visit.status, visit.message = final_status(scraper, store, visit.products, visit.source)
         if visit.status == "ok":
             await cache.set_cached(ckey, [p.model_dump() for p in visit.products], source=visit.source)
         elif visit.status == "empty":
-            await cache.set_cached(ckey, [], source=None)  # remembered 30 minutes
+            await cache.set_cached(ckey, [], source=visit.source)  # remembered 30 minutes
         await hooks.emit("products_scraped", store=key, store_ctx=store_ctx, query=query, products=visit.products)
     finally:
         _priority.reset(token)
@@ -364,7 +369,7 @@ async def search_store(
             result.message = stale_message(scraper.label, entry[1], visit.status, visit.retry_after)
 
     if result.status == "ok" and result.cached and not result.stale:
-        result.status, result.message = final_status(scraper, store, result.products)
+        result.status, result.message = final_status(scraper, store, result.products, result.source)
     result.elapsed_ms = int((time.monotonic() - start) * 1000)
     await hooks.emit("search_finished", result=result, query=query, store_ctx=store_ctx, from_cache=result.cached)
     return result

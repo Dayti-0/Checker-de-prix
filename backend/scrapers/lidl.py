@@ -3,8 +3,17 @@
 Each result is a "gridbox" (fullTitle, price.price, price.basePrice.text...),
 the same structure on every Lidl country site. ``numFound`` above the products
 read: the next ones (``offset``) are asked once, in the first half of the search.
+
+The API refuses ``Accept: application/json`` (HTTP 406, seen on lidl.es, .ie
+and .pt in 2026): it is asked with the media type of the site itself. An answer
+without products is a real « aucun produit »: lidl.fr only publishes part of its
+food range (mostly the offers of the week). It is kept in data/debug. When the
+API does not answer, the search page is read: the tiles carry their gridbox in
+``data-grid-data``.
 """
 
+import html
+import json
 import logging
 import re
 from urllib.parse import quote, urljoin
@@ -16,6 +25,7 @@ from backend.scrapers.common import (
     ensure_origin,
     page_fetch,
     save_debug_snapshot,
+    save_debug_text,
     wait_for_clearance,
 )
 from backend.scrapers.extract import (
@@ -39,12 +49,64 @@ BASE_URL = "https://www.lidl.fr"
 FETCH_SIZE = 48
 SEARCH_API = BASE_URL + "/q/api/search?q={query}&assortment=FR&locale=fr_FR&version=v2.0.0&fetchsize=" + str(FETCH_SIZE)
 SEARCH_URL = BASE_URL + "/q/search?q={query}"
+# Media type asked by lidl.fr itself; a bare application/json gets HTTP 406
+API_ACCEPT = "application/mindshift.search+json;version=2, application/json;q=0.9, */*;q=0.8"
+# Shown when the API answered without the product (glossary: « Aucun produit »)
+EMPTY_MESSAGE = (
+    "Aucun produit chez Lidl : lidl.fr ne publie en ligne qu'une partie de son rayon "
+    "alimentaire (surtout les offres de la semaine)."
+)
+# Invisible characters found in Lidl titles (soft hyphen, zero width space, BOM)
+_INVISIBLE = re.compile("[\u00ad\u200b\ufeff]")
 
 
 def _text(value: object) -> str:
     if isinstance(value, dict):
         value = value.get("text")
     return clean_text(value) if isinstance(value, str) else ""
+
+
+def _title(value: object) -> str:
+    """A title of the API: HTML entities decoded, invisible characters removed."""
+    if not isinstance(value, str):
+        return ""
+    return clean_text(_INVISIBLE.sub("", html.unescape(value)))
+
+
+def is_empty_answer(data: object) -> bool:
+    """The API answered, and has no product for the query (not a failure)."""
+    if not isinstance(data, dict):
+        return False
+    items = data.get("items")
+    if items == []:
+        return True
+    return items is None and (data.get("resultType") == "empty" or data.get("numFound") == 0)
+
+
+def redirect_url(data: object) -> str | None:
+    """Page the API sends the query to (« resultType: redirect »), on lidl.fr only."""
+    if not isinstance(data, dict) or data.get("resultType") != "redirect":
+        return None
+    target = data.get("redirectURL") or data.get("redirectUrl")
+    if not isinstance(target, str) or not target.strip():
+        return None
+    url = urljoin(BASE_URL + "/", target.strip())
+    return url if url.startswith(BASE_URL + "/") else None
+
+
+def grid_items(attributes: list[str | None]) -> dict:
+    """``data-grid-data`` attributes of the tiles of a page → an answer for parse_search_json."""
+    items = []
+    for raw in attributes:
+        if not raw:
+            continue
+        try:
+            grid = json.loads(raw)
+        except ValueError:
+            continue
+        if isinstance(grid, dict):
+            items.append({"gridbox": {"data": grid}})
+    return {"items": items}
 
 
 def parse_search_json(data: object) -> list[Product]:
@@ -58,7 +120,7 @@ def parse_search_json(data: object) -> list[Product]:
         grid = item.get("gridbox", {}).get("data") if isinstance(item.get("gridbox"), dict) else item
         if not isinstance(grid, dict):
             continue
-        name = clean_text(grid.get("fullTitle") or grid.get("title"))
+        name = _title(grid.get("fullTitle") or grid.get("title"))
         if not name:
             continue
         price_info = grid.get("price") if isinstance(grid.get("price"), dict) else {}
@@ -124,29 +186,52 @@ class LidlScraper(BaseScraper):
         "Prix nationaux : rien à configurer. Lidl ne publie en ligne qu'une partie "
         "de son rayon alimentaire (souvent les offres de la semaine)."
     )
+    empty_message = EMPTY_MESSAGE
 
     async def search(self, page, query: str, store: StoreSelection | None) -> list[Product]:
         self.last_source = None
         budget = PageBudget(self.key)
         await ensure_origin(page, self.home_url, self.label)
-        result = await page_fetch(page, SEARCH_API.format(query=quote(query)), headers={"accept": "application/json"})
+        result = await page_fetch(page, SEARCH_API.format(query=quote(query)), headers={"accept": API_ACCEPT})
         data = json_of(result)
+        page_url = SEARCH_URL.format(query=quote(query))
         if data is not None:
             products = self.found(parse_search_json(data), "api")
             if products:
                 return self.found(await self._next_products(page, query, data, products, budget), "api")
             products = self.found(products_from_json(data, self.key, BASE_URL), "generic")
-            if products or data.get("items") == []:
+            if products:
                 return products
-        logger.info("Lidl: JSON search unavailable (HTTP %s), reading the page", result.status)
+            if is_empty_answer(data):
+                # The API answered: Lidl has no such product online (kept as proof)
+                logger.info(
+                    "Lidl: no product for %r (numFound=%s, resultType=%s)",
+                    query,
+                    data.get("numFound"),
+                    data.get("resultType"),
+                )
+                save_debug_text(self.key, "empty", result.text)
+                self.last_source = "api"
+                return []
+            page_url = redirect_url(data) or page_url
+        else:
+            logger.info("Lidl: JSON search unavailable (HTTP %s), reading the page", result.status)
+            save_debug_text(self.key, "error", result.text[:20000], suffix=".txt")
 
-        await page.goto(SEARCH_URL.format(query=quote(query)), wait_until="domcontentloaded", timeout=30000)
+        await page.goto(page_url, wait_until="domcontentloaded", timeout=30000)
         await wait_for_clearance(page, self.label)
         await accept_cookies(page)
         try:
-            await page.wait_for_selector("a[href*='/p/']", timeout=12000)
+            await page.wait_for_selector("[data-grid-data], a[href*='/p/']", timeout=12000)
         except Exception as e:  # noqa: BLE001 (timeout: the page is read anyway)
-            logger.debug("Lidl: no product link yet: %s", e)
+            logger.debug("Lidl: no product tile yet: %s", e)
+        # The tiles carry the same gridbox as the API
+        attributes = await page.eval_on_selector_all(
+            "[data-grid-data]", "els => els.map((el) => el.getAttribute('data-grid-data'))"
+        )
+        products = self.found(parse_search_json(grid_items(attributes)), "html")
+        if products:
+            return products
         products = self.found(await extract_cards(page, self.key, BASE_URL, linkPattern="/p/"), "generic")
         if not products:
             products = self.found(await extract_json_ld(page, self.key, BASE_URL), "json-ld")
@@ -161,7 +246,7 @@ class LidlScraper(BaseScraper):
             return products
         await pause_between_pages(page)
         url = SEARCH_API.format(query=quote(query)) + f"&offset={offset}"
-        more = json_of(await page_fetch(page, url, headers={"accept": "application/json"}))
+        more = json_of(await page_fetch(page, url, headers={"accept": API_ACCEPT}))
         if more is None:
             logger.info("Lidl: next products unavailable")
             return products

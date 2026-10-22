@@ -76,8 +76,13 @@ RECENT_ROWS = 500
 
 # Files of data/debug/ that may be sent: aldi.html, coursesu-blocked.png,
 # intermarche-20261009-101500-error.json, coursesu-stores.html...
-SNAPSHOT_NAME = re.compile(r"^(?:" + "|".join(SCRAPERS) + r")(?:-[a-z0-9_-]{1,60})?\.(html|png|json)$")
-SNAPSHOT_TYPES = {"html": "text/plain; charset=utf-8", "json": "text/plain; charset=utf-8", "png": "image/png"}
+SNAPSHOT_NAME = re.compile(r"^(?:" + "|".join(SCRAPERS) + r")(?:-[a-z0-9_-]{1,60})?\.(html|png|json|txt)$")
+SNAPSHOT_TYPES = {
+    "html": "text/plain; charset=utf-8",
+    "json": "text/plain; charset=utf-8",
+    "txt": "text/plain; charset=utf-8",
+    "png": "image/png",
+}
 
 # Diagnostic report: newest snapshots and log files, size limits
 DIAGNOSTIC_SNAPSHOTS = 20
@@ -192,7 +197,8 @@ def retailer_health(
 
     run, queries = 0, set()
     for row in real:
-        if row["status"] not in BROKEN:
+        # The site's API answered « nothing » (Lidl publishes few foods): not broken
+        if row["status"] not in BROKEN or (row["status"] == "empty" and row.get("source") == "api"):
             break
         run += 1
         queries.add(query_key(row["query"]))
