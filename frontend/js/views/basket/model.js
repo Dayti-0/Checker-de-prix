@@ -34,6 +34,26 @@ function storeOf(comparison, key) {
     return (comparison.stores || []).find((s) => s.store === key) || null;
 }
 
+// Every item of the comparison counted: an item not found, not checked or
+// « pas disponible ici » is missing (whatever a comparison saved before says)
+export function isComplete(s, n) {
+    return Boolean(s) && s.status !== "unchecked" && s.found_count > 0 && s.found_count === n;
+}
+
+// What a basket does not count, by reason (glossary of the app):
+// ["1 article introuvable", "4 articles non vérifiés", "1 article pas disponible ici"]
+// `here`: what follows « pas disponible » (" ici" in a card, "" after « Chez Lidl : »)
+export function absentParts(s, here = " ici") {
+    const parts = [];
+    if (s.not_found_count) parts.push(missingText(s.not_found_count));
+    if (s.unchecked_count) parts.push(plural(s.unchecked_count, "article non vérifié", "articles non vérifiés"));
+    if (s.excluded_count) {
+        parts.push(plural(s.excluded_count, `article pas disponible${here}`, `articles pas disponibles${here}`));
+    }
+    if (!parts.length && s.missing) parts.push(missingText(s.missing));
+    return parts;
+}
+
 // The headline of the comparison:
 // { kind: "best" | "most" | "none" | "empty", label, store, value, text, sub }
 // « Panier le moins cher » only for a complete basket.
@@ -42,9 +62,10 @@ export function verdict(comparison) {
         return { kind: "empty", label: "Rien à comparer", text: "Aucun article de la liste n'est à comparer." };
     }
     const n = comparison.item_count;
-    if (comparison.best_store) {
-        const s = storeOf(comparison, comparison.best_store);
-        const others = (comparison.stores || []).filter((o) => o.complete && o.store !== s.store);
+    const best = comparison.best_store ? storeOf(comparison, comparison.best_store) : null;
+    if (isComplete(best, n)) {
+        const s = best;
+        const others = (comparison.stores || []).filter((o) => isComplete(o, n) && o.store !== s.store);
         let sub = "Seule enseigne avec tous les articles";
         if (others.length && s.saving) sub = `${euros(s.saving)} de moins que le panier complet le plus cher`;
         else if (others.length) sub = "Au même prix que les autres paniers complets";
@@ -58,8 +79,9 @@ export function verdict(comparison) {
             sub,
         };
     }
-    if (comparison.most_items_store) {
-        const s = storeOf(comparison, comparison.most_items_store);
+    const most = storeOf(comparison, comparison.most_items_store || (best ? best.store : null));
+    if (most) {
+        const s = most;
         // Other retailers with as many items: « Lidl et Aldi en ont le plus »
         const tied = (comparison.stores || []).filter(
             (o) => o.store !== s.store && o.status !== "unchecked" && o.found_count === s.found_count,
@@ -68,7 +90,8 @@ export function verdict(comparison) {
         const who = tied.length ? `${names.slice(0, -1).join(", ")} et ${names.at(-1)} en ont` : `${s.label} en a`;
         const sub = [];
         if (tied.length) sub.push(s.estimated ? `Total estimé le plus bas : ${s.label}` : `Le moins cher : ${s.label}`);
-        if (s.missing) sub.push(`${missingText(s.missing)} chez ${s.label}`);
+        const absent = absentParts(s, "");
+        if (absent.length) sub.push(`Chez ${s.label} : ${absent.join(", ")}`);
         return {
             kind: "most",
             label: "Paniers incomplets",
@@ -141,13 +164,48 @@ export function cellNotes(line, now = Date.now()) {
     return notes;
 }
 
-// « Tout chez Carrefour » / « Aldi + Lidl »
+// « Tout chez Carrefour » (every item), « Chez Aldi seulement » (some missing), « Aldi + Lidl »
 export function planTitle(plan) {
     const names = plan.stores.map((s) => s.label);
-    return names.length === 1 ? `Tout chez ${names[0]}` : names.join(" + ");
+    if (names.length > 1) return names.join(" + ");
+    return plan.complete ? `Tout chez ${names[0]}` : `Chez ${names[0]} seulement`;
 }
 
-// Texts of a retailer card: { count, total, estimate, common, saving, notes[] }
+// Amount of a plan, never bare when an item is missing: { value: "15,12 €", qualifier:
+// "estimé" | "pour 3 articles" | "" } (the same everywhere: plans, « En magasin », sharing)
+export function planAmount(plan) {
+    if (plan.estimated) return { value: euros(plan.estimated_total), qualifier: "estimé" };
+    if (plan.complete) return { value: euros(plan.total), qualifier: "" };
+    const n = plan.stores.reduce((sum, s) => sum + (s.item_ids || []).length, 0);
+    return { value: euros(plan.total), qualifier: `pour ${plural(n, "article")}` };
+}
+
+// « 19,39 € », « 15,12 € estimé », « 9,88 € pour 3 articles »
+export function planAmountText(plan) {
+    const a = planAmount(plan);
+    return a.qualifier ? `${a.value} ${a.qualifier}` : a.value;
+}
+
+// « 1 article introuvable » when no retailer of the plan has it, else « 2 articles manquants »
+// (not checked, or « pas disponible ici »)
+export function planMissingText(plan, comparison) {
+    const n = plan.missing || 0;
+    if (!n) return "";
+    const keys = new Set(plan.stores.map((s) => s.store));
+    const lines = ((comparison && comparison.stores) || []).filter((s) => keys.has(s.store)).flatMap((s) => s.lines || []);
+    const ids = plan.missing_item_ids || [];
+    const notFound = ids.length > 0 && ids.every((id) => lines.filter((l) => l.item_id === id).every((l) => l.status === "not_found"));
+    return notFound ? missingText(n) : plural(n, "article manquant", "articles manquants");
+}
+
+// Why a retailer is not ranked
+export function unrankedText(s) {
+    if (s.ranked) return "";
+    if (s.unchecked_count) return `Pas classée : recherche interrompue${s.reason ? ` (${reasonLabel(s.reason)})` : ""}.`;
+    return "Pas classée : moins de la moitié des articles trouvés.";
+}
+
+// Texts of a retailer card: { count, total, estimate, common, saving, missing, unranked, notes[] }
 export function storeTexts(comparison, s, now = Date.now()) {
     const out = {
         count: `${s.found_count}/${plural(s.item_count, "article")}`,
@@ -155,10 +213,10 @@ export function storeTexts(comparison, s, now = Date.now()) {
         estimate: s.estimated && s.estimated_total != null ? euros(s.estimated_total) : "",
         common: commonText(comparison, s),
         saving: s.saving ? `${euros(s.saving)} de moins que le panier complet le plus cher` : "",
-        missing: s.missing ? missingText(s.missing) : "",
+        missing: absentParts(s).join(" · "),
+        unranked: unrankedText(s),
         notes: [],
     };
-    if (s.excluded_count) out.notes.push(plural(s.excluded_count, "article pas disponible ici", "articles pas disponibles ici"));
     if (s.stale_count) out.notes.push(plural(s.stale_count, "prix ancien", "prix anciens"));
     if (s.manual_count) out.notes.push(plural(s.manual_count, "prix saisi", "prix saisis"));
     if (s.fetched_at && now / 1000 - s.fetched_at >= 3600) {

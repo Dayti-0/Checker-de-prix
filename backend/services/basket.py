@@ -25,11 +25,16 @@ and each retailer, in this order:
 
 **Totals** (``build_comparison``, pure): per retailer the total of the found
 lines, ``found_count``/``item_count``, ``common_total`` (items found at every
-ranked retailer), ``estimated_total`` (total plus, for each missing or excluded
-item, the median of the other retailers), ``complete``. A retailer whose lines
-are all unchecked is not ranked; the others are ranked when complete or with at
-least half of the items: complete baskets first, then by estimated total.
-« Panier le moins cher » (``best_store``) only for a complete basket.
+ranked retailer), ``estimated_total`` (total plus, for each item not counted,
+the median of the other retailers), ``complete``. An item is counted only when
+it is found: an item not found, not checked (the site failed) or « pas
+disponible ici » makes the basket incomplete (``missing``, broken down in
+``not_found_count``, ``unchecked_count`` and ``excluded_count``). A retailer
+whose lines are all unchecked is not ranked; the others are ranked when
+complete or with at least half of the items found: complete baskets first,
+then by estimated total. « Panier le moins cher » (``best_store``) only for a
+complete basket, with its saving against the dearest complete basket (both on
+their totals, which then include every item).
 
 **Searches** (``compare_basket``): items one after the other at a retailer,
 retailers at the same time, cached results first, priority ``basket``. After a
@@ -477,7 +482,7 @@ def build_comparison(
         _count(basket, info)
         baskets.append(basket)
 
-    # Estimates of the missing and excluded lines: median of the other retailers
+    # Estimates of the lines not counted: median of the other retailers
     amounts = {
         b.store: {li.item_id: li.line_total for li in b.lines if li.status == "found" and li.line_total is not None}
         for b in baskets
@@ -494,11 +499,10 @@ def build_comparison(
         if basket.status == "ok" and basket.found_count:
             basket.estimated_total = round(basket.total + added, 2)
 
-    # Ranking: complete baskets, then at least half of the items, by estimated total
+    # Ranking: complete baskets, then at least half of the items found, by estimated total
     order = {b.store: index for index, b in enumerate(baskets)}
     for basket in baskets:
-        countable = basket.item_count - basket.excluded_count
-        coverage = basket.found_count / countable if countable else 0.0
+        coverage = basket.found_count / basket.item_count if basket.item_count else 0.0
         basket.ranked = (
             basket.status == "ok" and basket.found_count > 0 and (basket.complete or coverage >= MIN_COVERAGE)
         )
@@ -523,9 +527,9 @@ def build_comparison(
     if complete:
         comparison.best_store = complete[0].store
         if len(complete) > 1:
-            dearest = max(b.estimated_total for b in complete)
+            dearest = max(b.total for b in complete)
             for basket in complete:
-                basket.saving = round(dearest - basket.estimated_total, 2)
+                basket.saving = round(dearest - basket.total, 2)
     else:
         answered = ranked or [b for b in baskets if b.status == "ok" and b.found_count]
         if answered:
@@ -573,8 +577,9 @@ def _count(basket: StoreBasket, info: StoreInfo) -> None:
         else:
             basket.excluded_count += 1
     basket.fetched_at = oldest
-    basket.missing = basket.not_found_count + basket.unchecked_count
-    basket.complete = basket.found_count > 0 and basket.missing == 0
+    # Every item not counted is missing, « pas disponible ici » included
+    basket.missing = basket.not_found_count + basket.unchecked_count + basket.excluded_count
+    basket.complete = basket.found_count > 0 and basket.found_count == basket.item_count
     if basket.unchecked_count and basket.found_count == 0 and basket.not_found_count == 0:
         basket.status = "unchecked"
     failure = info.failure or info.notice

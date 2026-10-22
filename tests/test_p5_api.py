@@ -366,7 +366,8 @@ def test_change_the_product_then_exclude_then_back_to_auto(client, sites):
     comparison = client.post("/api/basket/compare", json={"stores": ["carrefour", "aldi"]}).json()
     carrefour = next(b for b in comparison["stores"] if b["store"] == "carrefour")
     assert carrefour["lines"][0]["status"] == "excluded"
-    assert (carrefour["missing"], carrefour["excluded_count"]) == (0, 1)
+    # Missing like an item not found: never a complete basket
+    assert (carrefour["missing"], carrefour["excluded_count"], carrefour["complete"]) == (1, 1, False)
 
     # « Revenir au choix automatique »
     item = client.patch(f"/api/list/{flour['id']}", json={"remove_pick": "carrefour"}).json()

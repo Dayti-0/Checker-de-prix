@@ -4,7 +4,7 @@ prices seen in the store (B71): pure functions of services/basket.py, simulated 
 import pytest
 
 from backend.models import ListItem, Pick, Product, StoreResult
-from backend.services import basket
+from backend.services import basket, optimizer
 from backend.services.basket import (
     StoreInfo,
     build_comparison,
@@ -449,21 +449,74 @@ def test_retailer_with_less_than_half_of_the_items_is_not_ranked():
     assert comparison.common_count == 4
 
 
-def test_excluded_item_is_not_missing_but_estimated():
+def test_an_item_not_available_here_makes_the_basket_incomplete():
+    """« Pas disponible ici » is missing too: Lidl (0,99 € for the sugar alone) is never the
+    « Panier le moins cher » nor « complet » against Aldi, which has everything for 1,88 €."""
     items = [item(1, "farine", excluded=["lidl"]), item(2, "sucre")]
     catalog = {
         "aldi": {"farine": [("Farine", 0.79)], "sucre": [("Sucre", 1.09)]},
         "lidl": {"farine": [("Farine", 0.75)], "sucre": [("Sucre", 0.99)]},
     }
     comparison = build_comparison(items, infos("aldi", "lidl"), catalog_results(items, catalog), now=NOW)
-    lidl = next(b for b in comparison.stores if b.store == "lidl")
-    assert (lidl.missing, lidl.excluded_count, lidl.complete) == (0, 1, True)
-    assert lidl.total == 0.99 and lidl.estimated_total == 0.99 + 0.79 and lidl.estimated
+    baskets = {b.store: b for b in comparison.stores}
+    aldi, lidl = baskets["aldi"], baskets["lidl"]
+    assert (lidl.missing, lidl.excluded_count, lidl.not_found_count, lidl.unchecked_count) == (1, 1, 0, 0)
+    assert not lidl.complete and aldi.complete
+    # Estimated as an item not found: the median of the other retailers
+    assert lidl.total == 0.99 and lidl.estimated_total == 1.78 and lidl.estimated
     assert lidl.lines[0].estimate == 0.79
-    # Both complete: ranked on the same items
-    assert comparison.ranking == ["lidl", "aldi"]
-    aldi = next(b for b in comparison.stores if b.store == "aldi")
-    assert (aldi.saving, lidl.saving) == (0.0, 0.1)
+    assert comparison.best_store == "aldi" and comparison.complete_count == 1
+    assert comparison.ranking == ["aldi", "lidl"]
+    assert (aldi.saving, lidl.saving) == (None, None)
+    # The optimizer says the same: the single plan is Aldi, complete
+    assert comparison.plans[0].kind == "single" and comparison.plans[0].stores[0].store == "aldi"
+    assert comparison.plans[0].complete and comparison.plans[0].total == aldi.total
+
+
+def test_the_cheapest_basket_with_an_item_not_available_is_not_the_cheapest_basket():
+    """The case seen in the app: Lidl misses the juice (« pas disponible ici »), Aldi the
+    washing powder (not found), Carrefour has everything. Carrefour is « Panier le moins
+    cher » at its total, and its saving is computed on the totals of the complete baskets."""
+    names = ("beurre", "sucre", "lessive", "jus d'orange", "huile", "farine")
+    items = [item(i, q, excluded=["lidl"] if q == "jus d'orange" else []) for i, q in enumerate(names, start=1)]
+    prices = {
+        "lidl": {"beurre": 1.79, "sucre": 0.99, "lessive": 3.99, "jus d'orange": 5.94, "huile": 1.99, "farine": 0.75},
+        "aldi": {"beurre": 1.89, "sucre": 1.09, "jus d'orange": 6.90, "huile": 2.09, "farine": 0.79},
+        "carrefour": {
+            "beurre": 2.10,
+            "sucre": 1.15,
+            "lessive": 4.49,
+            "jus d'orange": 7.50,
+            "huile": 2.29,
+            "farine": 0.85,
+        },
+        "coursesu": {
+            "beurre": 2.20,
+            "sucre": 1.20,
+            "lessive": 4.99,
+            "jus d'orange": 7.90,
+            "huile": 2.39,
+            "farine": 0.89,
+        },
+    }
+    catalog = {store: {q: [(q.title(), p)] for q, p in by_query.items()} for store, by_query in prices.items()}
+    stores = infos("lidl", "aldi", "carrefour", "coursesu")
+    comparison = build_comparison(items, stores, catalog_results(items, catalog), now=NOW)
+    baskets = {b.store: b for b in comparison.stores}
+    lidl, aldi, carrefour, u = baskets["lidl"], baskets["aldi"], baskets["carrefour"], baskets["coursesu"]
+    assert (lidl.found_count, lidl.missing, lidl.complete, lidl.excluded_count) == (5, 1, False, 1)
+    assert lidl.total == 9.51 and lidl.estimated_total == 17.01  # + median(6,90 ; 7,50 ; 7,90)
+    assert (aldi.found_count, aldi.missing, aldi.complete) == (5, 1, False)
+    assert comparison.best_store == "carrefour" and comparison.complete_count == 2
+    assert comparison.ranking == ["carrefour", "coursesu", "lidl", "aldi"]
+    assert (carrefour.saving, u.saving, lidl.saving) == (round(u.total - carrefour.total, 2), 0.0, None)
+    # The optimizer agrees: the single plan is the basket of the verdict
+    single = comparison.plans[0]
+    assert single.kind == "single" and single.complete
+    assert single.stores[0].store == comparison.best_store and single.total == carrefour.total
+    # Lidl alone is never a complete plan
+    lidl_alone = next(p for p in optimizer.all_plans(comparison.stores) if [s.store for s in p.stores] == ["lidl"])
+    assert not lidl_alone.complete and lidl_alone.missing_item_ids == [4]
 
 
 def test_items_left_out_of_the_comparison():

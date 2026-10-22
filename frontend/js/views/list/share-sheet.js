@@ -5,10 +5,10 @@
 // the box, and WhatsApp, SMS, the files and the printing always work.
 
 import { api } from "../../core/api.js";
-import { euros } from "../../core/fmt.js";
 import { attr, html } from "../../core/html.js";
 import { icon } from "../../core/icons.js";
 import { notify } from "../../core/ui.js";
+import { planAmountText, planTitle } from "../basket/model.js";
 import { patch } from "../search/patch.js";
 import { openSheet } from "./sheet.js";
 
@@ -16,10 +16,9 @@ import { openSheet } from "./sheet.js";
 export function groupings(comparison) {
     const out = [{ value: "", label: "Par rayon" }];
     if (!comparison || comparison.outdated) return out;
+    // The title and the amount of the plan as the basket shows them
     (comparison.plans || []).forEach((plan, i) => {
-        const names = plan.stores.map((s) => s.label).join(" + ");
-        const what = plan.stores.length === 1 ? `Tout chez ${names}` : names;
-        out.push({ value: `plan:${i}`, label: `${what} (${euros(plan.total)})` });
+        out.push({ value: `plan:${i}`, label: `${planTitle(plan)} (${planAmountText(plan)})` });
     });
     for (const store of comparison.stores || []) {
         if (store.ranked) out.push({ value: `store:${store.store}`, label: `Chez ${store.label}` });

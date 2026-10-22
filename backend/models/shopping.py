@@ -55,7 +55,8 @@ MAX_ITEMS = 300
 # found: a product is counted; not_found: the retailer answered but has nothing
 # suitable; unchecked: the retailer could not be searched (store to choose,
 # anti-robot check, timeout, error), its message says why; excluded: the user
-# said « pas disponible ici » (not counted as missing)
+# said « pas disponible ici ». Only a found line is counted: any other one
+# makes the basket incomplete
 LineStatus = Literal["found", "not_found", "unchecked", "excluded"]
 # pick: product chosen by the user; ean: same barcode as a product chosen at
 # another retailer; auto: chosen by the basket; manual: price seen in the store
@@ -299,7 +300,7 @@ class BasketLine(BaseModel):
     expires_at: float | None = None
     # When the price was read (Unix time): age of the cell
     fetched_at: float | None = None
-    # Missing or excluded line: median of the other retailers (estimated_total)
+    # Line not counted: median of the other retailers (estimated_total)
     estimate: float | None = None
     # The user's choice for this retailer as saved (even when it is not counted)
     pick: Pick | None = None
@@ -326,7 +327,8 @@ class StoreBasket(BaseModel):
     found_count: int = 0
     # Items compared (the same for every retailer)
     item_count: int = 0
-    # Lines not found or unchecked (excluded ones are not missing)
+    # Items not counted: not found, unchecked or « pas disponible ici »
+    # (item_count - found_count), broken down below
     missing: int = 0
     not_found_count: int = 0
     unchecked_count: int = 0
@@ -336,16 +338,16 @@ class StoreBasket(BaseModel):
     manual_count: int = 0
     # Sum of the items found at every ranked retailer (``common_item_ids``)
     common_total: float | None = None
-    # Total plus, for each missing or excluded item, the median of the other
+    # Total plus, for each item not counted, the median of the other
     # retailers (``estimated`` when at least one was added)
     estimated_total: float | None = None
     estimated: bool = False
-    # Nothing missing (excluded lines allowed)
+    # Every item found (an item « pas disponible ici » is missing too)
     complete: bool = False
     # Ranked: complete, or at least half of the items found
     ranked: bool = False
     rank: int | None = None
-    # Complete basket: saving against the most expensive complete basket
+    # Complete basket: saving against the most expensive complete basket (totals)
     saving: float | None = None
     # Oldest price counted (Unix time)
     fetched_at: float | None = None

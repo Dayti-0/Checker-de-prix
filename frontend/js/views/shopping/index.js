@@ -25,7 +25,7 @@ import { readJson, restoreItems, writeJson } from "../list/data.js";
 import { counterText } from "../list/model.js";
 import { openSheet } from "../list/sheet.js";
 import { watchList } from "../list/sync.js";
-import { planTitle } from "../basket/model.js";
+import { planAmountText, planMissingText, planTitle } from "../basket/model.js";
 import { patch } from "../search/patch.js";
 import { flush, pending, queueCheck } from "./queue.js";
 
@@ -128,7 +128,7 @@ function chooserMarkup() {
             <ul class="trip-choices"${attr({ hidden: !plans.length })}>${plans.map(
                 (plan, i) => html`<li><a class="trip-choice" href="#/courses?plan=${i}">
                     <span class="trip-choice-title">${planTitle(plan)}</span>
-                    <span class="trip-choice-meta">${euros(plan.estimated ? plan.estimated_total : plan.total)}${plan.estimated ? " estimé" : ""} · ${plan.complete ? "tous les articles" : plural(plan.missing, "article introuvable", "articles introuvables")}</span>
+                    <span class="trip-choice-meta">${planAmountText(plan)} · ${plan.complete ? "tous les articles" : planMissingText(plan, c)}</span>
                     ${icon("chevron-right")}
                 </a></li>`,
             )}</ul>

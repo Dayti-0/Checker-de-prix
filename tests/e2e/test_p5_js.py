@@ -33,6 +33,9 @@ def store(key, label, **kw):
         "found_count": 0,
         "item_count": 4,
         "missing": 0,
+        "not_found_count": 0,
+        "unchecked_count": 0,
+        "excluded_count": 0,
         "complete": False,
         "ranked": True,
         "estimated": False,
@@ -97,28 +100,34 @@ def test_latest_tick_wins_in_the_offline_queue(page):
 
 def test_verdict_is_honest(page):
     carrefour = store("carrefour", "Carrefour", total=19.39, found_count=4, complete=True, saving=None)
-    aldi = store("aldi", "Aldi", total=9.88, found_count=3, missing=1, estimated=True, estimated_total=15.12)
+    aldi = store(
+        "aldi", "Aldi", total=9.88, found_count=3, missing=1, not_found_count=1, estimated=True, estimated_total=15.12
+    )
     complete = {"item_count": 4, "best_store": "carrefour", "stores": [carrefour, aldi]}
     v = js_eval(page, BASKET, "verdict", complete)
     assert (v["kind"], v["label"]) == ("best", "Panier le moins cher")
     assert (v["storeLabel"], v["value"]) == ("Carrefour", "19,39 €")
     assert v["sub"] == "Seule enseigne avec tous les articles"
 
-    lidl = store("lidl", "Lidl", total=5.20, found_count=2, missing=2, estimated=True, estimated_total=15.57)
+    lidl = store(
+        "lidl", "Lidl", total=5.20, found_count=2, missing=2, not_found_count=2, estimated=True, estimated_total=15.57
+    )
     partial = {"item_count": 4, "best_store": None, "most_items_store": "aldi", "stores": [aldi, lidl]}
     v = js_eval(page, BASKET, "verdict", partial)
     assert v["kind"] == "most"
     assert v["label"] == "Paniers incomplets"
     assert v["text"] == "Aucune enseigne n'a tout : Aldi en a le plus (3/4)"
-    assert (v["value"], v["valueLabel"], v["sub"]) == ("15,12 €", "estimé", "1 article introuvable chez Aldi")
+    assert (v["value"], v["valueLabel"], v["sub"]) == ("15,12 €", "estimé", "Chez Aldi : 1 article introuvable")
     assert "Panier le moins cher" not in str(v)
 
     # Two retailers with as many items: both are named, the cheaper one leads
-    tied = store("lidl", "Lidl", total=7.77, found_count=3, missing=1, estimated=True, estimated_total=15.57)
+    tied = store(
+        "lidl", "Lidl", total=7.77, found_count=3, missing=1, not_found_count=1, estimated=True, estimated_total=15.57
+    )
     blocked = store("coursesu", "Courses U", total=0, found_count=3, status="unchecked")
     v = js_eval(page, BASKET, "verdict", {"item_count": 4, "most_items_store": "aldi", "stores": [aldi, tied, blocked]})
     assert v["text"] == "Aucune enseigne n'a tout : Aldi et Lidl en ont le plus (3/4)"
-    assert v["sub"] == "Total estimé le plus bas : Aldi · 1 article introuvable chez Aldi"
+    assert v["sub"] == "Total estimé le plus bas : Aldi · Chez Aldi : 1 article introuvable"
 
     # No retailer with half of the items: the amount says what it covers
     few = store("carrefour", "Carrefour", total=18.24, found_count=5, missing=6, estimated=False, estimated_total=18.24)
@@ -134,9 +143,60 @@ def test_verdict_is_honest(page):
     assert js_eval(page, BASKET, "verdict", two)["sub"] == "2,39 € de moins que le panier complet le plus cher"
 
 
+def test_a_basket_with_an_item_not_available_is_never_the_cheapest(page):
+    """Even in a comparison saved by an older version (« best_store » and « complete » on a
+    basket where the juice is « pas disponible ici »): « Paniers incomplets », its estimated total."""
+    lidl = store(
+        "lidl",
+        "Lidl",
+        total=10.31,
+        found_count=5,
+        item_count=6,
+        missing=0,
+        excluded_count=1,
+        complete=True,
+        saving=2.08,
+        estimated=True,
+        estimated_total=18.11,
+    )
+    old = {"item_count": 6, "best_store": "lidl", "most_items_store": None, "stores": [lidl]}
+    v = js_eval(page, BASKET, "verdict", old)
+    assert (v["kind"], v["label"], v["value"], v["valueLabel"]) == ("most", "Paniers incomplets", "18,11 €", "estimé")
+    assert v["text"] == "Aucune enseigne n'a tout : Lidl en a le plus (5/6)"
+    assert v["sub"] == "Chez Lidl : 1 article pas disponible"
+    assert "Panier le moins cher" not in str(v) and "complet" not in v["text"]
+    assert js_eval(page, BASKET, "isComplete", lidl, 6) is False
+    assert js_eval(page, BASKET, "isComplete", {**lidl, "found_count": 6}, 6) is True
+
+
+def test_what_a_basket_does_not_count(page):
+    lidl = store("lidl", "Lidl", found_count=1, item_count=6, not_found_count=1, unchecked_count=4)
+    assert js_eval(page, BASKET, "absentParts", lidl) == ["1 article introuvable", "4 articles non vérifiés"]
+    both = store("lidl", "Lidl", excluded_count=2, unchecked_count=1)
+    assert js_eval(page, BASKET, "absentParts", both) == ["1 article non vérifié", "2 articles pas disponibles ici"]
+    assert js_eval(page, BASKET, "absentParts", both, "") == ["1 article non vérifié", "2 articles pas disponibles"]
+    # Why it is not ranked: the search stopped, or too few items
+    stopped = {**lidl, "ranked": False, "reason": "timeout"}
+    assert js_eval(page, BASKET, "unrankedText", stopped) == (
+        "Pas classée : recherche interrompue (Trop lent à répondre)."
+    )
+    few = store("lidl", "Lidl", ranked=False, found_count=1, not_found_count=5, item_count=6)
+    assert js_eval(page, BASKET, "unrankedText", few) == "Pas classée : moins de la moitié des articles trouvés."
+    texts = js_eval(page, BASKET, "storeTexts", {"item_count": 6, "stores": [stopped]}, stopped, 0)
+    assert texts["missing"] == "1 article introuvable · 4 articles non vérifiés"
+
+
 def test_texts_of_a_retailer_card(page):
     aldi = store(
-        "aldi", "Aldi", total=9.88, found_count=3, missing=1, estimated=True, estimated_total=15.12, common_total=4.86
+        "aldi",
+        "Aldi",
+        total=9.88,
+        found_count=3,
+        missing=1,
+        not_found_count=1,
+        estimated=True,
+        estimated_total=15.12,
+        common_total=4.86,
     )
     comparison = {"item_count": 4, "common_count": 3, "stores": [aldi]}
     texts = js_eval(page, BASKET, "storeTexts", comparison, aldi, 0)
@@ -205,9 +265,33 @@ def test_small_texts_of_the_basket(page):
     assert js_eval(page, BASKET, "progressText", 0, 1) == "0/1 recherche"
     assert js_eval(page, BASKET, "reasonLabel", "store_required") == "Magasin à choisir"
     assert js_eval(page, BASKET, "reasonLabel", "blocked") == "Vérification requise"
-    assert js_eval(page, BASKET, "planTitle", {"stores": [{"label": "Carrefour"}]}) == "Tout chez Carrefour"
+    assert js_eval(page, BASKET, "planTitle", {"complete": True, "stores": [{"label": "Carrefour"}]}) == (
+        "Tout chez Carrefour"
+    )
+    # Never « Tout chez » when an item is missing
+    assert js_eval(page, BASKET, "planTitle", {"complete": False, "stores": [{"label": "Aldi"}]}) == (
+        "Chez Aldi seulement"
+    )
     pair = {"stores": [{"label": "Aldi"}, {"label": "Lidl"}]}
     assert js_eval(page, BASKET, "planTitle", pair) == "Aldi + Lidl"
+    # The amount of a plan is never bare when an item is missing
+    full = {"complete": True, "estimated": False, "total": 19.39, "stores": [{"item_ids": [1, 2]}]}
+    assert js_eval(page, BASKET, "planAmountText", full) == "19,39 €"
+    guess = {**full, "complete": False, "estimated": True, "total": 14.75, "estimated_total": 19.99}
+    assert js_eval(page, BASKET, "planAmountText", guess) == "19,99 € estimé"
+    part = {"complete": False, "estimated": False, "total": 9.88, "stores": [{"item_ids": [1, 2, 3]}]}
+    assert js_eval(page, BASKET, "planAmountText", part) == "9,88 € pour 3 articles"
+    # « introuvable » only when no retailer of the plan has it, else « manquant »
+    comparison = {
+        "stores": [
+            {"store": "aldi", "lines": [{"item_id": 4, "status": "not_found"}, {"item_id": 5, "status": "excluded"}]},
+            {"store": "lidl", "lines": [{"item_id": 4, "status": "not_found"}, {"item_id": 5, "status": "unchecked"}]},
+        ]
+    }
+    plan = {"missing": 1, "missing_item_ids": [4], "stores": [{"store": "aldi"}, {"store": "lidl"}]}
+    assert js_eval(page, BASKET, "planMissingText", plan, comparison) == "1 article introuvable"
+    plan = {**plan, "missing": 2, "missing_item_ids": [4, 5]}
+    assert js_eval(page, BASKET, "planMissingText", plan, comparison) == "2 articles manquants"
     now = (OCT_3 + 86400 * 2) * 1000
     assert js_eval(page, BASKET, "priceAge", OCT_3, now) == "prix d'il y a 2 jours"
     assert js_eval(page, BASKET, "priceAge", OCT_3, (OCT_3 + 86400) * 1000) == "prix d'hier"
@@ -218,8 +302,16 @@ def test_share_groupings_and_export_address(page):
     comparison = {
         "outdated": False,
         "plans": [
-            {"stores": [{"label": "Carrefour"}], "total": 19.39},
-            {"stores": [{"label": "Aldi"}, {"label": "Lidl"}], "total": 14.67},
+            {"stores": [{"label": "Carrefour", "item_ids": [1, 2]}], "total": 19.39, "complete": True},
+            {"stores": [{"label": "Aldi"}, {"label": "Lidl"}], "total": 14.67, "complete": True},
+            # Incomplete: the title and the amount of the basket page
+            {
+                "stores": [{"label": "Aldi", "item_ids": [1]}],
+                "total": 14.75,
+                "estimated": True,
+                "estimated_total": 19.99,
+                "complete": False,
+            },
         ],
         "stores": [
             {"store": "carrefour", "label": "Carrefour", "ranked": True},
@@ -230,6 +322,7 @@ def test_share_groupings_and_export_address(page):
         {"value": "", "label": "Par rayon"},
         {"value": "plan:0", "label": "Tout chez Carrefour (19,39 €)"},
         {"value": "plan:1", "label": "Aldi + Lidl (14,67 €)"},
+        {"value": "plan:2", "label": "Chez Aldi seulement (19,99 € estimé)"},
         {"value": "store:carrefour", "label": "Chez Carrefour"},
     ]
     assert js_eval(page, SHARE, "groupings", {**comparison, "outdated": True}) == [{"value": "", "label": "Par rayon"}]

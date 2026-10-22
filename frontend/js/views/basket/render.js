@@ -11,7 +11,19 @@ import { euros, plural } from "../../core/fmt.js";
 import { html, safeUrl } from "../../core/html.js";
 import { icon } from "../../core/icons.js";
 import { brandText } from "../search/product-row.js";
-import { cellNotes, cheapest, commonText, itemOffers, planTitle, reasonLabel, storeTexts, verdict } from "./model.js";
+import {
+    cellNotes,
+    cheapest,
+    commonText,
+    isComplete,
+    itemOffers,
+    planAmount,
+    planMissingText,
+    planTitle,
+    reasonLabel,
+    storeTexts,
+    verdict,
+} from "./model.js";
 
 export function itemTitle(item) {
     if (item.target) return html`${item.query} <span class="item-qty">(${item.target})</span>`;
@@ -40,7 +52,7 @@ export function totalsHelp(comparison) {
     const ranked = (comparison.stores || []).filter((s) => s.ranked);
     const parts = [];
     if (ranked.some((s) => s.estimated)) {
-        parts.push("Total estimé : chaque article introuvable est compté au prix médian des autres enseignes.");
+        parts.push("Total estimé : chaque article manquant est compté au prix médian des autres enseignes.");
     }
     if (ranked.some((s) => commonText(comparison, s))) {
         parts.push("Articles communs : ceux que toutes les enseignes classées ont, pour comparer à égalité.");
@@ -85,22 +97,26 @@ export function storeCard(comparison, s) {
         </li>`;
     }
     const t = storeTexts(comparison, s);
-    const best = comparison.best_store === s.store;
-    return html`<li class="store-card${best ? " best" : ""}${s.complete ? " complete" : ""}${s.ranked ? "" : " unranked"}" data-key="${s.store}" data-store-card="${s.store}">
+    const complete = isComplete(s, comparison.item_count);
+    const best = complete && comparison.best_store === s.store;
+    const action = actionMarkup(s);
+    return html`<li class="store-card${best ? " best" : ""}${complete ? " complete" : ""}${s.ranked ? "" : " unranked"}" data-key="${s.store}" data-store-card="${s.store}">
         <h3 class="visually-hidden">${s.label}</h3>
         ${head}
-        <p class="store-count"><strong>${t.count}</strong>${s.complete ? html` <span class="tag ok">complet</span>` : ""}</p>
+        <p class="store-count"><strong>${t.count}</strong>${complete ? html` <span class="tag ok">complet</span>` : ""}</p>
         <progress class="store-progress" value="${s.found_count}" max="${s.item_count || 1}" aria-label="Articles trouvés chez ${s.label}">${s.found_count}/${s.item_count}</progress>
         <dl class="store-totals">
-            <div><dt>${s.complete ? "Total" : "Articles trouvés"}</dt><dd class="amount">${t.total}</dd></div>
+            <div><dt>${complete ? "Total" : "Articles trouvés"}</dt><dd class="amount">${t.total}</dd></div>
             ${t.estimate ? html`<div class="estimate"><dt>Total estimé</dt><dd class="amount">${t.estimate}</dd></div>` : ""}
         </dl>
         ${t.missing ? html`<p class="store-missing">${t.missing}</p>` : ""}
         ${t.common ? html`<p class="store-common">${t.common}</p>` : ""}
         ${t.saving ? html`<p class="store-saving">${icon("trending-down")}${t.saving}</p>` : ""}
-        ${s.ranked ? "" : html`<p class="store-message">Pas classée : moins de la moitié des articles trouvés.</p>`}
+        ${t.unranked ? html`<p class="store-message">${t.unranked}</p>` : ""}
         ${t.notes.length ? html`<p class="store-notes">${t.notes.join(" · ")}</p>` : ""}
         ${s.message ? html`<p class="store-message">${s.message}</p>` : ""}
+        ${s.retry_after ? html`<p class="store-message">${retryAfter(s.retry_after)}</p>` : ""}
+        ${action ? html`<div class="store-card-actions">${action}</div>` : ""}
     </li>`;
 }
 
@@ -227,7 +243,8 @@ function footCell(view, s) {
     if (view.live || !view.comparison) return html`<td class="foot-cell">…</td>`;
     const c = view.comparison.stores.find((x) => x.store === s.store);
     if (!c || c.status === "unchecked") return html`<td class="foot-cell muted">—</td>`;
-    return html`<td class="foot-cell${view.comparison.best_store === s.store ? " best" : ""}">
+    const best = view.comparison.best_store === s.store && isComplete(c, view.comparison.item_count);
+    return html`<td class="foot-cell${best ? " best" : ""}">
         <span class="foot-total">${euros(c.total)}</span>
         ${c.estimated && c.estimated_total != null ? html`<span class="foot-est">estimé ${euros(c.estimated_total)}</span>` : ""}
         <span class="foot-count">${c.found_count}/${c.item_count}</span>
@@ -289,13 +306,14 @@ export function plansMarkup(comparison, items) {
         <h2 id="plans-title" class="basket-h2">Où faire vos courses</h2>
         <ol class="plan-list">${plans.map((plan, i) => {
             const title = planTitle(plan);
+            const amount = planAmount(plan);
             return html`<li class="plan${plan.complete ? " complete" : ""}" data-key="plan-${i}">
                 <div class="plan-head">
                     <h3 class="plan-title">${title}</h3>
-                    <span class="plan-total"><strong>${euros(plan.estimated ? plan.estimated_total : plan.total)}</strong>${plan.estimated ? html` <span class="muted">estimé</span>` : ""}</span>
+                    <span class="plan-total"><strong>${amount.value}</strong>${amount.qualifier ? html` <span class="muted">${amount.qualifier}</span>` : ""}</span>
                 </div>
                 ${plan.saving > 0 && plan.kind !== "single" ? html`<p class="plan-saving">${icon("trending-down")}${euros(plan.saving)} de moins qu'en un seul magasin</p>` : ""}
-                ${plan.missing ? html`<p class="plan-missing">${plural(plan.missing, "article introuvable", "articles introuvables")}${plan.missing_item_ids.length ? ` : ${plan.missing_item_ids.map((id) => names.get(id)).filter(Boolean).join(", ")}` : ""}</p>` : html`<p class="plan-ok">Tous les articles</p>`}
+                ${plan.missing ? html`<p class="plan-missing">${planMissingText(plan, comparison)}${plan.missing_item_ids.length ? ` : ${plan.missing_item_ids.map((id) => names.get(id)).filter(Boolean).join(", ")}` : ""}</p>` : html`<p class="plan-ok">Tous les articles</p>`}
                 ${
                     plan.stores.length > 1
                         ? html`<ul class="plan-stores">${plan.stores.map(

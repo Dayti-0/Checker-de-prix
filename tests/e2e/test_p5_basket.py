@@ -167,7 +167,7 @@ def test_no_complete_basket_is_never_called_the_cheapest(mobile):
     expect(verdict).to_contain_text("17,31 €")
     expect(verdict).to_contain_text("estimé")
     expect(
-        page.get_by_text(re.compile("^Total estimé : chaque article introuvable est compté au prix médian"))
+        page.get_by_text(re.compile("^Total estimé : chaque article manquant est compté au prix médian"))
     ).to_be_visible()
     expect(page.get_by_text("Panier le moins cher")).to_have_count(0)
     # Lidl, 2 items missing, cheaper on what it has, is not shown as cheaper than Aldi
@@ -227,6 +227,69 @@ def test_not_available_here(desktop):
     page.get_by_role("button", name="Changer le produit beurre chez Lidl").click()
     page.get_by_role("dialog").get_by_role("button", name="Comparer de nouveau chez Lidl").click()
     expect(cell(page, "lidl", "beurre")).to_contain_text("1,79 €")
+
+
+def test_an_item_not_available_here_is_never_a_complete_basket(desktop):
+    """Carrefour has everything but the butter is « pas disponible » there: never « Panier
+    le moins cher » nor « complet » for it (15,34 € without the butter), on the page, in the
+    plans, in the announce and on the home card."""
+    page = desktop
+    items = demo_list(page)
+    butter = next(i for i in items if i["query"] == "beurre")
+    call(page, "PATCH", f"/api/list/{butter['id']}", {"exclude_store": "carrefour"})
+    open_basket(page)
+    verdict = page.get_by_test_id("basket-verdict")
+    expect(verdict).to_contain_text("Aucune enseigne n'a tout : Aldi, Lidl et Carrefour en ont le plus (3/4)")
+    expect(verdict).to_contain_text("15,12 €")
+    expect(verdict).to_contain_text("estimé")
+    expect(page.get_by_text("Panier le moins cher")).to_have_count(0)
+    expect(page.get_by_text("complet", exact=True)).to_have_count(0)
+    carrefour = card(page, "carrefour")
+    expect(carrefour).to_contain_text("3/4 articles")
+    expect(carrefour).to_contain_text("Articles trouvés15,34 €")
+    expect(carrefour).to_contain_text("Total estimé17,18 €")
+    expect(carrefour).to_contain_text("1 article pas disponible ici")
+    expect(cell(page, "carrefour", "beurre")).to_contain_text("Pas disponible ici")
+    # The plans say the same: Carrefour alone is not « Tout chez Carrefour »
+    plans = page.get_by_test_id("plans")
+    expect(plans).not_to_contain_text("Tout chez")
+    expect(plans).to_contain_text("Chez Aldi seulement")
+    expect(plans).to_contain_text("Lidl + Aldi")
+    expect(page.locator("#live-region")).not_to_contain_text("Le moins cher pour tout le panier")
+    page.goto(f"{page.base}/#/")
+    home = page.get_by_test_id("list-card")
+    expect(home).to_contain_text("Aucune enseigne n'a tout")
+    expect(home).not_to_contain_text("Panier le moins cher")
+
+
+def test_a_retailer_that_fails_halfway_says_which_items_were_not_checked(desktop, monkeypatch):
+    """Lidl stops answering after its first search: its other items are « non vérifiés »
+    (not « introuvables »), the card says why it is not ranked and offers « Réessayer »."""
+    page = desktop
+    demo_list(page)
+    calls = {"lidl": 0, "fail": True}
+
+    async def tired(scraper, query, store):
+        if scraper.key == "lidl":
+            calls["lidl"] += 1
+            if calls["fail"] and calls["lidl"] > 1:
+                raise TimeoutError("simulated")
+        return await fake.fake_scrape(scraper, query, store)
+
+    monkeypatch.setattr(search, "_scrape", tired)
+    open_basket(page)
+    lidl = card(page, "lidl")
+    expect(lidl).to_contain_text("1/4 articles")
+    expect(lidl).to_contain_text("3 articles non vérifiés")
+    expect(lidl).not_to_contain_text("introuvable")
+    expect(lidl).to_contain_text("Pas classée : recherche interrompue (Trop lent à répondre).")
+    expect(lidl).to_contain_text("Le site Lidl met trop de temps à répondre.")
+    assert_accessible(page, "enseigne interrompue")
+    calls["fail"] = False
+    lidl.get_by_role("button", name="Réessayer Lidl").click()
+    expect(lidl).to_contain_text("3/4 articles")
+    expect(lidl).to_contain_text("1 article introuvable")
+    expect(lidl).not_to_contain_text("non vérifié")
 
 
 def test_type_a_price_seen_in_the_store(mobile):
