@@ -50,11 +50,14 @@ from backend import config
 from backend.models import Product, StoreOption, StoreSelection
 from backend.scrapers.base import BaseScraper, BlockedError, HardBlockError, ScraperError, StoreRequiredError
 from backend.scrapers.common import (
-    classify_datadome,
+    REFUSAL_STATUSES,
+    classify_refusal,
     ensure_origin,
     hard_block_message,
-    is_hard_block_text,
+    is_datadome_answer,
     page_fetch,
+    refusal_record,
+    refused_message,
     save_debug_text,
     wait_for_clearance,
 )
@@ -93,10 +96,7 @@ NOT_A_DRIVE = "E.Leclerc n'a pas affiché la page du drive. Réessayez plus tard
 SITE_ERROR = "E.Leclerc a renvoyé une erreur. Réessayez plus tard."
 SEARCH_FAILED = "E.Leclerc n'a pas affiché la recherche. Réessayez dans un instant."
 # A refusal (401, 403, 405) without any DataDome mark: nothing to validate in the window
-REFUSED_MESSAGE = (
-    "E.Leclerc a refusé la recherche. Réessayez dans un moment ; si cela se répète, "
-    "téléchargez le diagnostic depuis « État des enseignes » et envoyez-le."
-)
+REFUSED_MESSAGE = refused_message(LABEL)
 CAPTCHA_MESSAGE = (
     "E.Leclerc demande une vérification : appuyez sur « Ouvrir le site », validez-la dans la "
     "fenêtre Chrome d'E.Leclerc ouverte par PrixMalin, puis appuyez sur « J'ai terminé »."
@@ -124,9 +124,6 @@ _COURSES_HOST = re.compile(r"^fd\d{1,2}-courses\.leclercdrive\.fr$")
 _SEGMENT = re.compile(r"^magasin-(\d{6})(?:-(\d{6}))?(?:-[\w%.'’-]*)?$")
 _WIDGET = re.compile(r"Utilitaires\.widget\.initOptions\(\s*'([^']+)'\s*,\s*")
 _CAPTCHA_URL = re.compile(r"https?://[\w.-]*captcha-delivery\.com/captcha/?\?[^\"'\s<>]*", re.I)
-_DD_HARD = re.compile(r"var\s+dd\s*=\s*\{[^}]*['\"]t['\"]\s*:\s*['\"]bv['\"]", re.I)
-# Any mark of a DataDome answer (its script, its iframe, its JSON)
-_DD_MARK = re.compile(r"var\s+dd\s*=\s*\{|captcha-delivery\.com", re.I)
 # fetch() stopped by its own time limit (page_fetch: « AbortError: signal is aborted… »)
 _ABORTED = re.compile(r"AbortError|aborted", re.I)
 _SESSION = re.compile(r"session a expir|sessionexpiree|session expir[ée]e", re.I)
@@ -722,15 +719,9 @@ def classify_answer(status: int, final_url: str | None, text: str | None) -> str
     if status == 0:
         return "timeout" if _ABORTED.search(text[:300]) else "retry"
     drive = "pnlElementProduit" in text or "lstProduitsLight" in text or "BandeauMultiUnivers" in text
-    hard = bool(_DD_HARD.search(head)) or is_hard_block_text(head)
-    marked = hard or bool(_DD_MARK.search(head))
-    if status in (401, 403, 405) or (not drive and marked):
-        if hard:
-            return "hard_block"
-        kind = classify_datadome(captcha_url(head), head[:5000])
-        if kind:
-            return kind
-        return "captcha" if marked else "refused"
+    if status in REFUSAL_STATUSES or (not drive and is_datadome_answer(head)):
+        # Same reading as Intermarché (common.classify_refusal)
+        return classify_refusal(status, head, captcha_url(head))
     if is_portal(final_url):
         return "portal"
     if not 200 <= status < 300:
@@ -738,19 +729,6 @@ def classify_answer(status: int, final_url: str | None, text: str | None) -> str
     if not drive and _SESSION.search(head):
         return "retry"
     return "ok"
-
-
-def refusal_record(status: int, content_type: str, text: str | None) -> str:
-    """JSON kept in data/debug for an answer that is not 2xx: status, type and start of the body.
-
-    Neither the URL (it holds the drive, or the postal code for the store
-    finder) nor the request headers.
-    """
-    return json.dumps(
-        {"status": status, "content_type": content_type, "body": (text or "")[:20000]},
-        ensure_ascii=False,
-        indent=1,
-    )
 
 
 def check_answer(status: int, final_url: str | None, text: str | None) -> str:

@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from backend.scrapers import common
+from backend.scrapers import common, intermarche
 from backend.scrapers.base import BlockedError, HardBlockError, ScraperError, StoreRequiredError
 from backend.scrapers.leclerc import (
     CAPTCHA_MESSAGE,
@@ -18,7 +18,6 @@ from backend.scrapers.leclerc import (
     is_portal,
     needs_store_visit,
     parse_store_url,
-    refusal_record,
 )
 from tests import fixtures
 
@@ -183,7 +182,40 @@ def test_fetch_stopped_by_its_time_limit_is_a_timeout():
 
 
 def test_refusal_record_keeps_no_address():
-    record = json.loads(refusal_record(403, "text/html", PLAIN_403 + "x" * 30000))
+    record = json.loads(common.refusal_record(403, "text/html", PLAIN_403 + "x" * 30000))
     assert record["status"] == 403 and record["content_type"] == "text/html"
     assert record["body"].startswith("<html>") and len(record["body"]) == 20000
     assert set(record) == {"status", "content_type", "body"}
+
+
+DD_SCRIPT = "<html><script>var dd={'rt':'c','cid':'AHrlqA','hsh':'x','t':'fe','s':40281}</script></html>"
+
+
+@pytest.mark.parametrize(
+    "status, text, kind",
+    [
+        (403, PLAIN_403, "refused"),
+        (401, PLAIN_401, "refused"),
+        (405, "", "refused"),
+        (403, REJECTED, "refused"),
+        (403, CAPTCHA_JSON, "captcha"),
+        (403, HARD_JSON, "hard_block"),
+        (429, "Too many requests", "hard_block"),
+        (403, DD_SCRIPT, "captcha"),
+        (403, DD_SCRIPT.replace("'t':'fe'", "'t':'bv'"), "hard_block"),
+        (403, "<h1>Accès temporairement restreint</h1>", "hard_block"),
+        (403, SLIDER_TEXT + " " + CAPTCHA_FRAME_URL, "captcha"),
+    ],
+)
+def test_refusals_are_read_the_same_way_for_intermarche_and_leclerc(status, text, kind):
+    """One reading of a refusal for the two DataDome sites (common.classify_refusal)."""
+    assert common.classify_refusal(status, text) == kind
+    error = {"refused": ScraperError, "captcha": BlockedError, "hard_block": HardBlockError}[kind]
+    for label, check in (("Intermarché", lambda: intermarche.check_answer(status, text)), ("E.Leclerc", None)):
+        with pytest.raises(error) as raised:
+            check() if check else check_answer(status, DRIVE, text)
+        assert type(raised.value) is error
+        if kind == "refused":
+            assert str(raised.value) == common.refused_message(label)
+    assert REFUSED_MESSAGE == common.refused_message("E.Leclerc")
+    assert intermarche.REFUSED_MESSAGE.startswith("Intermarché a refusé la recherche.")

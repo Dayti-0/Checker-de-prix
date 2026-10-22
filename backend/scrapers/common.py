@@ -156,6 +156,60 @@ def classify_page(
     return None
 
 
+# Statuses of a refusal: DataDome answers them, but so does a firewall or the server
+REFUSAL_STATUSES = (401, 403, 405)
+# The script of a DataDome page (« var dd={'rt':'c','cid':…,'t':'fe',…} »), and its t=bv form
+_DD_SCRIPT = re.compile(r"var\s+dd\s*=\s*\{", re.I)
+_DD_SCRIPT_BLOCK = re.compile(r"var\s+dd\s*=\s*\{[^}]*['\"]t['\"]\s*:\s*['\"]bv['\"]", re.I)
+
+
+def is_datadome_answer(text: str | None) -> bool:
+    """The answer carries a mark of DataDome: its script, its captcha address or a block text."""
+    head = (text or "")[:60000]
+    return bool(_DD_SCRIPT.search(head)) or "captcha-delivery.com" in head or is_hard_block_text(head)
+
+
+def classify_refusal(status: int, text: str | None, url: str | None = None) -> str:
+    """What a refusal of a site protected by DataDome means (pure).
+
+    ``"hard_block"``: HTTP 429, ``t=bv`` or a block text (PrixMalin backs off);
+    ``"captcha"``: a mark of DataDome (captcha address, JSON ``{"url": …}``, its
+    script), a check the user validates in the window; ``"refused"``: no mark
+    of DataDome at all (a firewall, the server), nothing to validate in the
+    window (Intermarché, October 2026). ``url``: the captcha address if known.
+    """
+    head = (text or "")[:60000]
+    if status == 429 or _DD_SCRIPT_BLOCK.search(head):
+        return "hard_block"
+    kind = classify_datadome(url, head[:5000])
+    if kind:
+        return kind
+    if is_hard_block_text(head):
+        return "hard_block"
+    return "captcha" if is_datadome_answer(head) else "refused"
+
+
+def refused_message(label: str) -> str:
+    """Message of a refusal without any mark of DataDome (``classify_refusal`` → ``"refused"``)."""
+    return (
+        f"{label} a refusé la recherche. Réessayez dans un moment ; si cela se répète, "
+        "téléchargez le diagnostic depuis « État des enseignes » et envoyez-le."
+    )
+
+
+def refusal_record(status: int, content_type: str | None, text: str | None) -> str:
+    """JSON kept in data/debug for an answer that is not 2xx: status, type and start of the body.
+
+    Neither the URL (it holds the store, or the postal code of a store finder)
+    nor the request headers.
+    """
+    return json.dumps(
+        {"status": status, "content_type": content_type or "", "body": (text or "")[:20000]},
+        ensure_ascii=False,
+        indent=1,
+    )
+
+
 def blocked_message(label: str) -> str:
     return (
         f"{label} demande une vérification anti-robot : appuyez sur « Ouvrir le site », "

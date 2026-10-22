@@ -21,12 +21,14 @@ from backend.models import Product, StoreOption, StoreSelection
 from backend.scrapers.base import BaseScraper, BlockedError, HardBlockError, ScraperError, StoreRequiredError
 from backend.scrapers.common import (
     FetchResult,
-    classify_datadome,
+    classify_refusal,
     ensure_origin,
     hard_block_message,
     page_fetch,
+    refused_message,
     save_debug_text,
 )
+from backend.scrapers.common import refusal_record as _refusal_record
 from backend.scrapers.extract import products_from_json
 from backend.scrapers.parsing import clean_text, parse_price
 
@@ -44,10 +46,7 @@ CAPTCHA_MESSAGE = (
     "fenêtre Chrome d'Intermarché ouverte par PrixMalin, puis appuyez sur « J'ai terminé »."
 )
 # A refusal of the API that is not DataDome: nothing to validate in the window
-REFUSED_MESSAGE = (
-    "Intermarché a refusé la recherche. Réessayez dans un moment ; si cela se répète, "
-    "téléchargez le diagnostic depuis « État des enseignes » et envoyez-le."
-)
+REFUSED_MESSAGE = refused_message(LABEL)
 
 # Identifiers the site sends with each API call (taken from its own cookies)
 _IDENTIFIERS_JS = r"""
@@ -185,8 +184,8 @@ def check_answer(status: int, text: str) -> None:
     """
     head = (text or "")[:5000]
     if status in (401, 403, 405, 429) or "captcha-delivery.com" in head:
-        kind = classify_datadome(None, head)
-        if kind == "hard_block" or status == 429:
+        kind = classify_refusal(status, head)
+        if kind == "hard_block":
             raise HardBlockError(hard_block_message(LABEL), label=LABEL)
         if kind == "captcha":
             raise BlockedError(CAPTCHA_MESSAGE)
@@ -205,11 +204,7 @@ def refusal_record(result: FetchResult) -> str:
 
     Neither the URL (it holds the store) nor the request headers.
     """
-    return json.dumps(
-        {"status": result.status, "content_type": result.content_type, "body": (result.text or "")[:20000]},
-        ensure_ascii=False,
-        indent=1,
-    )
+    return _refusal_record(result.status, result.content_type, result.text)
 
 
 def parse_stores(data: object) -> list[StoreOption]:
