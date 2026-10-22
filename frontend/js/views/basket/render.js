@@ -218,7 +218,7 @@ export function leftOutNote(view) {
     if (!names.length) return "";
     const who = names.length >= 2 ? `${names.slice(0, -1).join(", ")} et ${names.at(-1)} ne sont pas comparées` : `${names[0]} n'est pas comparée`;
     // Printed without the cards: « … ne sont pas comparées. »
-    return html`<p class="left-out-note" data-key="left-out">${icon("info")}<span>${who}<span class="see-cards"> : voir leur carte plus haut</span>.</span></p>`;
+    return html`<p class="left-out-note" data-key="left-out">${icon("info")}<span>${who}<span class="see-cards">&nbsp;: voir leur carte plus haut</span>.</span></p>`;
 }
 
 // ---------------------------------------------------------------- table (computer)
