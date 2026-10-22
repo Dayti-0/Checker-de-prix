@@ -120,8 +120,9 @@ OWN_BRANDS = (
     "Jean's",
 )
 
-_COURSES_HOST = re.compile(r"^fd\d{1,2}-courses\.leclercdrive\.fr$")
-_SEGMENT = re.compile(r"^magasin-(\d{6})(?:-(\d{6}))?(?:-[\w%.'’-]*)?$")
+# [0-9], not \d: the numbers of a drive are ASCII digits (\d takes « ١٧٣٣٠١ » too)
+_COURSES_HOST = re.compile(r"^fd[0-9]{1,2}-courses\.leclercdrive\.fr$")
+_SEGMENT = re.compile(r"^magasin-([0-9]{6})(?:-([0-9]{6}))?(?:-[\w%.'’-]*)?$")
 _WIDGET = re.compile(r"Utilitaires\.widget\.initOptions\(\s*'([^']+)'\s*,\s*")
 _CAPTCHA_URL = re.compile(r"https?://[\w.-]*captcha-delivery\.com/captcha/?\?[^\"'\s<>]*", re.I)
 # fetch() stopped by its own time limit (page_fetch: « AbortError: signal is aborted… »)
@@ -129,6 +130,8 @@ _ABORTED = re.compile(r"AbortError|aborted", re.I)
 _SESSION = re.compile(r"session a expir|sessionexpiree|session expir[ée]e", re.I)
 _LOT_END = re.compile(r"\s*,?\s*profitez[- ]en\s*!?\s*$", re.I)
 _TICKET = re.compile(r"\bticket\b|\bcarte\b", re.I)
+# « 1.50 € » in a text of the site (written « 1,50 € » everywhere else in PrixMalin)
+_DOT_AMOUNT = re.compile(r"(?<![\d.,])(\d+)\.(\d{1,2})(?=\s*€)")
 # Words of « Bouteille - 1,75L » or « La bouteille de 1.75L » that say nothing of the product
 _PACKAGING = frozenset(
     "bouteille bouteilles pack packs brique briques boite boites bocal bocaux pot pots sachet sachets "
@@ -397,6 +400,11 @@ def _decimal(value: float) -> str:
     return f"{value:.3f}".rstrip("0").rstrip(".").replace(".", ",")
 
 
+def french_amounts(text: str) -> str:
+    """« Avantage immédiat de 1.50 € » → « Avantage immédiat de 1,50 € » (pure)."""
+    return _DOT_AMOUNT.sub(r"\1,\2", text or "")
+
+
 def _own_brand(text: str) -> str | None:
     return _OWN_BRAND_WORDS.get(" ".join(_words(text)))
 
@@ -483,7 +491,7 @@ def element_to_product(element: dict, base: str, own_brand: bool = False) -> Pro
     discounted = _number(element.get("nrPVBRIIDeduit")) or parse_price(element.get("sPrixPromo"))
     lot_type = element.get("neTypeLotBrii") or 0
     incentive = element.get("eIncitationLot") or 0
-    tooltip = _text(element.get("sTexteTooltipLot"))
+    tooltip = french_amounts(_text(element.get("sTexteTooltipLot")))
     immediate = (
         lot_type == 0
         and element.get("fEstBRIIActifEtDisponible") is not False
@@ -805,7 +813,7 @@ def parse_nearby(data: object) -> list[StoreOption]:
         if kind not in ("drive", "relais"):
             continue
         postal_code = str(point.get("postalCode") or point.get("codePostal") or "").strip()
-        if postal_code and not re.fullmatch(r"\d{5}", postal_code):
+        if postal_code and not re.fullmatch(r"[0-9]{5}", postal_code):
             continue
         no_pl = _digits6(point.get("noPL"))
         url = store_base_from_point(point)
@@ -850,7 +858,7 @@ def coordinates_of(data: object) -> tuple[float, float] | None:
     return (lat, lon) if lat is not None else None
 
 
-_CONTEXT_COOKIE = re.compile(r"\|\s*(\d{6})\b")
+_CONTEXT_COOKIE = re.compile(r"\|\s*([0-9]{6})(?![0-9])")
 
 
 def site_store_selection(

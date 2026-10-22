@@ -131,7 +131,7 @@ def test_immediate_discount():
     p = product(129235)
     assert (p.price, p.old_price) == (8.72, 10.22)
     assert p.unit_price_label == "0,83 € / l"  # of the discount, not 0,97 € / l
-    assert p.promo == "Avantage immédiat de 1.50 €"
+    assert p.promo == "Avantage immédiat de 1,50 €"  # « 1.50 € » on the site
     assert p.quantity_label == "6x1.75L"
     water = product(15305)
     assert (water.name, water.price, water.old_price, water.promo) == (
@@ -141,6 +141,20 @@ def test_immediate_discount():
         "Avantage immédiat de 34%",
     )
     assert water.unit_price_label == "0,29 € / l"
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("Avantage immédiat de 1.50 €", "Avantage immédiat de 1,50 €"),
+        ("Le 2ème à 0.5€", "Le 2ème à 0,5€"),
+        ("Avantage immédiat de 34%", "Avantage immédiat de 34%"),
+        ("Lot de 2 x 1.5L à 3,20 €", "Lot de 2 x 1.5L à 3,20 €"),
+        ("", ""),
+    ],
+)
+def test_french_amounts(text, expected):
+    assert leclerc.french_amounts(text) == expected
 
 
 def test_immediate_discount_without_its_text():

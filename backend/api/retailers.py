@@ -134,6 +134,8 @@ def _leclerc_selection(choice: StoreChoice) -> StoreSelection:
     ref = leclerc.parse_store_url(choice.url)
     if ref is None:
         raise HTTPException(400, leclerc.URL_HINT)
+    if not valid_store_id(ref.no_pl):
+        raise HTTPException(422, "Identifiant de magasin invalide.")
     if choice.id is not None and choice.id != ref.no_pl:
         raise HTTPException(422, "Identifiant de magasin invalide.")
     return StoreSelection(

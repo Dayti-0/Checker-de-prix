@@ -105,6 +105,9 @@ def test_parse_store_url_accepts_the_pages_of_a_drive(url, base, no_pl, no_pr):
         "https://fd123-courses.leclercdrive.fr/magasin-173301-173301-Bruges.aspx",
         "https://fd12-courses.leclercdrive.fr/magasin-173301-173301-Bruges<script>.aspx",
         "https://fd12-courses.leclercdrive.fr/magasin-173301-" + "x" * 300,
+        # Digits of another script: \\d would take them (« ١٧٣٣٠١ » are 6 digits for Python)
+        "https://fd12-courses.leclercdrive.fr/magasin-\u0661\u0667\u0663\u0663\u0660\u0661",
+        "https://fd\u0661\u0662-courses.leclercdrive.fr/magasin-173301-173301-Bruges",
     ],
 )
 def test_parse_store_url_refuses_the_rest(url):
@@ -246,6 +249,9 @@ def test_site_store_selection():
     # Nothing to read
     assert lc.site_store_selection("https://www.leclercdrive.fr/", "", "@d=2%7c999999", known) is None
     assert lc.site_store_selection("about:blank", None, None, None) is None
+    # Only ASCII digits in the cookie
+    arabic = "\u0661\u0669\u0660\u0665\u0660\u0661"  # « 190501 » in Arabic-Indic digits
+    assert lc.site_store_selection("https://www.leclercdrive.fr/", "", f"@d=2%7c{arabic}", known) is None
 
 
 # ---------------------------------------------------------------- store finder, cache and automatic choice
@@ -572,6 +578,10 @@ def test_api_pasted_address(client):
     response = client.put("/api/retailers/leclerc/store", json={"id": "093401", "url": url})
     assert (response.status_code, response.json()["detail"]) == (422, "Identifiant de magasin invalide.")
     assert client.put("/api/retailers/leclerc/store", json={"id": "12/34", "url": url}).status_code == 422
+    # Digits of another script in the address: refused like for Intermarché
+    arabic = "https://fd12-courses.leclercdrive.fr/magasin-\u0661\u0667\u0663\u0663\u0660\u0661"
+    assert client.put("/api/retailers/leclerc/store", json={"url": arabic}).status_code == 400
+    assert client.get("/api/settings").json()["stores"]["leclerc"]["id"] == "173301"
 
 
 def test_api_choose_a_listed_drive(client, nearby, located):
