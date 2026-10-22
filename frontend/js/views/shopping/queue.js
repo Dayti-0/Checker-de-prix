@@ -21,9 +21,13 @@ export function queueCheck(id, checked) {
 
 let sending = null;
 
+// Refused for good (a damaged queue): never accepted later either
+const REFUSED = new Set([400, 404, 413, 422]);
+
 // Sends the waiting ticks: true when the server took them (or none was
 // waiting), false when it could not be reached. A tick made while a request is
-// on its way is sent right after it.
+// on its way is sent right after it. Ticks the server refuses for good are
+// dropped, rather than « Hors connexion » shown for ever.
 export function flush() {
     if (sending) return sending.then(() => flush());
     sending = (async () => {
@@ -31,8 +35,8 @@ export function flush() {
         if (!queue.length) return true;
         try {
             await api("/api/list/checks", { method: "POST", body: { checks: queue }, timeout: 10000 });
-        } catch {
-            return false;
+        } catch (err) {
+            if (!REFUSED.has(err && err.status)) return false;
         }
         // Ticks made while sending stay in the queue
         const sent = new Map(queue.map((c) => [c.id, c.checked_at]));

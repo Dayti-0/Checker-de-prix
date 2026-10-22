@@ -110,6 +110,24 @@ def test_ticks_without_network_are_kept_then_sent(mobile):
     page.errors[:] = [e for e in page.errors if "ERR_INTERNET_DISCONNECTED" not in e]
 
 
+def test_a_damaged_queue_of_ticks_is_dropped(mobile):
+    """Ticks the server refuses for good (422) leave the queue: never « Hors connexion » for ever."""
+    page = mobile
+    page.add_init_script(
+        "localStorage.setItem('prixmalin.pendingChecks', JSON.stringify([{ id: 'x', checked: true, checked_at: 1 }]))"
+    )
+    demo_list(page)
+    compare(page)
+    follow_carrefour(page)
+    page.wait_for_function("() => JSON.parse(localStorage.getItem('prixmalin.pendingChecks') || '[]').length === 0")
+    expect(page.get_by_text("Hors connexion")).to_have_count(0)
+    page.get_by_role("checkbox", name="sucre").check()
+    assert wait_until(lambda: checked(page.base, "sucre"))
+    expect(page.get_by_text("Hors connexion")).to_have_count(0)
+    # The browser reports the request refused (422): expected here
+    page.errors[:] = [e for e in page.errors if "422" not in e]
+
+
 def test_quick_ticks_online_never_say_offline(mobile):
     """Ticks made while the previous one is on its way are sent after it: no « Hors connexion »."""
     page = mobile
