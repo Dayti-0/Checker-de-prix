@@ -54,7 +54,6 @@ import inspect
 import json
 import logging
 import math
-import re
 import statistics
 import time
 from collections import Counter
@@ -87,7 +86,7 @@ from backend.scrapers.parsing import PIECE, parse_quantity
 from backend.services import hooks, matching, optimizer, prefs, search
 from backend.services.search import search_store
 from backend.services.settings import load_settings
-from backend.services.shopping_list import MAX_ITEMS, add_item, get_item, get_list, update_item
+from backend.services.shopping_list import MAX_ITEMS, add_item, get_item, get_list, parse_target, update_item
 
 __all__ = [
     "MAX_ITEMS",
@@ -99,6 +98,7 @@ __all__ = [
     "choose_line",
     "compare_basket",
     "get_list",
+    "parse_target",
     "update_item",
 ]
 
@@ -124,33 +124,6 @@ UNITS = ("kg", "L", PIECE)
 # ---------------------------------------------------------------------------
 # Quantities (pure)
 # ---------------------------------------------------------------------------
-
-
-# Unit names typed by hand, as parse_quantity reads them (« 500 grammes » → « 500 g »)
-_UNIT_WORDS = (
-    (r"kilogrammes?|kilos?", "kg"),
-    (r"grammes?|gr", "g"),
-    (r"centilitres?", "cl"),
-    (r"millilitres?", "ml"),
-    (r"litres?", "L"),
-)
-
-
-def parse_target(text: str | None) -> tuple[float, str] | None:
-    """Quantity wanted: « 1 kg » → (1.0, "kg"), « 6 L » → (6.0, "L"), « 12 » → (12.0, "pièce"),
-    « 500 grammes » → (0.5, "kg"), « 1/2 litre » → (0.5, "L")."""
-    if not text or not text.strip():
-        return None
-    text = re.sub(r"(?<![\d/])1/2(?![\d/])|½", "0,5", text)
-    for words, unit in _UNIT_WORDS:
-        text = re.sub(rf"(\d)\s*(?:{words})(?![a-zà-ÿ])", rf"\1 {unit}", text, flags=re.I)
-    quantity = parse_quantity(text)
-    if quantity and quantity[0] > 0:
-        return quantity
-    m = re.fullmatch(r"\s*(\d{1,4})\s*(?:pi[eè]ces?|unit[eé]s?|x)?\s*", text, re.I)
-    if m and int(m.group(1)) > 0:
-        return float(m.group(1)), PIECE
-    return None
 
 
 def contents_of(product: Product) -> tuple[float, str] | None:

@@ -144,6 +144,14 @@ def test_edit_an_item_aisle_note_target_and_comparison(desktop):
     expect(sheet.get_by_role("combobox", name="Rayon")).to_have_value("")
     expect(sheet.get_by_role("combobox", name="Rayon").locator("option").first).to_have_text("Automatique (Entretien)")
     assert_accessible(page, "feuille « Modifier »")
+    # A target the basket could not read is refused, with an example (never ignored in silence)
+    sheet.get_by_role("textbox", name="Quantité visée").fill("2 paquets")
+    sheet.get_by_role("button", name="Enregistrer").click()
+    expect(sheet.get_by_role("alert")).to_contain_text("Quantité visée non comprise : écrivez par exemple 1 kg")
+    expect(sheet).to_be_visible()
+    assert next(i for i in items(page) if i["query"] == "lessive")["target"] is None
+    assert len(page.errors) == 1 and "status of 422" in page.errors[0]
+    page.errors.clear()  # the refusal above is expected
     sheet.get_by_role("textbox", name="Quantité visée").fill("2 L")
     sheet.get_by_role("combobox", name="Rayon").select_option("Hygiène et beauté")
     sheet.get_by_role("textbox", name="Note").fill("sans parfum")

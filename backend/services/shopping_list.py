@@ -38,9 +38,10 @@ from backend.models import (
     TripStore,
     UsualItem,
 )
+from backend.models.shopping import TARGET_MAX
 from backend.repos import shopping_list as repo
 from backend.repos import templates as templates_repo
-from backend.scrapers.parsing import finalize_product
+from backend.scrapers.parsing import PIECE, finalize_product, parse_quantity
 from backend.services import hooks
 from backend.services.categories import CATEGORIES, OTHER, categorize, category_order, is_category
 
@@ -104,6 +105,50 @@ def _check_category(category: str | None, query: str | None = None) -> str | Non
 
 def _full() -> AppError:
     return AppError(f"Votre liste est pleine ({MAX_ITEMS} articles au maximum).", code="list_full")
+
+
+# --- Quantity wanted (« 1 kg », « 6 L », « 12 ») ---------------------------------
+
+# Unit names typed by hand, as parse_quantity reads them (« 500 grammes » → « 500 g »)
+_UNIT_WORDS = (
+    (r"kilogrammes?|kilos?", "kg"),
+    (r"grammes?|gr", "g"),
+    (r"centilitres?", "cl"),
+    (r"millilitres?", "ml"),
+    (r"litres?", "L"),
+)
+
+
+def parse_target(text: str | None) -> tuple[float, str] | None:
+    """Quantity wanted: « 1 kg » → (1.0, "kg"), « 6 L » → (6.0, "L"), « 12 » → (12.0, "pièce"),
+    « 500 grammes » → (0.5, "kg"), « 1/2 litre » → (0.5, "L"); None when not understood."""
+    if not text or not text.strip() or len(text) > TARGET_MAX:
+        return None
+    text = re.sub(r"(?<![\d/])1/2(?![\d/])|½", "0,5", text)
+    for words, unit in _UNIT_WORDS:
+        text = re.sub(rf"(\d)\s*(?:{words})(?![a-zà-ÿ])", rf"\1 {unit}", text, flags=re.I)
+    quantity = parse_quantity(text)
+    if quantity and quantity[0] > 0:
+        return quantity
+    m = re.fullmatch(r"\s*(\d{1,4})\s*(?:pi[eè]ces?|unit[eé]s?|x)?\s*", text, re.I)
+    if m and int(m.group(1)) > 0:
+        return float(m.group(1)), PIECE
+    return None
+
+
+TARGET_HELP = (
+    "Quantité visée non comprise : écrivez par exemple 1 kg, 6 L ou 12. "
+    "Pour un nombre de paquets, changez plutôt la quantité."
+)
+
+
+def check_target(text: str | None) -> str | None:
+    """The quantity wanted as saved (None: none); AppError 422 when the basket could not
+    read it (« 2 paquets »: it would be ignored without a word)."""
+    target = _clean(text)
+    if target is not None and parse_target(target) is None:
+        raise AppError(TARGET_HELP, 422, "validation")
+    return target
 
 
 # --- Prices of the chosen products (B63) ---------------------------------------
@@ -195,7 +240,7 @@ async def _add(db, query: str, data: ListItemCreate, category: str | None, pick:
             data.quantity,
             _dump(picks),
             db=db,
-            target=_clean(data.target),
+            target=check_target(data.target),
             category=category,
             note=_clean(data.note),
         )
@@ -211,7 +256,7 @@ async def _add(db, query: str, data: ListItemCreate, category: str | None, pick:
     else:
         fields["quantity"] = min(99, item.quantity + data.quantity)
     if _clean(data.target):
-        fields["target"] = _clean(data.target)
+        fields["target"] = check_target(data.target)
     if _clean(data.note):
         fields["note"] = _clean(data.note)
     if category:
@@ -274,7 +319,7 @@ async def update_item(item_id: int, data: ListItemUpdate) -> ListItem | None:
         if data.quantity is not None:
             fields["quantity"] = data.quantity
         if data.target is not None:
-            fields["target"] = _clean(data.target)
+            fields["target"] = check_target(data.target)
         if data.note is not None:
             fields["note"] = _clean(data.note)
         if data.category is not None:
@@ -438,7 +483,9 @@ _UNIT_NAMES = (
     (r"millilitres?|ml", "ml"),
     (r"litres?|l", "L"),
 )
-_SIZE = rf"(?:\d+\s*[x×]\s*)?\d+(?:[.,]\d+)?\s*{_UNIT}(?:\s*[x×]\s*\d+)?"
+# Numbers of bounded length, never started inside another number: each try is short
+# (with « \d+ » a long run of digits took seconds, the server waiting meanwhile)
+_SIZE = rf"(?<!\d)(?<!\d[.,])(?:\d{{1,6}}\s*[x×]\s*)?\d{{1,6}}(?:[.,]\d{{1,3}})?\s*{_UNIT}(?:\s*[x×]\s*\d{{1,3}})?"
 _SIZE_ONLY = re.compile(rf"^\(?\s*({_SIZE})\s*\)?$", re.I)
 _PREFIX_SIZE = re.compile(rf"^({_SIZE})(?![a-zà-ÿ])\s*(?:de\s+|d['’]\s*)?(.+)$", re.I)
 _PREFIX_TIMES = re.compile(r"^(\d{1,2})\s*[x×*]\s*(.+)$", re.I)
@@ -465,6 +512,8 @@ _CONTAINER = re.compile(rf"^{_PACKAGING}\s+(?:de\s+|d['’]\s*)(.+)$", re.I)
 _SUFFIX_CONTAINER = re.compile(rf"^(.+?)\s+(\d{{1,2}})\s*{_PACKAGING}$", re.I)
 _FRACTIONS = ((re.compile(r"(?<![\d/])1/2(?![\d/])|½"), "0,5"), (re.compile(r"(?<![\d/])1/4(?![\d/])|¼"), "0,25"))
 _SPLIT = re.compile(r";|,(?!\d)\s*|\s+\+\s+")
+# Longest piece read (an item is at most QUERY_MAX characters anyway)
+PIECE_MAX = 200
 
 
 def _size_text(text: str) -> str:
@@ -542,6 +591,8 @@ def _parse_piece(text: str) -> ParsedLine | None:
     query = text.strip(" \t.;,:-–—")[:120].strip()
     if not query or not re.search(r"[^\W\d_]", query):
         return None
+    if target is not None and parse_target(target) is None:
+        target = None  # never a target that the list would refuse
     return ParsedLine(query=query, quantity=max(1, min(99, quantity)), target=target, category=categorize(query))
 
 
@@ -554,6 +605,7 @@ def parse_list_text(text: str) -> list[ParsedLine]:
     for line in (text or "").splitlines():
         last: ParsedLine | None = None
         for piece in _SPLIT.split(line):
+            piece = piece[:PIECE_MAX]
             size = size_only(piece)
             if size is not None:
                 if last is not None and last.target is None:

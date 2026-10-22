@@ -63,8 +63,9 @@ def test_french_texts_follow_the_glossary(path):
 
 
 def test_the_basket_never_calls_an_incomplete_basket_the_cheapest():
-    """« Panier le moins cher » comes only with best_store, which the server gives to complete baskets."""
+    """« Panier le moins cher » comes only with best_store, which the server gives to complete
+    baskets, and only when that basket has every item (isComplete)."""
     model = (VIEWS / "basket" / "model.js").read_text(encoding="utf-8")
     assert model.count('"Panier le moins cher"') == 1
     before = model.split('"Panier le moins cher"')[0]
-    assert "if (comparison.best_store)" in before
+    assert "comparison.best_store" in before and "if (isComplete(best, n))" in before

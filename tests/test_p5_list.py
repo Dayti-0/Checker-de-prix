@@ -4,6 +4,7 @@
 import asyncio
 import json
 import sqlite3
+import time
 
 import pytest
 
@@ -22,6 +23,7 @@ from backend.models import (
     Product,
     StoreBasket,
 )
+from backend.models.shopping import TARGET_MAX
 from backend.repos import shopping_list as repo
 from backend.services import hooks, matching, shopping_list
 from backend.services.categories import CATEGORIES, categorize
@@ -83,6 +85,60 @@ def test_parse_merges_the_same_item_and_guesses_the_aisle():
 def test_parse_keeps_at_most_the_size_of_a_list():
     lines = parse_list_text("\n".join(f"article {i}" for i in range(400)))
     assert len(lines) == shopping_list.MAX_ITEMS
+
+
+def test_a_huge_pasted_line_is_read_at_once():
+    """A long run of digits took seconds (38 s for 20 000), the whole server waiting:
+    each piece is cut, and the numbers of a size have a bounded length."""
+    start = time.perf_counter()
+    assert parse_list_text("1" * 20000) == []
+    assert shopping_list._parse_piece("1" * 8000) is None  # without the cut of the piece
+    assert shopping_list._parse_piece("farine " + "1" * 8000 + " kg").target is None
+    assert time.perf_counter() - start < 1.0
+    # A number is never cut to make a size: « 1000000 g » is not « 000000 g »
+    assert [(p.query, p.target) for p in parse_list_text("sel 1000000 g")] == [("sel 1000000 g", None)]
+    assert [(p.query, p.target) for p in parse_list_text("1,500 kg de farine")] == [("farine", "1,500 kg")]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "farine 1234567890123456789012345678901234567890 kg",
+        "eau 6x1,5L\nœufs x12\n10 rouleaux de papier toilette\nfarine 1kg x 2\nyaourts 4x125g",
+    ],
+)
+def test_the_preview_never_proposes_a_target_the_list_refuses(text):
+    for line in parse_list_text(text):
+        assert line.target is None or (
+            len(line.target) <= TARGET_MAX and shopping_list.parse_target(line.target) is not None
+        ), line
+
+
+def test_a_target_the_basket_cannot_read_is_refused():
+    """« 2 paquets » was saved, shown as « Objectif 2 paquets », then ignored by the basket."""
+
+    async def scenario():
+        sugar = await shopping_list.add_item(ListItemCreate(query="sucre", quantity=3))
+        errors = []
+        for attempt in (
+            shopping_list.update_item(sugar.id, ListItemUpdate(target="2 paquets")),
+            shopping_list.add_item(ListItemCreate(query="lait", target="beaucoup")),
+            shopping_list.add_item(ListItemCreate(query="sucre", target="trois")),
+            shopping_list.bulk_add([ListItemCreate(query="riz", target="un peu")]),
+        ):
+            with pytest.raises(AppError) as error:
+                await attempt
+            errors.append(error.value)
+        before = await shopping_list.get_list()
+        kept = await shopping_list.update_item(sugar.id, ListItemUpdate(target=" 2  kg "))
+        cleared = await shopping_list.update_item(sugar.id, ListItemUpdate(target=""))
+        return errors, before, kept, cleared
+
+    errors, before, kept, cleared = run(scenario())
+    assert {(e.status_code, e.code) for e in errors} == {(422, "validation")}
+    assert errors[0].message.startswith("Quantité visée non comprise : écrivez par exemple 1 kg, 6 L ou 12.")
+    assert [(i.query, i.quantity, i.target) for i in before] == [("sucre", 3, None)]
+    assert (kept.target, cleared.target) == ("2 kg", None)
 
 
 # --- B65: aisles -----------------------------------------------------------------------
