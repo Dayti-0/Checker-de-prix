@@ -33,6 +33,8 @@ BACKUP_COUNT = 5
 UVICORN_LOGGERS = ("uvicorn", "uvicorn.error", "uvicorn.access")
 # One line per HTTP request: in the file only
 FILE_ONLY_LOGGERS = ("uvicorn.access",)
+# One line per request of the app to a web service (geocoding, GitHub): warnings only
+QUIET_LOGGERS = ("httpx", "httpcore")
 
 logger = logging.getLogger("prixmalin.logs")
 
@@ -103,6 +105,8 @@ def configure(folder: Path | None = None, *, console=None, level: int = logging.
         uvicorn_logger = logging.getLogger(name)
         uvicorn_logger.handlers.clear()
         uvicorn_logger.propagate = True
+    for name in QUIET_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
     logging.captureWarnings(True)
     _catch_uncaught()
     return folder / LOG_FILE
