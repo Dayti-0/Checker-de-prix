@@ -37,6 +37,7 @@ __all__ = [
     "TemplateApply",
     "TemplateCreate",
     "TemplateDetail",
+    "TemplateRestore",
     "Trip",
     "TripAisle",
     "TripItem",
@@ -263,6 +264,14 @@ class TemplateDetail(Template):
 
 class TemplateCreate(BaseModel):
     name: str = Field(min_length=1, max_length=TEMPLATE_NAME_MAX)
+    # A saved list of that name is replaced only when asked (the page confirms first)
+    replace: bool = False
+
+
+class TemplateRestore(BaseModel):
+    """« Annuler » after deleting a saved list."""
+
+    id: int
 
 
 class TemplateApply(BaseModel):

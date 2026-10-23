@@ -518,10 +518,29 @@ def test_templates_round_trip(client, sites):
     # Merged into the list: quantities added
     merged = client.post(f"/api/templates/{saved['id']}/apply", json={"mode": "merge"}).json()
     assert [i["quantity"] for i in merged] == [4, 2]
-    # Same name in another case: replaced
-    again = client.post("/api/templates", json={"name": "courses de la semaine"}).json()
-    assert again["id"] == saved["id"] and len(client.get("/api/templates").json()) == 1
+    # Same name in another case: never replaced without being asked (the page confirms)
+    add(client, "sucre")
+    refused = client.post("/api/templates", json={"name": "courses de la semaine"})
+    assert (refused.status_code, refused.json()["code"]) == (409, "template_exists")
+    assert refused.json()["detail"] == "Une liste enregistrée s'appelle déjà « Courses de la semaine »."
+    assert client.get("/api/templates").json()[0]["item_count"] == 2
+    again = client.post("/api/templates", json={"name": "courses de la semaine", "replace": True}).json()
+    assert again["id"] == saved["id"] and again["item_count"] == 3 and len(client.get("/api/templates").json()) == 1
+    # Deleted, then « Annuler »: back with its items
     assert client.delete(f"/api/templates/{saved['id']}").status_code == 204
+    assert client.get("/api/templates").json() == []
+    back = client.post("/api/templates/restore", json={"id": saved["id"]}).json()
+    assert (back["id"], back["item_count"]) == (saved["id"], 3)
+    assert client.get(f"/api/templates/{saved['id']}").json()["queries"] == ["farine", "lait", "sucre"]
+    gone = client.post("/api/templates/restore", json={"id": saved["id"]})  # only once
+    assert (gone.status_code, gone.json()["code"]) == (404, "restore_expired")
+    assert client.delete(f"/api/templates/{saved['id']}").status_code == 204
+    # Its name taken meanwhile: not put back over the new one
+    client.post("/api/templates", json={"name": "Courses de la semaine"})
+    taken = client.post("/api/templates/restore", json={"id": saved["id"]})
+    assert (taken.status_code, taken.json()["code"]) == (409, "template_exists")
+    other = client.get("/api/templates").json()[0]
+    assert client.delete(f"/api/templates/{other['id']}").status_code == 204
     assert client.delete(f"/api/templates/{saved['id']}").status_code == 404
     assert client.post(f"/api/templates/{saved['id']}/apply", json={}).status_code == 404
     assert client.get(f"/api/templates/{saved['id']}").status_code == 404

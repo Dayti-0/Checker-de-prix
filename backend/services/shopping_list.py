@@ -879,20 +879,39 @@ async def get_template(template_id: int) -> TemplateDetail | None:
     return TemplateDetail(**saved, queries=queries)
 
 
-async def save_template(name: str) -> Template:
+async def save_template(name: str, replace: bool = False) -> Template:
+    """Save the list under ``name``. A saved list of that name (in any case) is replaced
+    only with ``replace`` (the page asks first), else AppError 409 ``template_exists``."""
     name = _clean(name) or ""
     if not name:
         raise AppError("Donnez un nom à cette liste.", 422, "validation")
     items = await get_list()
     if not items:
         raise AppError("Votre liste est vide : il n'y a rien à enregistrer.", code="list_empty")
+    existing = await templates_repo.find_by_name(name)
+    if existing is not None and not replace:
+        raise AppError(f"Une liste enregistrée s'appelle déjà « {existing['name']} ».", 409, "template_exists")
     template_id = await templates_repo.save_template(name, [_template_item(i) for i in items])
     saved = await templates_repo.get_template(template_id)
     return Template(**{k: v for k, v in saved.items() if k != "items"})
 
 
 async def delete_template(template_id: int) -> bool:
-    return await templates_repo.delete_template(template_id)
+    """Delete a saved list (kept a while for « Annuler », like a line of the list)."""
+    return await templates_repo.delete_template(template_id, time.time(), TRASH_SECONDS)
+
+
+async def restore_template(template_id: int) -> Template:
+    """« Annuler » after deleting a saved list. AppError 404 ``restore_expired`` when too
+    late, 409 ``template_exists`` when another saved list has its name meanwhile."""
+    try:
+        restored = await templates_repo.restore_template(template_id, time.time() - TRASH_SECONDS)
+    except templates_repo.NameTaken as taken:
+        raise AppError(f"Une liste enregistrée s'appelle déjà « {taken} ».", 409, "template_exists") from None
+    if restored is None:
+        raise AppError("Cette liste enregistrée ne peut plus être rétablie.", 404, "restore_expired")
+    saved = await templates_repo.get_template(restored)
+    return Template(**{k: v for k, v in saved.items() if k != "items"})
 
 
 def _saved_items(raw_items: list[dict], name: str) -> list[ListItem]:

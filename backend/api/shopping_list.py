@@ -25,6 +25,7 @@ from backend.models import (
     TemplateApply,
     TemplateCreate,
     TemplateDetail,
+    TemplateRestore,
     Trip,
     UsualItem,
 )
@@ -161,8 +162,14 @@ async def api_templates():
 
 @router.post("/templates", response_model=Template)
 async def api_template_save(request: TemplateCreate):
-    """Save the list under a name (a list of that name is replaced)."""
-    return await shopping_list.save_template(request.name)
+    """Save the list under a name (a list of that name is replaced with ``replace``, else 409)."""
+    return await shopping_list.save_template(request.name, request.replace)
+
+
+@router.post("/templates/restore", response_model=Template)
+async def api_template_restore(request: TemplateRestore):
+    """« Annuler » after deleting a saved list (404 ``restore_expired`` when too late)."""
+    return await shopping_list.restore_template(request.id)
 
 
 @router.get("/templates/{template_id}", response_model=TemplateDetail)

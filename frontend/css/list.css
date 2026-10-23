@@ -347,6 +347,19 @@
 .template-name { overflow-wrap: anywhere; }
 .template-actions { grid-area: actions; display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .template-remove { grid-area: remove; align-self: start; width: 2.75rem; height: 2.75rem; color: var(--danger-text); }
+/* « Liste « … » supprimée [Annuler] » for 6 s */
+.template-undo {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2) var(--space-3);
+    margin: 0 0 var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-70);
+    background: var(--surface-2);
+}
+.template-undo > span { overflow-wrap: anywhere; }
 
 /* « Partager ou imprimer » */
 .share-body { display: grid; gap: var(--space-5); }

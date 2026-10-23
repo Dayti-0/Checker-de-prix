@@ -290,9 +290,39 @@ def test_saved_lists_round_trip(desktop):
     farine = next(i for i in items(page) if i["query"] == "farine")
     assert farine["quantity"] == 4
 
+    # The same name again (in another case): replaced only once confirmed
+    add(page, "sucre")
+    page.reload()
+    expect(page.get_by_test_id("list-count")).to_have_text("3 articles")
     page.get_by_role("button", name="Listes enregistrées").click()
-    page.get_by_role("button", name="Supprimer la liste enregistrée Courses de la semaine").click()
-    expect(page.get_by_role("dialog")).to_contain_text("Aucune liste enregistrée pour l'instant.")
+    sheet = page.get_by_role("dialog", name="Listes enregistrées")
+    expect(sheet.locator(".template")).to_contain_text("2 articles")
+    field = sheet.get_by_role("textbox", name=re.compile("Enregistrer ma liste actuelle"))
+    asked = []
+    page.once("dialog", lambda d: (asked.append(d.message), d.dismiss()))
+    field.fill("courses de la semaine")
+    sheet.get_by_role("button", name="Enregistrer").click()
+    expect(field).to_be_focused()
+    assert asked == ["Remplacer la liste enregistrée « Courses de la semaine » par votre liste actuelle (3 articles) ?"]
+    expect(sheet.locator(".template")).to_contain_text("2 articles")
+    page.once("dialog", lambda d: d.accept())
+    sheet.get_by_role("button", name="Enregistrer").click()
+    expect(page.get_by_role("status")).to_contain_text("Liste « Courses de la semaine » remplacée (3 articles)")
+    expect(sheet.locator(".template")).to_contain_text("3 articles")
+
+    # Deleted, then « Annuler »
+    sheet.get_by_role("button", name="Supprimer la liste enregistrée Courses de la semaine").click()
+    expect(sheet).to_contain_text("Aucune liste enregistrée pour l'instant.")
+    expect(sheet).to_contain_text("Liste « Courses de la semaine » supprimée")
+    undo = sheet.get_by_role("button", name="Annuler la suppression de Courses de la semaine")
+    expect(undo).to_be_focused()
+    assert_accessible(page, "liste enregistrée supprimée")
+    undo.click()
+    expect(page.get_by_role("status").filter(has_text="rétablie")).to_contain_text(
+        "Liste « Courses de la semaine » rétablie"
+    )
+    expect(sheet.locator(".template")).to_contain_text("3 articles")
+    expect(undo).to_have_count(0)
 
 
 def test_share_copy_and_files(desktop):
