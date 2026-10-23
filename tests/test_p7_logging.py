@@ -16,6 +16,7 @@ def configured(tmp_path):
     root = logging.getLogger()
     saved = (list(root.handlers), root.level)
     hooks = (sys.excepthook, threading.excepthook)
+    levels = {name: logging.getLogger(name).level for name in logging_setup.QUIET_LOGGERS}
     console = io.StringIO()
     path = logging_setup.configure(tmp_path / "logs", console=console)
     yield path, console
@@ -27,6 +28,8 @@ def configured(tmp_path):
     root.setLevel(saved[1])
     sys.excepthook, threading.excepthook = hooks
     logging.captureWarnings(False)
+    for name, level in levels.items():
+        logging.getLogger(name).setLevel(level)
 
 
 def flush():
