@@ -265,9 +265,14 @@ def _pick_packs(item: ListItem, product: Product) -> int:
     return packs_for(parse_target(item.target), contents_of(product)) or item.quantity
 
 
+def _priced(product: Product) -> bool:
+    """A price the basket may count: more than 0 € (never 0,00 € nor a negative amount)."""
+    return product.price is not None and product.price >= 0.01
+
+
 def _recent(pick: Pick, now: float) -> bool:
     moment = pick.price_at or pick.picked_at
-    return pick.price is not None and moment is not None and now - moment <= PICK_MAX_AGE
+    return _priced(pick) and moment is not None and now - moment <= PICK_MAX_AGE
 
 
 def needs_search(item: ListItem, store: str, now: float, manual_max_age: float) -> bool:
@@ -279,7 +284,7 @@ def needs_search(item: ListItem, store: str, now: float, manual_max_age: float) 
 
 
 def _manual_valid(pick: Pick, now: float, manual_max_age: float) -> bool:
-    return pick.price is not None and now - (pick.picked_at or now) <= manual_max_age
+    return _priced(pick) and now - (pick.picked_at or now) <= manual_max_age
 
 
 def choose_line(
@@ -322,7 +327,7 @@ def choose_line(
     line.alternatives = len(suitable(products))
     old_prices = result.message if result.stale else None
     if pick is not None:
-        fresh = next((p for p in products if p.price is not None and _same(p, pick)), None)
+        fresh = next((p for p in products if _priced(p) and _same(p, pick)), None)
         if fresh is not None and fresh.available:
             line.message = old_prices
             return _found(line, fresh, _pick_packs(item, fresh), "pick", result.fetched_at, stale=result.stale)
@@ -541,7 +546,8 @@ def _count(basket: StoreBasket, info: StoreInfo) -> None:
             basket.total = round(basket.total + line.line_total, 2)
             basket.stale_count += line.stale
             basket.manual_count += line.manual
-            if line.fetched_at is not None:
+            # Age of the prices read on the sites (a price typed by hand has its own date)
+            if line.fetched_at is not None and not line.manual:
                 oldest = line.fetched_at if oldest is None else min(oldest, line.fetched_at)
         elif line.status == "not_found":
             basket.not_found_count += 1
@@ -659,6 +665,18 @@ async def _fresh_in_cache(key: str, query: str, settings: Settings, now: float) 
     return entry is not None and now - entry.created_at < search.cache_ttl(entry.products)
 
 
+async def _cached_first(key: str, query: str, settings: Settings, now: float) -> bool:
+    """``_fresh_in_cache``, False when the cache cannot be read: only the order of the
+    searches depends on it, never whether the retailer is compared."""
+    try:
+        return await _fresh_in_cache(key, query, settings, now)
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001 (the searches go on in the order of the list)
+        logger.warning("Basket: cache of %s unreadable for « %s »", key, query, exc_info=True)
+        return False
+
+
 @dataclass
 class _Run:
     """What a comparison collects while the retailers answer."""
@@ -684,7 +702,7 @@ async def _search_retailer(
     key = info.key
     todo = [i for i in run.items if needs_search(i, key, run.now, run.manual_max_age)]
     if not refresh and not cache_only:
-        cached = [await _fresh_in_cache(key, i.query, settings, run.now) for i in todo]
+        cached = [await _cached_first(key, i.query, settings, run.now) for i in todo]
         todo = [i for i, c in zip(todo, cached, strict=True) if c] + [
             i for i, c in zip(todo, cached, strict=True) if not c
         ]
@@ -731,6 +749,28 @@ async def _search_retailer(
             "retry_after": failure.retry_after if failure is not None else None,
         },
     )
+
+
+async def _all_retailers(
+    run: _Run,
+    infos: list[StoreInfo],
+    settings: Settings,
+    refresh: bool,
+    cache_only: bool,
+    on_event: EventHandler | None,
+) -> None:
+    """The retailers at the same time. When one fails (or the comparison is cancelled),
+    the others are stopped and awaited: no search goes on for a comparison that is over."""
+    tasks = [
+        asyncio.create_task(_search_retailer(run, info, settings, refresh, cache_only, on_event)) for info in infos
+    ]
+    try:
+        await asyncio.gather(*tasks)
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
 
 
 async def get_prefs() -> BasketPrefs:
@@ -799,7 +839,7 @@ async def compare_basket(
                         "line",
                         {"store": info.key, "item_id": item.id, "line": line, "done": run.done, "total": run.total},
                     )
-    await asyncio.gather(*(_search_retailer(run, info, settings, refresh, cache_only, on_event) for info in infos))
+    await _all_retailers(run, infos, settings, refresh, cache_only, on_event)
     comparison = build_comparison(
         items, infos, run.results, now=now, manual_max_age=manual_max_age, min_saving=basket_prefs.min_saving
     )

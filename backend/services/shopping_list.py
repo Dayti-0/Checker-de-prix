@@ -210,6 +210,8 @@ def pick_from(product: Product, cached: list[Product], read_at: float | None, no
             return Pick(**found.model_dump(), picked_at=now, price_at=read_at, source="site", verified=True)
     data = product.model_dump()
     data.update(picked_at=now, price_at=None, source="site", verified=False)
+    if data.get("price") is not None and data["price"] < 0.01:
+        data["price"] = None  # never 0 € nor a negative amount in a basket
     return Pick(**data)
 
 

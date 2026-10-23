@@ -145,6 +145,14 @@ class ManualPrice(BaseModel):
     def _store(cls, value: str) -> str:
         return _known_store(value)
 
+    @field_validator("price")
+    @classmethod
+    def _cents(cls, value: float) -> float:
+        # « 0,004 » was saved as 0,00 € and counted as found
+        if round(value, 2) < 0.01:
+            raise ValueError("prix trop petit")
+        return value
+
 
 class ListItemUpdate(BaseModel):
     query: str | None = Field(default=None, min_length=1, max_length=QUERY_MAX)

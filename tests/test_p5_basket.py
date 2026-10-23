@@ -2,8 +2,9 @@
 prices seen in the store (B71): pure functions of services/basket.py, simulated scores."""
 
 import pytest
+from pydantic import ValidationError
 
-from backend.models import ListItem, Pick, Product, StoreResult
+from backend.models import ListItem, ManualPrice, Pick, Product, StoreResult
 from backend.services import basket, optimizer
 from backend.services.basket import (
     StoreInfo,
@@ -316,6 +317,41 @@ def test_manual_price_counted_with_its_flag_then_expired():
 def test_manual_price_after_a_shorter_setting():
     milk = item(10, "lait", picks={"lidl": manual("lidl", 0.99, 10)})
     assert choose_line(milk, "lidl", None, now=NOW, manual_max_age=7 * DAY).expired
+
+
+def test_a_price_of_zero_or_less_is_never_counted():
+    """« 0,004 » typed in the store was counted as 0,00 € found; an unverified choice sent at
+    -5 € made a basket of -5,00 €, « Panier le moins cher »."""
+    with pytest.raises(ValidationError):
+        ManualPrice(store="lidl", name="Farine", price=0.004)
+    assert ManualPrice(store="lidl", name="Farine", price=0.005).price == 0.005  # 0,01 €
+    # Saved before: never counted
+    flour = item(1, "farine", picks={"lidl": manual("lidl", 0.0, 1)})
+    line = choose_line(flour, "lidl", ok("lidl", [prod("lidl", "Farine T45", 0.75)]), now=NOW)
+    assert (line.basis, line.line_total) == ("auto", 0.75)
+    # An unverified choice at -5 €: its price is not kept, the basket takes the automatic choice
+    sent = prod("lidl", "Sucre fantôme", -5.0)
+    pick = pick_from(sent, [], None, NOW)
+    assert (pick.price, pick.verified) == (None, False)
+    sugar = item(2, "sucre", picks={"lidl": pick})
+    line = choose_line(sugar, "lidl", ok("lidl", [prod("lidl", "Sucre", 0.99)]), now=NOW)
+    assert (line.status, line.line_total, line.basis) == ("found", 0.99, "auto")
+    # Even with a negative price saved before, and the site down
+    ghost = item(2, "sucre", picks={"lidl": chosen("lidl", "Sucre fantôme", -5.0)})
+    assert choose_line(ghost, "lidl", failed("lidl", "timeout"), now=NOW).status == "unchecked"
+    zero = [prod("lidl", "Sucre fantôme", 0.0, product_url=ghost.picks["lidl"].product_url)]
+    assert choose_line(ghost, "lidl", ok("lidl", zero), now=NOW).status == "not_found"
+
+
+def test_the_age_of_a_basket_leaves_out_the_prices_typed_by_hand():
+    """A price typed 3 weeks ago (its date is the day it was seen) is not « prix d'il y a 3 semaines »."""
+    milk = item(1, "lait", picks={"lidl": manual("lidl", 0.99, 21)})
+    items = [milk, item(2, "sucre")]
+    results = {("lidl", 2): ok("lidl", [prod("lidl", "Sucre", 0.99)])}
+    comparison = build_comparison(items, infos("lidl"), results, now=NOW)
+    lidl = comparison.stores[0]
+    assert (lidl.found_count, lidl.manual_count) == (2, 1)
+    assert lidl.fetched_at == NOW - 60  # the price read on the site
 
 
 # --- B57: honest comparison -------------------------------------------------------------

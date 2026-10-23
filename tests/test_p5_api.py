@@ -730,3 +730,42 @@ def test_a_pasted_list_says_what_it_leaves_out(client, sites):
         ("牛奶", True),
         ("🍌", True),
     ]
+
+
+def test_a_retailer_failing_stops_the_searches_of_the_others(monkeypatch, sites):
+    """An error out of one retailer ends the comparison: the other retailers are stopped,
+    no search goes on for nothing. A cache that cannot be read stops nothing."""
+    from backend.models import ListItemCreate
+    from backend.services import basket, shopping_list
+
+    async def slow(scraper, query, store):
+        sites.calls.append((scraper.key, query))
+        await asyncio.sleep(0.05)
+        return products_for(scraper.key, query)
+
+    monkeypatch.setattr(search, "_scrape", slow)
+
+    async def unreadable(key, query, settings, now):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(basket, "_fresh_in_cache", unreadable)
+
+    async def scenario():
+        for query in ("farine", "sucre", "lait", "beurre", "riz", "sel"):
+            await shopping_list.add_item(ListItemCreate(query=query))
+        compared = await basket.compare_basket(["aldi", "lidl"])
+
+        def broken(name, data):
+            if name == "line" and data["store"] == "lidl":
+                raise RuntimeError("page partie")
+
+        sites.calls.clear()
+        with pytest.raises(RuntimeError):
+            await basket.compare_basket(["aldi", "lidl"], refresh=True, on_event=broken)
+        at_failure = len(sites.calls)
+        await asyncio.sleep(0.5)
+        return compared, at_failure, len(sites.calls)
+
+    compared, at_failure, later = run(scenario())
+    assert {b.store: b.found_count for b in compared.stores} == {"aldi": 3, "lidl": 2}  # cache or not
+    assert later == at_failure < 12

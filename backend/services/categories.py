@@ -51,6 +51,11 @@ _PHRASES = {
     "lait corps": "Hygiène et beauté",
     "pate a tartiner": "Épicerie sucrée",
     "pates a tartiner": "Épicerie sucrée",
+    # Not butter: spreads, next to the « pâtes à tartiner »
+    "beurre de cacahuete": "Épicerie sucrée",
+    "beurre de cacahuetes": "Épicerie sucrée",
+    "beurre d arachide": "Épicerie sucrée",
+    "beurre de cacao": "Épicerie sucrée",
     "pomme de terre": "Fruits et légumes",
     "pommes de terre": "Fruits et légumes",
     "petits pois": "Épicerie salée",
