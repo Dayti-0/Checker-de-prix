@@ -140,3 +140,10 @@ ALLOWED_HOSTS = tuple(h.strip().lower() for h in os.environ.get("PRIXMALIN_ALLOW
 OPEN_BROWSER = os.environ.get("PRIXMALIN_OPEN_BROWSER", "") == "1"
 # GitHub repository of the releases (Réglages › À propos, mettre-a-jour.bat)
 UPDATES_REPO = "Dayti-0/Checker-de-prix"
+# HTTPS with a certificate of mkcert (docs/acces-telephone.md): both files, else plain HTTP
+SSL_CERTFILE = os.environ.get("PRIXMALIN_SSL_CERTFILE", "").strip()
+SSL_KEYFILE = os.environ.get("PRIXMALIN_SSL_KEYFILE", "").strip()
+
+
+def scheme() -> str:
+    return "https" if SSL_CERTFILE and SSL_KEYFILE else "http"

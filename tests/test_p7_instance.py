@@ -247,3 +247,86 @@ def test_ready_prints_the_code_but_never_logs_it(monkeypatch, capsys, caplog):
     assert code in capsys.readouterr().out
     assert code not in caplog.text and security.access_secret().code not in caplog.text
     assert opened == ["http://localhost:8000"]
+
+
+# --- HTTPS with a certificate (docs/acces-telephone.md, mkcert) ----------------------
+
+
+@pytest.fixture
+def certificate(tmp_path, monkeypatch):
+    import shutil
+    import subprocess
+
+    openssl = shutil.which("openssl")
+    if openssl is None:
+        pytest.skip("openssl introuvable")
+    cert, key = tmp_path / "pc.pem", tmp_path / "pc-key.pem"
+    subprocess.run(  # noqa: S603
+        [
+            openssl,
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-days",
+            "1",
+            "-subj",
+            "/CN=pc.local",
+            "-keyout",
+            str(key),
+            "-out",
+            str(cert),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    monkeypatch.setattr(config, "SSL_CERTFILE", str(cert))
+    monkeypatch.setattr(config, "SSL_KEYFILE", str(key))
+    return cert, key
+
+
+def test_https_addresses(certificate):
+    assert config.scheme() == "https"
+    assert instance.local_url(8000) == "https://localhost:8000"
+    assert instance.phone_url("192.168.1.10", 8000) == "https://192.168.1.10:8000"
+
+
+def test_probe_over_https(certificate):
+    import ssl
+
+    cert, key = certificate
+    handler = type("Handler", (_Answer,), {"body": json.dumps({"version": "2.1.0"}).encode()})
+    server = http.server.HTTPServer(("127.0.0.1", 0), handler)
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(cert, key)
+    server.socket = context.wrap_socket(server.socket, server_side=True)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        assert instance.probe(server.server_address[1]) == "prixmalin"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_run_with_https(certificate, monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "PORT", free_port())
+    monkeypatch.setattr(instance, "probe", lambda port: "free")
+    monkeypatch.setattr(main.backup, "migrate_legacy_data", lambda **kw: None)
+    monkeypatch.setattr(main.instance, "lock_data_dir", lambda: None)
+    monkeypatch.setattr(main.logging_setup, "configure", lambda: tmp_path / "x.log")
+    monkeypatch.setattr(main.hooks, "_startup", list(main.hooks._startup))
+    monkeypatch.setattr(main.security, "LISTEN_HOST", None)
+    seen = {}
+
+    class FakeServer:
+        def __init__(self, config_, on_ready):
+            seen.update(cert=config_.ssl_certfile, key=config_.ssl_keyfile)
+            self.started = True
+
+        def run(self):
+            pass
+
+    monkeypatch.setattr(main, "Server", FakeServer)
+    main.run()
+    assert seen == {"cert": config.SSL_CERTFILE, "key": config.SSL_KEYFILE}

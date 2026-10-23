@@ -199,7 +199,8 @@ def request_port(request: Request) -> int:
 async def phone_url(request: Request) -> str | None:
     if not security.lan_active() or not await security.lan_allowed():
         return None
-    return instance.phone_url(await asyncio.to_thread(instance.lan_ip), request_port(request))
+    scheme = "https" if request.url.scheme == "https" or config.scheme() == "https" else "http"
+    return instance.phone_url(await asyncio.to_thread(instance.lan_ip), request_port(request), scheme)
 
 
 @router.get("/system/phone", response_model=PhoneInfo)

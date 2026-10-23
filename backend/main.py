@@ -103,8 +103,9 @@ def run() -> None:
     lan = security.lan_active()
     # No auto-reload: it would start a second browser and breaks Playwright on Windows.
     # No proxy headers: the address of a request is the one of its connection (security.py).
+    tls = {"ssl_certfile": config.SSL_CERTFILE, "ssl_keyfile": config.SSL_KEYFILE} if config.scheme() == "https" else {}
     server = Server(
-        uvicorn.Config(app, host=host, port=config.PORT, log_config=None, log_level="info", proxy_headers=False),
+        uvicorn.Config(app, host=host, port=config.PORT, log_config=None, log_level="info", proxy_headers=False, **tls),
         on_ready=lambda: instance.ready(config.PORT, lan),
     )
     server.run()

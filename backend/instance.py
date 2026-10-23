@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import socket
+import ssl
 import sys
 import webbrowser
 from collections.abc import Callable, Iterable
@@ -50,7 +51,14 @@ def probe(port: int, host: str = "127.0.0.1", timeout: float = PROBE_TIMEOUT_SEC
     except OSError:
         return "free"
     sock.close()
-    conn = http.client.HTTPConnection(host, port, timeout=timeout)
+    if config.scheme() == "https":
+        # Our own port on this PC: its certificate is for the names of the PC, not for 127.0.0.1
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        conn = http.client.HTTPSConnection(host, port, timeout=timeout, context=context)
+    else:
+        conn = http.client.HTTPConnection(host, port, timeout=timeout)
     try:
         conn.request("GET", "/api/version", headers={"Host": f"{host}:{port}", "Accept": "application/json"})
         answer = conn.getresponse()
@@ -85,7 +93,7 @@ def port_taken_message(port: int) -> str:
 
 
 def local_url(port: int) -> str:
-    return f"http://localhost:{port}"
+    return f"{config.scheme()}://localhost:{port}"
 
 
 def open_page(url: str) -> None:
@@ -243,8 +251,8 @@ def lan_ip(
     return pick_lan_ip(host_addresses())
 
 
-def phone_url(ip: str | None, port: int) -> str | None:
-    return f"http://{ip}:{port}" if ip else None
+def phone_url(ip: str | None, port: int, scheme: str | None = None) -> str | None:
+    return f"{scheme or config.scheme()}://{ip}:{port}" if ip else None
 
 
 def qr_available() -> bool:
