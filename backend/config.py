@@ -11,8 +11,10 @@ DB_PATH = DATA_DIR / "prixmalin.db"
 BROWSER_PROFILE_DIR = DATA_DIR / "browser-profile"
 DEBUG_DIR = DATA_DIR / "debug"
 
-# 0.0.0.0: the phone on the same Wi-Fi reaches PrixMalin with the address of the PC
+# 0.0.0.0: the phone on the same Wi-Fi reaches PrixMalin with the address of the PC. Without
+# PRIXMALIN_HOST, run() listens on 127.0.0.1 when « Autoriser l'accès depuis le téléphone » is off
 HOST = os.environ.get("PRIXMALIN_HOST", "0.0.0.0")  # noqa: S104
+HOST_FROM_ENV = bool(os.environ.get("PRIXMALIN_HOST", "").strip())
 PORT = int(os.environ.get("PRIXMALIN_PORT", "8000"))
 
 # Browser channel: "chrome", "msedge", "chromium" (bundled with Playwright),
@@ -92,3 +94,15 @@ def scraper_timeout(key: str) -> float:
 def real_chrome_profile_dir(key: str) -> Path:
     """Profile of the dedicated Chrome window of retailer ``key`` (data/chrome-intermarche, data/chrome-leclerc)."""
     return DATA_DIR / f"chrome-{key}"
+
+
+# --- Sécurité, lancement et mises à jour (area of P7) -----------------------
+
+# Names of the PC accepted in the address bar besides localhost, the IP
+# addresses, the name of the PC (and « name.local ») and Tailscale's *.ts.net:
+# PRIXMALIN_ALLOWED_HOSTS=prixmalin.maison,.mondomaine.fr (".x": every name ending with it)
+ALLOWED_HOSTS = tuple(h.strip().lower() for h in os.environ.get("PRIXMALIN_ALLOWED_HOSTS", "").split(",") if h.strip())
+# lancer.bat sets it: the browser opens PrixMalin as soon as the server listens
+OPEN_BROWSER = os.environ.get("PRIXMALIN_OPEN_BROWSER", "") == "1"
+# GitHub repository of the releases (Réglages › À propos, mettre-a-jour.bat)
+UPDATES_REPO = "Dayti-0/Checker-de-prix"

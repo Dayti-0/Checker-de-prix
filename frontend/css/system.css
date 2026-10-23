@@ -1,1 +1,95 @@
-/* Sécurité, données, mises à jour (P7). Empty for now. */
+/* Sécurité, téléphone, données, mises à jour (P7): sections of Réglages, access code, update banner */
+
+/* Finger-sized targets: at least 44 px (--control-h is smaller at the default text size) */
+.sys-target { min-height: max(44px, var(--control-h)); }
+.sys-target.btn-ghost, .sys-target.btn-primary, a.sys-target { display: inline-flex; align-items: center; justify-content: center; }
+.switch.sys-target { align-items: center; }
+.switch.sys-target input { margin-top: 0; }
+
+.sys-label { margin: var(--space-4) 0 var(--space-1); font-weight: 600; font-size: var(--text-95); }
+.sys-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-4); }
+.sys-path { overflow-wrap: anywhere; font-family: ui-monospace, Consolas, monospace; font-size: var(--text-875); }
+.sys-block + .sys-block { margin-top: var(--space-5); padding-top: var(--space-5); border-top: 1px solid var(--border); }
+
+/* Settings › Sécurité */
+.sys-code-block { margin-top: var(--space-4); }
+.sys-code {
+    margin: 0 0 var(--space-2);
+    font-size: var(--text-180);
+    font-weight: 700;
+    letter-spacing: .12em;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+}
+
+/* Settings › Sur le téléphone */
+.sys-phone { display: flex; flex-wrap: wrap; gap: var(--space-5); align-items: flex-start; }
+.sys-qr {
+    flex: none;
+    width: 10rem;
+    height: 10rem;
+    padding: var(--space-2);
+    background: var(--thumb-bg); /* white in both themes: a dark QR code on white for the cameras */
+    border: 1px solid var(--border);
+    border-radius: var(--radius-55);
+}
+.sys-phone-text { flex: 1 1 14rem; min-width: 0; }
+.sys-url { margin: 0 0 var(--space-3); font-size: var(--text-120); font-weight: 700; overflow-wrap: anywhere; }
+.sys-steps { margin: 0; padding-left: 1.2rem; font-size: var(--text-95); }
+.sys-steps li + li { margin-top: var(--space-1); }
+
+/* Settings › Mes données */
+.sys-file { display: block; max-width: 100%; margin: var(--space-2) 0; font-size: var(--text-95); }
+.sys-file::file-selector-button { min-height: max(44px, var(--control-h)); margin-right: var(--space-3); }
+.sys-modes { margin: var(--space-3) 0 0; padding: 0; border: 0; }
+.sys-modes legend { padding: 0; font-weight: 600; font-size: var(--text-95); }
+.sys-modes label { display: flex; gap: var(--space-3); align-items: center; min-height: max(44px, var(--control-h)); font-size: var(--text-95); }
+.sys-modes input { width: 1.2rem; height: 1.2rem; accent-color: var(--primary); }
+
+/* Access code of the phone (js/features/access-code.js) */
+.access-dialog {
+    width: min(26rem, calc(100vw - 2rem));
+    padding: 0;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-toast);
+}
+.access-dialog::backdrop { background: rgba(16, 24, 40, .55); }
+.access-form { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-5) 1.2rem 1.2rem; }
+.access-title { margin: 0; font-size: var(--text-130); }
+.access-help, .access-note { margin: 0; font-size: var(--text-95); }
+.access-note { color: var(--muted); font-size: var(--text-875); }
+.access-label { font-weight: 600; font-size: var(--text-95); }
+.access-input {
+    min-height: max(44px, var(--control-h));
+    padding: var(--space-3) var(--space-4);
+    font-size: var(--text-150);
+    letter-spacing: .2em;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--muted);
+    border-radius: var(--radius-70);
+}
+.access-input:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.access-input[aria-invalid="true"] { border-color: var(--danger); }
+.access-error { margin: 0; color: var(--danger-text); font-size: var(--text-95); }
+.access-submit { min-height: max(44px, var(--control-h)); }
+
+/* « Nouvelle version disponible » (js/features/update-banner.js) */
+.update-banner {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-3) var(--space-5);
+    color: var(--text);
+    background: var(--best-bg);
+    border-bottom: 1px solid var(--border);
+    font-size: var(--text-95);
+}
+.update-banner p { margin: 0; }
+.update-banner a { color: var(--primary-text); }
