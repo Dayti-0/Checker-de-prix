@@ -1,15 +1,49 @@
 import os
 import shlex
+import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
 
-# Everything the app writes (database, browser profile, debug snapshots)
-DATA_DIR = Path(os.environ.get("PRIXMALIN_DATA_DIR", BASE_DIR / "data"))
+# Everything the app writes (database, browser profiles, logs, debug snapshots):
+# PRIXMALIN_DATA_DIR, else %LOCALAPPDATA%\PrixMalin (Windows) or ~/.local/share/prixmalin,
+# outside the folder of the app (an update or a new copy of the app keeps them).
+# Before 3.0 they were in the folder of the app: run() moves that ./data (backend/backup.py).
+LEGACY_DATA_DIR = BASE_DIR / "data"
+
+
+def default_data_dir(env: Mapping[str, str] = os.environ, platform: str = sys.platform) -> Path:
+    if platform == "win32":
+        root = env.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+        return Path(root) / "PrixMalin"
+    xdg = env.get("XDG_DATA_HOME")
+    return (Path(xdg) if xdg else Path.home() / ".local" / "share") / "prixmalin"
+
+
+def initial_data_dir(env: Mapping[str, str] = os.environ, legacy: Path = LEGACY_DATA_DIR) -> Path:
+    """The folder at import: ./data while it waits to be moved (nothing reads elsewhere before run())."""
+    if env.get("PRIXMALIN_DATA_DIR"):
+        return Path(env["PRIXMALIN_DATA_DIR"])
+    target = default_data_dir(env)
+    return legacy if legacy.is_dir() and not target.exists() else target
+
+
+DATA_DIR = initial_data_dir()
 DB_PATH = DATA_DIR / "prixmalin.db"
 BROWSER_PROFILE_DIR = DATA_DIR / "browser-profile"
 DEBUG_DIR = DATA_DIR / "debug"
+
+
+def use_data_dir(path: Path) -> None:
+    """Point every path of the data to ``path`` (after the move of ./data)."""
+    global DATA_DIR, DB_PATH, BROWSER_PROFILE_DIR, DEBUG_DIR
+    DATA_DIR = Path(path)
+    DB_PATH = DATA_DIR / "prixmalin.db"
+    BROWSER_PROFILE_DIR = DATA_DIR / "browser-profile"
+    DEBUG_DIR = DATA_DIR / "debug"
+
 
 # 0.0.0.0: the phone on the same Wi-Fi reaches PrixMalin with the address of the PC. Without
 # PRIXMALIN_HOST, run() listens on 127.0.0.1 when « Autoriser l'accès depuis le téléphone » is off
