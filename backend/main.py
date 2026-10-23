@@ -94,6 +94,7 @@ def run() -> None:
     if moved:
         logger.log(*moved)
     logging_setup.log_versions()
+    security.access_secret()  # created now: the code of the banner is the one the server checks
     logger.info("Data folder: %s, log: %s", config.DATA_DIR, log_file)
     host = security.listen_host()
     security.LISTEN_HOST = host
