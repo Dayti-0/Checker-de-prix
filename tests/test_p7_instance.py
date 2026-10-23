@@ -89,7 +89,7 @@ def test_a_second_run_opens_the_first_one_and_quits(listening, monkeypatch, no_s
         main.run()
     assert stop.value.code == 0
     assert calls == [] and opened == [f"http://localhost:{port}"]
-    assert main.browser._thread is None  # no browser created
+    assert "browser" not in calls  # no browser launched (main.browser._launch never called)
     assert "PrixMalin est déjà ouvert" in capsys.readouterr().out
 
 
