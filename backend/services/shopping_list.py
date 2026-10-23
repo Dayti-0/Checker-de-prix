@@ -103,6 +103,17 @@ def _check_category(category: str | None, query: str | None = None) -> str | Non
     return category
 
 
+NO_LETTER = "Écrivez le nom de l'article avec des lettres ou des chiffres."
+
+
+def _check_query(query: str) -> str:
+    """``query`` when it names an item; AppError 422 when it has no Latin letter nor digit
+    (« 🍌 », « !!! », spaces): its key would be empty, two such items would merge."""
+    if not repo.list_key(query):
+        raise AppError(NO_LETTER, 422, "validation")
+    return query
+
+
 def _full() -> AppError:
     return AppError(f"Votre liste est pleine ({MAX_ITEMS} articles au maximum).", code="list_full")
 
@@ -267,7 +278,7 @@ async def _add(db, query: str, data: ListItemCreate, category: str | None, pick:
 
 async def add_item(data: ListItemCreate) -> ListItem:
     """Add a query to the list, or update the existing line for the same query."""
-    query = _clean(data.query) or data.query.strip()
+    query = _check_query(_clean(data.query) or data.query.strip())
     category = _check_category(data.category, query)
     pick = await verified_pick(data.product, query) if data.product else None
     async with transaction() as db:
@@ -279,7 +290,7 @@ async def bulk_add(items: list[ListItemCreate]) -> list[ListItem]:
     """Add several items at once (pasted list), merged with the existing lines; returns the list."""
     prepared = []
     for data in items:
-        query = _clean(data.query) or data.query.strip()
+        query = _check_query(_clean(data.query) or data.query.strip())
         pick = await verified_pick(data.product, query) if data.product else None
         prepared.append((query, data, _check_category(data.category, query), pick))
     async with transaction() as db:
@@ -303,6 +314,8 @@ async def update_item(item_id: int, data: ListItemUpdate) -> ListItem | None:
     if current is None:
         return None
     query = (_clean(data.query) or current["query"]) if data.query is not None else current["query"]
+    if data.query is not None:
+        _check_query(query)
     pick = await verified_pick(data.set_pick, query) if data.set_pick is not None else None
     category = _check_category(data.category, query) if data.category is not None else None
     async with transaction() as db:
@@ -364,16 +377,23 @@ async def apply_checks(checks: list[CheckUpdate]) -> list[ListItem]:
     return await get_list()
 
 
-async def finish(mode: str) -> list[ListItem]:
-    """End of the shopping: untick everything, or remove the ticked items (kept a
-    while for « Annuler », like any deleted line)."""
+async def finish(mode: str, ids: list[int] | None = None) -> list[ListItem]:
+    """End of the shopping: untick everything (dated now: an older tick sent later
+    loses), or remove the ticked items (kept a while for « Annuler », like any
+    deleted line). ``ids``: only those lines (the ones the page showed ticked),
+    never an item ticked meanwhile on another device; the page tells the lines
+    removed by those missing from the list returned."""
+    now = time.time()
     if mode == "remove":
+        wanted = None if ids is None else set(ids)
         async with transaction() as db:
-            taken = [raw for raw in await repo.list_items() if raw.get("checked")]
-            await repo.delete_checked(db=db)
-            await repo.trash_items(taken, time.time(), TRASH_SECONDS, db=db)
+            taken = [
+                raw for raw in await repo.list_items() if raw.get("checked") and (wanted is None or raw["id"] in wanted)
+            ]
+            await repo.delete_items([raw["id"] for raw in taken], db=db)
+            await repo.trash_items(taken, now, TRASH_SECONDS, db=db)
     else:
-        await repo.uncheck_all()
+        await repo.uncheck_all(now)
     return await get_list()
 
 
@@ -601,7 +621,14 @@ def parse_list_text(text: str) -> list[ParsedLine]:
     « • œufs x12 », « 3x yaourts », « 2 paquets de pâtes »… (one item per line, or separated
     by « ; », « , » or « + »; a size alone after a comma belongs to the item before it).
     The same item twice is merged (quantities added)."""
+    return parse_pasted(text)[0]
+
+
+def parse_pasted(text: str) -> tuple[list[ParsedLine], list[str]]:
+    """``parse_list_text`` and the pieces left out although they say something: words
+    without a Latin letter nor digit (« 牛奶 », « 🍌 »), that the list refuses (pure)."""
     found: dict[str, ParsedLine] = {}
+    ignored: list[str] = []
     for line in (text or "").splitlines():
         last: ParsedLine | None = None
         for piece in _SPLIT.split(line):
@@ -614,6 +641,9 @@ def parse_list_text(text: str) -> list[ParsedLine]:
             parsed = _parse_piece(piece)
             key = repo.list_key(parsed.query) if parsed else ""
             if not key:
+                left = parsed.query if parsed else _clean_piece(piece)
+                if re.search(r"[^\x00-\x7f]", left) and left not in ignored and len(ignored) < MAX_ITEMS:
+                    ignored.append(left[:120])
                 continue
             if key in found:
                 found[key].quantity = min(99, found[key].quantity + parsed.quantity)
@@ -621,16 +651,17 @@ def parse_list_text(text: str) -> list[ParsedLine]:
                 last = found[key]
             elif len(found) < MAX_ITEMS:
                 found[key] = last = parsed
-    return list(found.values())
+    return list(found.values()), ignored
 
 
 async def preview_text(text: str) -> list[ParsedLine]:
-    """``parse_list_text`` with the items already in the list marked ``existing``."""
+    """``parse_list_text`` with the items already in the list marked ``existing``, then the
+    pieces left out (``ignored``: shown, never added)."""
     keys = {item["key"] for item in await repo.list_items()}
-    lines = parse_list_text(text)
+    lines, ignored = parse_pasted(text)
     for line in lines:
         line.existing = repo.list_key(line.query) in keys
-    return lines
+    return lines + [ParsedLine(query=piece, ignored=True) for piece in ignored]
 
 
 # --- Export (B69) -----------------------------------------------------------------
@@ -937,9 +968,9 @@ async def restore_backup(data: list[dict]) -> None:
         seen = set()
         for item in items:
             key = repo.list_key(item.query)
-            if key in seen or not key:
-                continue
-            seen.add(key)
+            if key and key in seen:
+                continue  # the same item twice: the first one is kept
+            seen.add(key)  # a line without a key is kept, never merged
             await repo.insert_item(
                 item.query,
                 item.quantity,

@@ -220,9 +220,11 @@ def test_paste_a_whole_list(desktop):
         "lessive",
         "éponges",
         "papier toilette",
+        "牛奶",  # no Latin letter: said, never added
     ]
     sheet.get_by_role("textbox", name="Votre liste, un article par ligne").fill("\n".join(lines))
     expect(sheet).to_contain_text("Aperçu : 16 articles")
+    expect(sheet).to_contain_text("Non repris : 牛奶. Écrivez le nom avec des lettres ou des chiffres.")
     expect(sheet.locator(".paste-lines li").filter(has_text="beurre")).to_contain_text("déjà dans la liste")
     assert_accessible(page, "feuille « Coller une liste »")
     sheet.get_by_role("button", name="Ajouter 16 articles").click()

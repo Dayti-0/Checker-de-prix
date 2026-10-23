@@ -192,6 +192,8 @@ class ParsedLine(BaseModel):
     category: str = ""
     # Already in the list (its quantity will be added)
     existing: bool = False
+    # Left out: no Latin letter nor digit (« 牛奶 »), the list would refuse it (never added)
+    ignored: bool = False
 
 
 class BulkRequest(BaseModel):
@@ -214,6 +216,8 @@ class RestoreRequest(BaseModel):
 class FinishRequest(BaseModel):
     # uncheck: everything unticked; remove: the ticked items leave the list
     mode: Literal["uncheck", "remove"] = "uncheck"
+    # remove: only these lines (those the page showed ticked); None: every ticked line
+    ids: list[int] | None = Field(default=None, max_length=MAX_ITEMS)
 
 
 class CheckUpdate(BaseModel):

@@ -482,6 +482,33 @@ def test_usual_items_are_proposed_after_two_additions():
 # --- Backups ----------------------------------------------------------------------------------
 
 
+def test_lines_without_a_key_are_kept_apart():
+    """A line kept from before without a Latin letter (« 🍌 », « !!! ») has no key: never
+    merged with another one, nor lost by a backup or « Annuler »."""
+
+    async def scenario():
+        await shopping_list.add_item(ListItemCreate(query="sucre"))
+        await shopping_list.restore_backup(
+            [
+                {"id": 1, "query": "sucre", "quantity": 1},
+                {"id": 2, "query": "🍌", "quantity": 3},
+                {"id": 3, "query": "!!!", "quantity": 1},
+                {"id": 4, "query": "Sucre", "quantity": 5},
+            ]
+        )
+        items = await shopping_list.get_list()
+        banana = next(i for i in items if i.query == "🍌")
+        await shopping_list.delete_item(banana.id)
+        after_delete = [i.query for i in await shopping_list.get_list()]
+        restored = await shopping_list.restore_items([banana.id])
+        return items, after_delete, restored
+
+    items, after_delete, restored = run(scenario())
+    assert [(i.query, i.quantity, i.key) for i in items] == [("sucre", 1, "sucre"), ("🍌", 3, ""), ("!!!", 1, "")]
+    assert after_delete == ["sucre", "!!!"]
+    assert sorted(i.query for i in restored) == sorted(["sucre", "🍌", "!!!"])
+
+
 def test_backup_providers_round_trip():
     assert {"shopping_list", "list_templates", "list_history"} <= set(hooks.backups())
     providers = hooks.backups()
@@ -533,6 +560,9 @@ def test_migration_merges_duplicate_lines_of_version_2():
             ("sucre", 1, {}),
             ("farine ", 2, {"lidl": lidl}),
             ("FARINE", 98, "pas du json"),
+            # No Latin letter nor digit: no key, never merged (they were merged into one line)
+            ("!!!", 1, {}),
+            ("🍌", 2, {}),
         ):
             db.execute(
                 "INSERT INTO shopping_list (query, quantity, picks_json, created_at) VALUES (?, ?, ?, 1.0)",
@@ -551,6 +581,8 @@ def test_migration_merges_duplicate_lines_of_version_2():
     assert [(i.query, i.quantity, sorted(i.picks)) for i in items] == [
         ("Farine", 99, ["aldi", "lidl"]),
         ("sucre", 1, []),
+        ("!!!", 1, []),
+        ("🍌", 2, []),
     ]
     assert all(i.compare and not i.checked and i.excluded == [] for i in items)
     assert usual == [] and version == 0

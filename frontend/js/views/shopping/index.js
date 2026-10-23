@@ -14,7 +14,7 @@
 
 import { retailerBadge } from "../../components/retailer-badge.js";
 import { api } from "../../core/api.js";
-import { euros, plural } from "../../core/fmt.js";
+import { euros, plural, relativeTime } from "../../core/fmt.js";
 import { attr, html, setHtml } from "../../core/html.js";
 import { icon } from "../../core/icons.js";
 import { navigate } from "../../core/router.js";
@@ -161,6 +161,11 @@ function chooserMarkup() {
 
 // ---------------------------------------------------------------- markup: the trip
 
+// « Produits et prix du panier comparé il y a 2 h » (hier, le 2 octobre…)
+export function basketWhen(ts, now = Date.now()) {
+    return `Produits et prix du panier comparé ${relativeTime(ts, now)}`;
+}
+
 export function tripTitle(t) {
     // A plan or a retailer no longer in the last basket: the whole list by aisle
     const names = t.stores.filter((s) => s.store).map((s) => s.label);
@@ -246,7 +251,7 @@ function tripMarkup() {
         <div class="trip-top" data-key="top">
             <a class="btn-ghost small" href="#/courses">${icon("chevron-left")}Changer de magasin</a>
             <h1 class="trip-title">${tripTitle(trip)}</h1>
-            ${trip.basket_at ? html`<p class="trip-sub">Produits et prix du panier comparé le ${new Date(trip.basket_at * 1000).toLocaleDateString("fr-FR", { day: "numeric", month: "long" })}</p>` : ""}
+            ${trip.basket_at ? html`<p class="trip-sub">${basketWhen(trip.basket_at)}</p>` : ""}
         </div>
         ${trip.unknown ? html`<div class="notice warn trip-note" data-key="unknown"><p>Ce choix n'est plus dans le dernier panier : comparez à nouveau votre panier.</p><div class="actions"><button type="button" class="btn-primary small" data-compare>Comparer mon panier</button></div></div>` : ""}
         ${trip.outdated && !trip.unknown ? html`<div class="notice warn trip-note" data-key="outdated"><p>Votre liste a changé depuis la comparaison : produits et prix peuvent ne plus correspondre.</p><div class="actions"><button type="button" class="btn-primary small" data-compare>Comparer à nouveau</button></div></div>` : ""}
@@ -303,14 +308,21 @@ function finishSheet() {
         if (!mode) return;
         await flush();
         try {
-            await api("/api/list/finish", { method: "POST", body: { mode } });
+            // Only the items shown ticked here (never one ticked meanwhile on another device)
+            const ids = taken.map((it) => it.item.id);
+            const list = await api("/api/list/finish", { method: "POST", body: mode === "remove" ? { mode, ids } : { mode } });
             sheet.close();
             if (mode === "remove") {
-                const ids = taken.map((it) => it.item.id);
-                notify(`${plural(ids.length, "article retiré", "articles retirés")} de votre liste`, {
-                    action: { label: "Annuler", onClick: () => restoreItems(ids, "Articles remis dans votre liste").then(loadTrip) },
-                    duration: 6000,
-                });
+                const left = new Set((list || []).map((i) => i.id));
+                const removed = ids.filter((id) => !left.has(id));
+                if (removed.length) {
+                    notify(`${plural(removed.length, "article retiré", "articles retirés")} de votre liste`, {
+                        action: { label: "Annuler", onClick: () => restoreItems(removed, "Articles remis dans votre liste").then(loadTrip) },
+                        duration: 6000,
+                    });
+                } else {
+                    notify("Aucun article retiré : ils ont été décochés sur un autre appareil");
+                }
             } else {
                 notify("Tous les articles sont décochés");
             }

@@ -44,6 +44,14 @@ def follow_carrefour(page):
     expect(page.get_by_role("checkbox")).to_have_count(4)
 
 
+BLOCK_STORAGE = """
+Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    get() { throw new DOMException("The operation is insecure.", "SecurityError"); },
+});
+"""
+
+
 def test_follow_a_plan_tick_and_finish(mobile):
     page = mobile
     page.add_init_script(WAKE_LOCK)
@@ -184,6 +192,9 @@ def test_one_hand_on_a_small_phone(chromium, server, scheme):
         page.get_by_text("Lessive liquide (2 L)").tap()
         expect(page.get_by_role("checkbox", name="lessive")).to_be_checked()
         expect(page.get_by_test_id("trip-bar")).to_contain_text("1/4 · 5,49 €")
+        # Ticked items stay readable (their detail was too pale: 3,2:1 in light)
+        expect(page.locator(".trip-aisle.done")).to_contain_text("Lessive liquide (2 L)")
+        assert_accessible(page, f"en magasin, article coché ({scheme})")
     finally:
         context.close()
     assert page.errors == []
@@ -270,3 +281,46 @@ def test_printed_trip_is_a_checklist(desktop):
     expect(page.get_by_role("link", name="Changer de magasin")).to_be_hidden()
     box = page.locator(".trip-box").first.bounding_box()
     assert box["width"] < 30  # a small box to tick with a pen
+
+
+def test_ticks_without_local_storage_still_reach_the_server(mobile):
+    """A private window or blocked site data: the queue lives in the page, ticks are sent."""
+    page = mobile
+    demo_list(page)
+    compare(page)
+    page.context.add_init_script(BLOCK_STORAGE)
+    follow_carrefour(page)
+    page.get_by_role("checkbox", name="sucre").check()
+    expect(page.get_by_test_id("trip-bar")).to_contain_text("1/4")
+    assert wait_until(lambda: checked(page.base, "sucre"))
+    expect(page.get_by_text("Hors connexion")).to_have_count(0)
+    page.reload()
+    expect(page.get_by_role("checkbox", name="sucre")).to_be_checked()
+
+
+def test_finish_removes_only_what_this_phone_saw_ticked(mobile):
+    """« lessive » ticked on the PC after this page read the trip: « Retirer l'article pris »
+    removes « beurre » only (the one ticked here); « Annuler » puts it back."""
+    page = mobile
+    items = demo_list(page)
+    compare(page)
+    follow_carrefour(page)
+    lessive = next(i for i in items if i["query"] == "lessive")
+    httpx.patch(f"{page.base}/api/list/{lessive['id']}", json={"checked": True}, headers=HEADERS)
+    page.get_by_role("checkbox", name="beurre").check()
+    assert wait_until(lambda: checked(page.base, "beurre"))
+    page.get_by_role("button", name="Terminer").click()
+    page.get_by_role("dialog").get_by_role("button", name="Retirer l'article pris de ma liste").click()
+    toast = page.get_by_role("status")
+    expect(toast).to_contain_text("1 article retiré de votre liste")
+    assert sorted(i["query"] for i in call(page, "GET", "/api/list")) == ["jus d'orange", "lessive", "sucre"]
+    toast.get_by_role("button", name="Annuler").click()
+    expect(page.get_by_role("checkbox")).to_have_count(4)
+
+
+def test_the_date_of_the_basket_is_relative(mobile):
+    page = mobile
+    demo_list(page)
+    compare(page)
+    follow_carrefour(page)
+    expect(page.get_by_text("Produits et prix du panier comparé à l'instant")).to_be_visible()

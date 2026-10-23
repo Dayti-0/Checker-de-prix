@@ -97,7 +97,8 @@ async def api_list_checks(request: ChecksRequest):
 
 @router.post("/list/finish", response_model=list[ListItem])
 async def api_list_finish(request: FinishRequest):
-    return await shopping_list.finish(request.mode)
+    """« Terminer » (``remove`` with ``ids``: only those lines); returns the list."""
+    return await shopping_list.finish(request.mode, request.ids)
 
 
 @router.get("/list/export")

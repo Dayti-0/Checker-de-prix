@@ -674,3 +674,59 @@ def test_undo_window(client, sites, monkeypatch):
     with sqlite3.connect(config.DB_PATH) as db:
         assert [r[0] for r in db.execute("SELECT id FROM list_trash")] == [flour["id"]]
     db.close()
+
+
+# --- Robustness of the list -----------------------------------------------------------
+
+
+def test_untick_everything_wins_over_an_older_tick_sent_later(client, sites):
+    """The phone ticked « beurre » offline 10 min ago; meanwhile the PC « Tout décocher »:
+    the older tick, replayed afterwards, loses (the most recent tick wins)."""
+    butter = add(client, "beurre")
+    ticked_offline = time.time() - 600
+    client.patch(f"/api/list/{butter['id']}", json={"checked": True})
+    after = client.post("/api/list/finish", json={"mode": "uncheck"}).json()
+    assert after[0]["checked"] is False and after[0]["checked_at"] is not None
+    replay = {"checks": [{"id": butter["id"], "checked": True, "checked_at": ticked_offline}]}
+    assert client.post("/api/list/checks", json=replay).json()[0]["checked"] is False
+    # A tick made after « Tout décocher » counts
+    replay["checks"][0]["checked_at"] = time.time() + 1
+    assert client.post("/api/list/checks", json=replay).json()[0]["checked"] is True
+
+
+def test_finish_removes_only_the_items_the_page_showed_ticked(client, sites):
+    """« lait » ticked on the PC after the phone read its trip: « Retirer l'article pris »
+    on the phone removes « beurre » only, and « Annuler » puts back all it removed."""
+    milk, butter, sugar = (add(client, q) for q in ("lait", "beurre", "sucre"))
+    client.patch(f"/api/list/{milk['id']}", json={"checked": True})
+    client.post("/api/list/checks", json={"checks": [{"id": butter["id"], "checked": True}]})
+    after = client.post("/api/list/finish", json={"mode": "remove", "ids": [butter["id"], sugar["id"]]}).json()
+    assert [(i["query"], i["checked"]) for i in after] == [("lait", True), ("sucre", False)]
+    restored = client.post("/api/list/restore", json={"ids": [butter["id"]]}).json()
+    assert sorted(i["query"] for i in restored) == ["beurre", "lait", "sucre"]
+    # Without ids (an older page): every ticked line, as before
+    after = client.post("/api/list/finish", json={"mode": "remove"}).json()
+    assert [i["query"] for i in after] == ["sucre"]
+
+
+@pytest.mark.parametrize("query", ["🍌", "牛奶", "!!!", "   "])
+def test_an_item_without_letter_nor_digit_is_refused(client, sites, query):
+    """Their key was empty: « 🍌 », « 🥛 » and « 牛奶 » became one line, « ␣␣␣ » a line without a name."""
+    response = client.post("/api/list", json={"query": query})
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Écrivez le nom de l'article avec des lettres ou des chiffres."
+    sugar = add(client, "sucre")
+    renamed = client.patch(f"/api/list/{sugar['id']}", json={"query": query})
+    # Spaces only: the name is kept, nothing to refuse
+    assert renamed.status_code == (200 if not query.strip() else 422)
+    assert client.post("/api/list/bulk", json={"items": [{"query": "sel"}, {"query": query}]}).status_code == 422
+    assert [i["query"] for i in client.get("/api/list").json()] == ["sucre"]
+
+
+def test_a_pasted_list_says_what_it_leaves_out(client, sites):
+    lines = client.post("/api/list/parse", json={"text": "farine\n牛奶 x2\n🍌\n- \n123"}).json()
+    assert [(line["query"], line["ignored"]) for line in lines] == [
+        ("farine", False),
+        ("牛奶", True),
+        ("🍌", True),
+    ]

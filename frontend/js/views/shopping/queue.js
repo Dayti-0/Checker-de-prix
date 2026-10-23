@@ -1,21 +1,36 @@
 // Ticks of the mode « En magasin » waiting for the network (B64): kept in
 // localStorage (an open tab survives a loss of network, and a reload), sent with
 // POST /api/list/checks; the server keeps the most recent tick of each item.
+// When the browser refuses localStorage (private window, blocked site data), the
+// queue lives in this page only: the ticks are still sent.
 
 import { api } from "../../core/api.js";
-import { readJson, writeJson } from "../list/data.js";
+import { readJson } from "../list/data.js";
 import { mergeCheck } from "../list/model.js";
 
 const KEY = "prixmalin.pendingChecks";
 
+// The queue when localStorage could not keep it (null: localStorage works)
+let memory = null;
+
+function save(queue) {
+    try {
+        localStorage.setItem(KEY, JSON.stringify(queue));
+        memory = null;
+    } catch {
+        memory = queue;
+    }
+}
+
 export function pending() {
+    if (memory) return memory;
     const queue = readJson(KEY, []);
     return Array.isArray(queue) ? queue : [];
 }
 
 export function queueCheck(id, checked) {
     const check = { id, checked, checked_at: Date.now() / 1000 };
-    writeJson(KEY, mergeCheck(pending(), check));
+    save(mergeCheck(pending(), check));
     return check;
 }
 
@@ -40,10 +55,7 @@ export function flush() {
         }
         // Ticks made while sending stay in the queue
         const sent = new Map(queue.map((c) => [c.id, c.checked_at]));
-        writeJson(
-            KEY,
-            pending().filter((c) => sent.get(c.id) !== c.checked_at),
-        );
+        save(pending().filter((c) => sent.get(c.id) !== c.checked_at));
         return true;
     })().finally(() => {
         sending = null;

@@ -127,7 +127,6 @@
 .trip-price { font-size: var(--text-110); font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .trip-row.is-checked .trip-query, .trip-row.is-checked .trip-price { color: var(--muted); text-decoration: line-through; }
-.trip-row.is-checked .trip-detail { opacity: .8; }
 .trip-aisle.done .trip-rows { background: var(--surface-2); box-shadow: none; }
 .trip-all-done { display: flex; align-items: center; gap: var(--space-2); color: var(--best-text); font-weight: 600; }
 .trip-offline { display: flex; align-items: center; gap: var(--space-3); border-radius: var(--radius-70); }

@@ -40,8 +40,17 @@ def list_key(query: str) -> str:
     It is ``matching.query_key``, which the page also uses (``listKey`` of
     add-sheet.js). The keys of the saved lines are computed with it (UNIQUE
     index): if query_key changes, a migration must compute them again.
+    A query without a Latin letter or digit (« 🍌 ») has the key "": the
+    services refuse it, and a line kept from before is saved without a key
+    (``_stored_key``: NULL, never merged with another one).
     """
     return query_key(query or "")
+
+
+def _stored_key(query: str) -> str | None:
+    """The key written in the column ``query_key``: NULL rather than "" (the UNIQUE index
+    lets several lines have no key, they are never merged)."""
+    return list_key(query) or None
 
 
 @contextlib.asynccontextmanager
@@ -119,6 +128,8 @@ async def get_item(item_id: int) -> dict | None:
 
 
 async def get_by_key(key: str) -> dict | None:
+    if not key:
+        return None  # lines without a key are never the same item
     db = await get_db()
     cursor = await db.execute("SELECT * FROM shopping_list WHERE query_key = ?", (key,))
     row = await cursor.fetchone()
@@ -149,7 +160,7 @@ async def insert_item(
             (
                 item_id,
                 query,
-                list_key(query),
+                _stored_key(query),
                 quantity,
                 json.dumps(picks),
                 target,
@@ -175,7 +186,7 @@ async def update_fields(item_id: int, *, db: aiosqlite.Connection | None = None,
     if not fields:
         return
     if "query" in fields:
-        fields["query_key"] = list_key(fields["query"])
+        fields["query_key"] = _stored_key(fields["query"])
     sets, values = [], []
     for name, value in fields.items():
         convert = _FIELDS[name]
@@ -199,16 +210,22 @@ async def clear_items(*, db: aiosqlite.Connection | None = None) -> None:
         await _bump(tx)
 
 
-async def delete_checked(*, db: aiosqlite.Connection | None = None) -> int:
+async def delete_items(ids: list[int], *, db: aiosqlite.Connection | None = None) -> int:
+    """Delete the lines ``ids``; returns how many were deleted."""
+    if not ids:
+        return 0
+    marks = ", ".join("?" for _ in ids)
     async with writing(db) as tx:
-        cursor = await tx.execute("DELETE FROM shopping_list WHERE checked = 1")
+        cursor = await tx.execute(f"DELETE FROM shopping_list WHERE id IN ({marks})", tuple(ids))  # noqa: S608
         await _bump(tx)
         return cursor.rowcount
 
 
-async def uncheck_all(*, db: aiosqlite.Connection | None = None) -> None:
+async def uncheck_all(now: float, *, db: aiosqlite.Connection | None = None) -> None:
+    """Untick everything, dated ``now``: a tick made earlier (offline on a phone) and sent
+    later loses against it (the most recent tick wins)."""
     async with writing(db) as tx:
-        await tx.execute("UPDATE shopping_list SET checked = 0, checked_at = NULL")
+        await tx.execute("UPDATE shopping_list SET checked = 0, checked_at = ?", (now,))
         await _bump(tx)
 
 
@@ -250,6 +267,8 @@ async def untrash(ids: list[int], *, db: aiosqlite.Connection) -> None:
 
 async def record_added(query: str, *, db: aiosqlite.Connection | None = None) -> None:
     """One more addition of ``query`` to the list (usual items: at least 2)."""
+    if not list_key(query):
+        return  # no key: never a usual item
     async with writing(db) as tx:
         await tx.execute(
             "INSERT INTO list_history (query_key, query, count, last_added_at) VALUES (?, ?, 1, ?)"

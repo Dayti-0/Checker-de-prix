@@ -380,3 +380,9 @@ def test_title_of_a_trip(page):
     assert js_eval(page, SHOPPING, "tripTitle", gone) == "Ma liste par rayon"
     whole = {"plan": None, "store": None, "unknown": False, "stores": [group(None, "Ma liste")]}
     assert js_eval(page, SHOPPING, "tripTitle", whole) == "Ma liste par rayon"
+    # The date of the basket says how old it is, as everywhere (« le 22 octobre » for today before)
+    now = (OCT_3 + 2 * 3600) * 1000
+    assert js_eval(page, SHOPPING, "basketWhen", OCT_3, now) == "Produits et prix du panier comparé il y a 2 h"
+    assert js_eval(page, SHOPPING, "basketWhen", OCT_3, (OCT_3 + 86400) * 1000) == (
+        "Produits et prix du panier comparé hier"
+    )

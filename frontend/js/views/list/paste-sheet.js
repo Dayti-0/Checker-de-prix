@@ -24,16 +24,17 @@ const BODY = html`<form class="paste-form" data-paste-form>
     </div>
 </form>`;
 
-function preview(lines) {
-    if (!lines.length) return html``;
-    return html`<h3 class="edit-sub" data-key="title">Aperçu : ${plural(lines.length, "article")}</h3>
+function preview(lines, ignored) {
+    if (!lines.length && !ignored.length) return html``;
+    return html`${lines.length ? html`<h3 class="edit-sub" data-key="title">Aperçu : ${plural(lines.length, "article")}</h3>
         <ul class="paste-lines" data-key="lines">${lines.map(
             (l) => html`<li>
                 <span class="paste-query">${l.query}</span>
                 <span class="paste-meta">${[l.target ? `objectif ${l.target}` : l.quantity > 1 ? `× ${l.quantity}` : "", l.category].filter(Boolean).join(" · ")}</span>
                 ${l.existing ? html`<span class="tag">déjà dans la liste</span>` : ""}
             </li>`,
-        )}</ul>`;
+        )}</ul>` : ""}
+        ${ignored.length ? html`<p class="field-help paste-ignored" data-key="ignored">Non repris : ${ignored.join(", ")}. Écrivez le nom avec des lettres ou des chiffres.</p>` : ""}`;
 }
 
 export function openPasteSheet() {
@@ -42,24 +43,27 @@ export function openPasteSheet() {
     const box = form.querySelector("[data-preview]");
     const submit = form.querySelector("[data-paste-submit]");
     let lines = [];
+    let ignored = [];
     let timer = null;
     let token = 0;
 
     async function read() {
         const text = form.text.value;
         const mine = ++token;
-        if (!text.trim()) {
-            lines = [];
-        } else {
+        let read = [];
+        if (text.trim()) {
             try {
-                lines = await api("/api/list/parse", { method: "POST", body: { text } });
+                read = await api("/api/list/parse", { method: "POST", body: { text } });
             } catch (err) {
                 notify(err.message, { type: "error" });
                 return;
             }
         }
         if (mine !== token || !sheet.open) return;
-        patch(box, preview(lines));
+        // The pieces the list would refuse are shown, never sent
+        lines = read.filter((l) => !l.ignored);
+        ignored = read.filter((l) => l.ignored).map((l) => l.query);
+        patch(box, preview(lines, ignored));
         submit.disabled = !lines.length;
         submit.textContent = lines.length ? `Ajouter ${plural(lines.length, "article")}` : "Ajouter";
     }

@@ -2,8 +2,10 @@
 
 Lines whose queries only differ by case, accents or spaces (« Farine » and
 « farine ») are merged into the oldest one (quantities added, choices kept),
-then a UNIQUE index on the normalised query prevents new duplicates. Written in
-one transaction: an interrupted migration leaves the table as it was.
+then a UNIQUE index on the normalised query prevents new duplicates. A line
+without a Latin letter nor digit (« 🍌 », « !!! ») has no key (NULL): kept as
+it is, never merged with another one. Written in one transaction: an
+interrupted migration leaves the table as it was.
 """
 
 import json
@@ -50,6 +52,8 @@ async def _up(db) -> None:
     kept: dict[str, dict] = {}
     for row_id, query, quantity, picks_json in await cursor.fetchall():
         key = key_of(query)
+        if not key:
+            continue  # no key: the line stays as it is (query_key NULL)
         try:
             picks = json.loads(picks_json or "{}")
         except ValueError:
