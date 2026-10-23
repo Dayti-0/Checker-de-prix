@@ -139,7 +139,10 @@ function statusMarkup() {
     if (run.status === "error") return notice("status", run.error || "La comparaison a échoué.", "Réessayer");
     if (!c) return html``;
     let warning = "";
-    if (c.outdated) warning = notice("outdated", "Votre liste a changé depuis cette comparaison.", "Comparer à nouveau");
+    // Nothing to compare in the list: nothing to compare again either
+    const comparable = !state.list.length || state.list.some((i) => i.compare);
+    if (!comparable) warning = "";
+    else if (c.outdated) warning = notice("outdated", "Votre liste a changé depuis cette comparaison.", "Comparer à nouveau");
     else if (storesChanged(c)) {
         warning = notice("stores", "Les enseignes cochées ont changé depuis cette comparaison.", "Comparer à nouveau");
     }
