@@ -42,13 +42,17 @@ function view() {
         </div>
         <form class="sys-block restore-form" novalidate data-testid="restore-form">
             <label class="sys-label" for="restore-file">Restaurer une sauvegarde</label>
-            <input id="restore-file" class="sys-file" name="file" type="file" accept=".json,application/json">
+            <div class="sys-file-row">
+                <input id="restore-file" class="sys-file" name="file" type="file" accept=".json,application/json">
+                <label class="btn-ghost sys-target sys-file-button" for="restore-file">Choisir un fichier</label>
+                <span class="small sys-file-name" id="restore-name" data-testid="restore-name">Aucun fichier choisi</span>
+            </div>
             <fieldset class="sys-modes">
                 <legend>Vos données actuelles</legend>
                 <label><input type="radio" name="mode" value="merge" checked> Les garder et ajouter ce qui manque</label>
                 <label><input type="radio" name="mode" value="replace"> Les remplacer par la sauvegarde</label>
             </fieldset>
-            <div class="sys-actions"><button class="btn-ghost sys-target" type="submit">Restaurer</button></div>
+            <div class="sys-actions"><button class="btn-ghost sys-target" type="submit">Restaurer ce fichier</button></div>
             <p class="small" id="restore-result" data-testid="restore-result" hidden></p>
         </form>
         <div class="sys-block">
@@ -83,6 +87,13 @@ export function render(el) {
         }
     }
 
+    // The button of the browser speaks its own language: a French one instead
+    form.elements.file.addEventListener("change", () => {
+        const file = form.elements.file.files[0];
+        el.querySelector("#restore-name").textContent = file ? file.name : "Aucun fichier choisi";
+        say("");
+    });
+
     form.addEventListener("submit", async (e) => {
         e.preventDefault();
         const file = form.elements.file.files[0];
@@ -112,6 +123,7 @@ export function render(el) {
             notify(restoredText(answer));
             await Promise.all([loadSettings(), loadList()]).catch(() => {});
             form.reset();
+            el.querySelector("#restore-name").textContent = "Aucun fichier choisi";
         } catch (err) {
             say(err.message, { error: true });
         } finally {
