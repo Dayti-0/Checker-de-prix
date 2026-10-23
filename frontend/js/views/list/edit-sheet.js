@@ -21,7 +21,7 @@ function picksBlock(item) {
                 const p = pickParts(pick);
                 return html`<li>
                     <span class="dot ${store}-bg" aria-hidden="true"></span>
-                    <span class="edit-pick-text"><strong>${retailer(store).label}</strong> · ${p.name}${p.price ? ` · ${p.price}` : ""}${p.note ? html` <span class="muted">(${p.note})</span>` : ""}</span>
+                    <span class="edit-pick-text"><strong>${retailer(store).label}</strong> · ${p.name}${p.price ? html` · <span class="edit-pick-price">${p.price}</span>` : ""}${p.note ? html` <span class="muted">(${p.note})</span>` : ""}</span>
                     <button type="button" class="btn-ghost small" data-unpick="${store}" aria-label="Retirer le choix ${retailer(store).label}">Retirer</button>
                 </li>`;
             })}

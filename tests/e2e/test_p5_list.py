@@ -102,6 +102,15 @@ def test_choices_show_retailer_and_price_in_full_on_a_phone(mobile):
             assert price.evaluate("(el) => el.scrollWidth <= el.clientWidth")
         assert horizontal_overflow(page) == 0, width
     assert_accessible(page, "liste sur téléphone")
+    # In the sheet « Modifier » too: the price on one line (« 0,75 » then « € » below, before)
+    add(page, "pain", product=LIDL_T45)
+    add(page, "pain", product={**LIDL_T45, "store": "carrefour", "price": 0.85})
+    open_list(page)
+    page.get_by_role("button", name="Modifier pain").click()
+    prices = page.get_by_role("dialog").locator(".edit-pick-price")
+    expect(prices).to_have_count(2)
+    for price in prices.all():
+        assert price.evaluate("(el) => el.getClientRects().length") == 1, price.text_content()
 
 
 def test_clearing_the_list_asks_first_and_can_be_undone(desktop):
@@ -438,3 +447,16 @@ def test_home_card_of_the_list(desktop):
     assert_accessible(page, "accueil avec la carte « Ma liste »")
     card.get_by_role("link", name="Voir ma liste").click()
     expect(page).to_have_url(re.compile(r"#/liste$"))
+
+    # Compared in this page, then the list changes: the card never shows the old verdict
+    page.goto(f"{page.base}/#/panier")
+    expect(page.get_by_test_id("basket-verdict")).to_contain_text("Panier le moins cher")
+    page.get_by_role("link", name="Modifier ma liste").click()
+    page.get_by_role("textbox", name="Article à ajouter").fill("vinaigre")
+    page.get_by_role("button", name="Ajouter", exact=True).click()
+    expect(page.get_by_test_id("list-count")).to_have_text("5 articles")
+    page.get_by_role("link", name="Rechercher").first.click()
+    card = page.get_by_test_id("list-card")
+    expect(card).to_contain_text("Ma liste : 5 articles")
+    expect(card).to_contain_text("Votre liste a changé depuis la dernière comparaison.")
+    expect(card).not_to_contain_text("Panier le moins cher")

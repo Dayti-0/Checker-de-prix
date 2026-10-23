@@ -318,6 +318,8 @@
 .edit-pick-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
 .edit-pick-list li { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); border-radius: var(--radius-60); background: var(--surface-2); }
 .edit-pick-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-size: var(--text-95); }
+/* « 0,75 € » never cut in two */
+.edit-pick-price { white-space: nowrap; overflow-wrap: normal; }
 
 /* « Coller une liste » */
 .paste-form textarea { font-family: inherit; }

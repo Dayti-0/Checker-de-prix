@@ -102,6 +102,8 @@ function topMarkup(view) {
     let action;
     if (run.status === "running") {
         action = html`<button type="button" class="btn-ghost" data-stop data-focus="basket-action">${icon("x")}Arrêter</button>`;
+    } else if (state.list.length && !state.list.some((i) => i.compare)) {
+        action = ""; // every item is « hors comparaison »: nothing to compare
     } else if (view) {
         action = html`<button type="button" class="btn-ghost" data-refresh data-focus="basket-action">${icon("refresh-cw")}Actualiser les prix</button>`;
     } else if (state.list.length) {
@@ -161,7 +163,8 @@ function waitingVerdict() {
 }
 
 function skippedMarkup(c) {
-    const ids = c ? c.skipped_item_ids || [] : run.skipped || [];
+    // No comparison yet: the items of the list left out
+    const ids = c ? c.skipped_item_ids || [] : run.skipped.length ? run.skipped : state.list.filter((i) => !i.compare).map((i) => i.id);
     const names = ids.map((id) => listItem(id)?.query).filter(Boolean);
     if (!names.length) return "";
     return html`<p class="basket-skipped" data-key="skipped">Hors comparaison : ${names.join(", ")}.</p>`;
@@ -176,13 +179,25 @@ function emptyMarkup() {
     </div>`;
 }
 
+// Every item of the list is « hors comparaison »
+function nothingMarkup() {
+    return html`<div class="list-empty" data-key="nothing" data-testid="basket-nothing">
+        <div class="list-empty-art" aria-hidden="true">${icon("shopping-cart")}</div>
+        <h2 class="list-empty-title">Rien à comparer</h2>
+        <p>Tous les articles de votre liste sont hors comparaison. Touchez le nom d'un article dans votre liste et cochez « Comparer les prix de cet article ».</p>
+    </div>`;
+}
+
 function mainMarkup() {
     const view = buildView();
     if (!view) {
         if (!state.list.length) return html`${topMarkup(null)}${emptyMarkup()}`;
+        if (!state.list.some((i) => i.compare)) return html`${topMarkup(null)}${nothingMarkup()}${skippedMarkup(null)}`;
         return html`${topMarkup(null)}<p class="muted" data-key="wait"><span class="spinner" aria-hidden="true"></span> Chargement du dernier panier…</p>`;
     }
     const c = view.comparison;
+    // A comparison without any item: no card of « 0/0 article »
+    if (!view.live && c && !c.item_count) return html`${topMarkup(view)}${statusMarkup()}${nothingMarkup()}${skippedMarkup(c)}`;
     const cards = view.live
         ? view.stores.map((s) => liveStoreCard(view, s, run.storeStates[s.store]))
         : c.stores.map((s) => storeCard(c, s));

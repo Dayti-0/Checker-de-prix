@@ -11,7 +11,7 @@ import { icon } from "../../../core/icons.js";
 import { navigate } from "../../../core/router.js";
 import { on, state } from "../../../core/store.js";
 import { verdict } from "../../basket/model.js";
-import { compareNow, run } from "../../basket/runner.js";
+import { compareNow } from "../../basket/runner.js";
 
 export const enabled = true;
 
@@ -28,7 +28,22 @@ function lastLine(c) {
 }
 
 export function render(el) {
-    let last = run.comparison;
+    // The last basket as the server keeps it (with « outdated »): never the one of this
+    // page, which does not know that the list changed since
+    let last = null;
+    let timer = null;
+    let alive = true;
+
+    async function readLast() {
+        try {
+            const c = await api("/api/basket/last");
+            if (!alive) return;
+            last = c;
+        } catch {
+            /* the card says nothing about the last basket */
+        }
+        draw();
+    }
 
     function draw() {
         const n = state.list.length;
@@ -59,13 +74,16 @@ export function render(el) {
         navigate("/panier");
     });
     draw();
-    if (!last && state.list.length) {
-        api("/api/basket/last")
-            .then((c) => {
-                last = c;
-                draw();
-            })
-            .catch(() => {});
-    }
-    return on("list:changed", draw);
+    readLast();
+    const off = on("list:changed", () => {
+        draw();
+        // Read again a little later: several changes in a row make one request
+        clearTimeout(timer);
+        timer = setTimeout(readLast, 400);
+    });
+    return () => {
+        alive = false;
+        clearTimeout(timer);
+        off();
+    };
 }

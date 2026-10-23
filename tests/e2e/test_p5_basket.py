@@ -292,6 +292,28 @@ def test_a_retailer_that_fails_halfway_says_which_items_were_not_checked(desktop
     expect(lidl).not_to_contain_text("non vérifié")
 
 
+def test_nothing_to_compare(desktop):
+    """Every item « hors comparaison »: « Rien à comparer », never « Chargement du dernier
+    panier… » for ever nor five cards of « 0/0 article »."""
+    page = desktop
+    for query in ("beurre", "sucre"):
+        item = add(page, query)
+        call(page, "PATCH", f"/api/list/{item['id']}", {"compare": False})
+    page.goto(f"{page.base}/#/panier")
+    nothing = page.get_by_test_id("basket-nothing")
+    expect(nothing).to_contain_text("Rien à comparer")
+    expect(page.get_by_text("Hors comparaison : beurre, sucre.")).to_be_visible()
+    expect(page.get_by_text("Chargement du dernier panier")).to_have_count(0)
+    expect(page.get_by_role("button", name="Comparer mon panier")).to_have_count(0)
+    assert_accessible(page, "rien à comparer")
+    # A comparison of no item (asked elsewhere): the same, no card
+    compare(page)
+    page.reload()
+    expect(nothing).to_contain_text("Rien à comparer")
+    expect(page.locator("[data-store-card]")).to_have_count(0)
+    expect(page.get_by_text("0/0")).to_have_count(0)
+
+
 def test_type_a_price_seen_in_the_store(mobile):
     page = mobile
     demo_list(page)
