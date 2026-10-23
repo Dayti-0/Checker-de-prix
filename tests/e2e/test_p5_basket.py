@@ -483,6 +483,44 @@ def test_on_a_computer_a_table_in_dark_mode(dark):
     assert_accessible(page, "feuille « Changer » en sombre")
 
 
+def test_the_table_never_widens_the_page_nor_hides_its_last_row(desktop):
+    """Five retailers compared: the hidden texts of the cells stayed in place beyond the
+    page (125 px of sideways scroll at 1024 px); the totals stuck at the bottom covered
+    the last row."""
+    page = desktop
+    demo_list(page)
+    for query in ("farine", "huile de tournesol"):
+        add(page, query)
+    call(
+        page, "PUT", "/api/retailers/intermarche/store", {"id": "12345", "name": "Intermarché Test", "address": "1 rue"}
+    )
+    fake.state.unblocked.add("coursesu")
+    compared = compare(page)
+    assert all(b["status"] == "ok" for b in compared["stores"])
+    for width in (920, 1024):
+        page.set_viewport_size({"width": width, "height": 900})
+        open_basket(page)
+        table = page.get_by_role("table", name=re.compile("Prix de chaque article"))
+        expect(table.locator("thead th")).to_have_count(6)
+        page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+        assert horizontal_overflow(page) == 0, width
+    # A table a little taller than the window scrolls in its box: its last row stays readable
+    page.set_viewport_size({"width": 1440, "height": 700})
+    page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+    box = page.evaluate(
+        "() => { const b = document.querySelector('.table-scroll'); return [b.clientHeight, b.scrollHeight]; }"
+    )
+    assert box[1] > box[0], box  # it does scroll in its box
+    gap = page.evaluate(
+        """() => {
+            const last = document.querySelector(".basket-table tbody tr:last-child").getBoundingClientRect();
+            const foot = document.querySelector(".basket-table tfoot td").getBoundingClientRect();
+            return foot.top - last.bottom;
+        }"""
+    )
+    assert gap >= -1, gap
+
+
 def test_second_store_when_it_is_worth_the_trip(desktop):
     page = desktop
     demo_list(page)
@@ -539,3 +577,22 @@ def test_printed_basket_fits_on_one_a4_page(desktop):
     expect(page.get_by_role("table", name=re.compile("Prix de chaque article"))).to_be_visible()
     expect(page.get_by_role("button", name="Actualiser les prix")).to_be_hidden()
     assert pdf_pages(page) == 1
+
+
+def test_printed_basket_of_found_items_and_two_plans_fits_on_one_a4_page(desktop):
+    """Seven items found and two plans printed on two pages, the totals repeated in the
+    middle of the table: one page, the totals once, after the last item."""
+    page = desktop
+    call(page, "PATCH", "/api/basket/prefs", {"min_saving": 0.5})
+    demo_list(page)
+    for query in ("farine", "huile de tournesol", "gâteau"):
+        add(page, query)
+    compared = compare(page)
+    assert len(compared["plans"]) == 2 and compared["stores"][0]["found_count"] >= 6
+    open_basket(page)
+    expect(page.get_by_test_id("plans").locator(".plan")).to_have_count(2)
+    page.emulate_media(media="print")
+    table = page.get_by_role("table", name=re.compile("Prix de chaque article"))
+    assert table.locator("tfoot").evaluate("(el) => getComputedStyle(el).display") == "table-row-group"
+    assert pdf_pages(page) == 1
+    call(page, "PATCH", "/api/basket/prefs", {"min_saving": 3})

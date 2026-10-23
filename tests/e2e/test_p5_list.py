@@ -432,6 +432,28 @@ def test_printed_list_fits_on_one_a4_page(desktop):
     assert pdf_pages(page) == 1
 
 
+def test_printed_list_of_21_items_on_one_page_never_overlaps(desktop):
+    """21 items printed on two pages, the item moved to the second page printed over the
+    title of the next aisle: one page (two columns), each aisle title above its items."""
+    page = desktop
+    demo_list(page)
+    for query in (
+        "pommes", "bananes", "yaourts nature", "café moulu", "pâtes", "riz", "farine", "œufs", "pain de mie",
+        "jambon", "fromage râpé", "carottes", "papier toilette", "liquide vaisselle", "gâteau marbré",
+        "huile de tournesol", "thé",
+    ):  # fmt: skip
+        add(page, query)
+    open_list(page)
+    expect(page.get_by_test_id("list-count")).to_have_text("21 articles")
+    page.emulate_media(media="print")
+    assert pdf_pages(page) == 1
+    # Blocks, not grids: a grid cut by a page break printed its next aisle over the rows moved
+    displays = page.evaluate(
+        "() => ['.list-page', '.list-groups'].map((s) => getComputedStyle(document.querySelector(s)).display)"
+    )
+    assert displays == ["block", "block"]
+
+
 def test_home_card_of_the_list(desktop):
     page = desktop
     page.goto(page.base)

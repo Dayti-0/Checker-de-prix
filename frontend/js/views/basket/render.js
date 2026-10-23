@@ -200,7 +200,7 @@ export function cellBody(view, item, s, line, low, where = "t") {
     }
     if (line.status === "not_found") {
         return html`${cellTop(html`<span class="cell-state">Introuvable</span>`, changeButton(view, item, s, line, where))}${notesMarkup(line)}${
-            line.estimate != null ? html`<span class="note muted">compté ${euros(line.estimate)} dans l'estimation</span>` : ""
+            line.estimate != null ? html`<span class="note muted note-estimate">compté ${euros(line.estimate)} dans l'estimation</span>` : ""
         }`;
     }
     const reason = view.reason(s.store);

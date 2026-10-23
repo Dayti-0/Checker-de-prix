@@ -263,9 +263,12 @@ a.cell-name:hover { text-decoration-color: currentColor; }
 }
 .cell-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
-/* Table (computer): header row, totals and first column stay in view */
+/* Table (computer): header row and first column stay in view; the totals end
+   the table (stuck at the bottom, they covered its last row) */
 .detail-table { display: none; }
 .table-scroll {
+    /* The hidden texts of the cells are placed in it, never beyond the page */
+    position: relative;
     max-height: calc(100vh - 6rem);
     overflow: auto;
     background: var(--surface);
@@ -323,14 +326,10 @@ a.cell-name:hover { text-decoration-color: currentColor; }
 .basket-table tbody tr:last-child > * { border-bottom: 0; }
 .item-qty { color: var(--primary-text); font-weight: 700; white-space: nowrap; }
 .basket-table tfoot th, .basket-table tfoot td {
-    position: sticky;
-    bottom: 0;
-    z-index: 2;
     border-top: 2px solid var(--border);
     border-bottom: 0;
     background: var(--surface-2);
 }
-.basket-table tfoot th { z-index: 3; }
 .foot-cell { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .foot-total { display: block; font-size: var(--text-120); font-weight: 800; }
 .foot-cell.best .foot-total { color: var(--best-text); }
