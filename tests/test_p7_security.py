@@ -287,3 +287,44 @@ def test_refusals_carry_the_security_headers(phone):
     answer = phone.get("/api/settings")
     assert answer.headers["content-security-policy"].startswith("default-src 'self'")
     assert answer.headers["x-content-type-options"] == "nosniff"
+
+
+def wrong_code() -> str:
+    return str((int(security.access_secret().code) + 1) % 10**6).zfill(6)
+
+
+# --- review: X-Forwarded-For does not reset the limit of a device of the Wi-Fi ----
+
+
+def test_forwarded_header_of_a_phone_does_not_reset_its_attempts():
+    with TestClient(main.app, client=("192.168.1.50", 5000), base_url=PC_ADDRESS) as phone:
+        answers = [
+            phone.post(
+                "/api/access",
+                json={"code": wrong_code()},
+                headers={"X-PrixMalin": "1", "X-Forwarded-For": f"10.0.0.{i}"},
+            ).status_code
+            for i in range(8)
+        ]
+    assert answers == [403] * 5 + [429] * 3
+
+
+def test_tailscale_clients_keep_their_own_counters():
+    """Through tailscale serve (from the PC itself), the forwarded address tells the devices apart."""
+    with TestClient(main.app, client=("127.0.0.1", 5000), base_url="http://pc.tail1234.ts.net") as proxy:
+        for _ in range(security.MAX_FAILURES):
+            headers = {"X-PrixMalin": "1", "X-Forwarded-For": "100.64.0.7"}
+            assert proxy.post("/api/access", json={"code": wrong_code()}, headers=headers).status_code == 403
+        other = {"X-PrixMalin": "1", "X-Forwarded-For": "100.64.0.8"}
+        assert proxy.post("/api/access", json={"code": wrong_code()}, headers=other).status_code == 403
+
+
+def test_attempt_key():
+    class Req:
+        def __init__(self, peer, forwarded=None):
+            self.client = type("C", (), {"host": peer})()
+            self.headers = {"x-forwarded-for": forwarded} if forwarded else {}
+
+    assert security._attempt_key(Req("192.168.1.50", "1.2.3.4")) == "192.168.1.50"
+    assert security._attempt_key(Req("127.0.0.1", "100.64.0.7, 100.64.0.9")) == "127.0.0.1|100.64.0.9"
+    assert security._attempt_key(Req("127.0.0.1")) == "127.0.0.1"

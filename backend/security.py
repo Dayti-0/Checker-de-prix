@@ -593,7 +593,14 @@ def _is_https(request: Request) -> bool:
 
 
 def _attempt_key(request: Request) -> str:
+    """Counter of the wrong codes: the address of the connection.
+
+    X-Forwarded-For only counts when the connection comes from the PC itself
+    (tailscale serve): a device of the Wi-Fi could change it at each try.
+    """
     peer = request.client.host if request.client else "?"
+    if not is_loopback(peer):
+        return peer
     forwarded = request.headers.get("x-forwarded-for", "").split(",")[-1].strip()
     return f"{peer}|{forwarded}" if forwarded else peer
 
