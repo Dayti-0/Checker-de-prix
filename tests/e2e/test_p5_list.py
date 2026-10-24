@@ -482,3 +482,16 @@ def test_home_card_of_the_list(desktop):
     expect(card).to_contain_text("Ma liste : 5 articles")
     expect(card).to_contain_text("Votre liste a changé depuis la dernière comparaison.")
     expect(card).not_to_contain_text("Panier le moins cher")
+
+
+def test_a_list_answer_cut_short_never_breaks_the_page(desktop):
+    """A page reloaded at once cuts the answer of GET /api/list: the badge of « Ma liste »
+    read ``null.length`` and the page logged an error (seen under load)."""
+    page = desktop
+    page.route(re.compile(r".*/api/list$"), lambda route: route.fulfill(status=200, body='[{"id": 1, "que'))
+    page.goto(page.base)
+    expect(page.get_by_role("searchbox")).to_be_visible()
+    page.unroute(re.compile(r".*/api/list$"))
+    add(page, "farine")
+    page.reload()
+    expect(page.get_by_role("link", name=re.compile("^Ma liste"))).to_contain_text("1")

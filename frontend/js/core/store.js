@@ -61,11 +61,14 @@ export function setBrowser(status) {
 }
 
 export async function loadList() {
+    let list = null;
     try {
-        state.list = await api("/api/list");
+        list = await api("/api/list");
     } catch {
-        state.list = [];
+        // offline or refused: an empty list
     }
+    // An answer cut short (page reloaded at once) gives null, never a list
+    state.list = Array.isArray(list) ? list : [];
     emit("list:changed");
 }
 
