@@ -1,4 +1,4 @@
-// Filters of the search page (B30, B31).
+// Retailers compared on the search page (B30).
 //
 // - Retailers compared (#store-filters, above the views; mounted by the shell
 //   through components/store-filters.js): a fieldset « Enseignes comparées »,
@@ -6,17 +6,13 @@
 //   with ✓, unticked = outlined with « + ». On a phone, one row that scrolls
 //   sideways. The choice is shared by every view and saved on the device
 //   (core/store.js: setEnabled). The last ticked retailer cannot be unticked.
-// - Filters of the results (resultFiltersMarkup): chips Bio, En promo,
-//   Disponible, Marque distributeur, Marque nationale, with the number of
-//   products each one keeps; those that would change nothing are disabled.
 
 import { attr, html, setHtml } from "../../core/html.js";
 import { icon } from "../../core/icons.js";
 import { setEnabled, state } from "../../core/store.js";
 import { notify } from "../../core/ui.js";
-import { RESULT_FILTERS } from "./rank.js";
 
-export const MONOGRAMS = { aldi: "A", lidl: "L", carrefour: "C", intermarche: "I", coursesu: "U" };
+export const MONOGRAMS = { aldi: "A", lidl: "L", carrefour: "C", intermarche: "I", coursesu: "U", leclerc: "E" };
 
 export function monogram(key, label = key) {
     return MONOGRAMS[key] || String(label).charAt(0).toUpperCase();
@@ -76,25 +72,4 @@ export function mountStoreFilters(el) {
         if (row) edges(row);
     });
     return { refresh: () => renderStores(el) };
-}
-
-// Chips of the result filters. counts: filterCounts() of the relevant
-// products, total: their number, active: ids of the active filters. Every
-// chip is always there (the page does not move when the retailers answer); a
-// chip that would change nothing is disabled with aria-disabled: it stays
-// reachable with the keyboard (and the row, that scrolls on a phone, too).
-export function resultFiltersMarkup(counts, total, active) {
-    const on = new Set(active);
-    return html`<div class="result-filters-row" data-key="row" data-patch role="group" aria-label="Filtrer les résultats" data-testid="result-filters">
-        ${RESULT_FILTERS.map((f) => {
-            const useless = !on.has(f.id) && (counts[f.id] === 0 || counts[f.id] === total);
-            return html`<button class="filter-chip${on.has(f.id) ? " on" : ""}" type="button" data-key="${f.id}" data-action="filter" data-filter="${f.id}" data-focus="filter:${f.id}" aria-pressed="${on.has(f.id) ? "true" : "false"}" aria-disabled="${useless ? "true" : "false"}">
-                ${icon(on.has(f.id) ? "check" : "plus")}<span>${f.label}</span><span class="chip-count">${counts[f.id]}</span>
-            </button>`;
-        })}
-        ${
-            on.size > 0 &&
-            html`<button class="filter-clear" type="button" data-key="clear" data-action="clear-filters" data-focus="clear-filters">${icon("x")}Retirer les filtres</button>`
-        }
-    </div>`;
 }

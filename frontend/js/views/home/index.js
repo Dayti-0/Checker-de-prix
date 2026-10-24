@@ -25,7 +25,7 @@ export function render(el) {
         el,
         html`
         <div id="welcome" class="welcome">
-            <p>Tapez un produit pour comparer ses prix chez <strong>Aldi</strong>, <strong>Lidl</strong>, <strong>Carrefour</strong>, <strong>Intermarché</strong> et <strong>Courses U</strong>.</p>
+            <p>Tapez un produit pour comparer ses prix chez <strong>Aldi</strong>, <strong>Lidl</strong>, <strong>Carrefour</strong>, <strong>Intermarché</strong>, <strong>Courses U</strong> et <strong>E.Leclerc</strong>.</p>
         </div>`,
     );
     const welcome = el.querySelector("#welcome");

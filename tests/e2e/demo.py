@@ -22,7 +22,7 @@ from tests.e2e import fake  # noqa: E402
 from tests.e2e.server import make_app, use_data_dir  # noqa: E402
 
 # Order in which the retailers answer with --fixed
-FIXED_DELAYS = {"aldi": 0.4, "intermarche": 0.8, "lidl": 1.2, "coursesu": 1.6, "carrefour": 2.0}
+FIXED_DELAYS = {"aldi": 0.4, "intermarche": 0.8, "leclerc": 1.0, "lidl": 1.2, "coursesu": 1.6, "carrefour": 2.0}
 
 
 def main(argv=None) -> None:

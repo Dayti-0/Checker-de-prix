@@ -40,6 +40,9 @@
     --intermarche-text: #3a2a00;
     --coursesu: #e2001a;
     --coursesu-text: #ffffff;
+    /* E.Leclerc: orange with dark text (contrast 6.6:1), apart from the blues, the yellow and the red */
+    --leclerc: #ee7f00;
+    --leclerc-text: #1f1300;
 
     /* Text sizes (rem: they follow the A− / A+ buttons through --ui-scale) */
     --text-80: .8rem;

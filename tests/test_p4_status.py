@@ -252,9 +252,9 @@ def test_status_api(client, monkeypatch):
         assert client.get(f"/api/search/lidl?q={query}").status_code == 200
     write_snapshot("lidl.html")
     write_snapshot("lidl-blocked.html")
-    write_snapshot("aldi-x.txt")  # not a snapshot
+    write_snapshot("aldi-x.exe")  # not a snapshot
     states = {h["key"]: h for h in client.get("/api/status/retailers").json()}
-    assert list(states) == ["aldi", "lidl", "carrefour", "intermarche", "coursesu"]
+    assert list(states) == ["aldi", "lidl", "carrefour", "intermarche", "coursesu", "leclerc"]
     lidl = states["lidl"]
     assert (lidl["state"], lidl["state_label"], lidl["consecutive_failures"]) == ("broken", "Probablement cassé", 3)
     assert lidl["last_error"] == "Aucun produit trouvé chez Lidl."
@@ -262,6 +262,7 @@ def test_status_api(client, monkeypatch):
     assert states["aldi"]["state"] == "unknown" and states["aldi"]["snapshots"] == []
     assert states["intermarche"]["state"] == "store_required"
     assert states["coursesu"]["needs_store"] and not states["carrefour"]["national"]
+    assert states["leclerc"]["needs_store"] and states["leclerc"]["state"] == "store_required"
 
 
 def test_snapshot_api(client):
@@ -278,7 +279,13 @@ def test_snapshot_api(client):
 
 
 def test_snapshot_names():
-    for name in ("aldi.html", "coursesu-stores.html", "intermarche-20261009-101500-error.json", "lidl-blocked.png"):
+    for name in (
+        "aldi.html",
+        "coursesu-stores.html",
+        "intermarche-20261009-101500-error.json",
+        "lidl-blocked.png",
+        "lidl-20261016-213000-error.txt",  # raw answer kept by save_debug_text
+    ):
         assert health.SNAPSHOT_NAME.match(name), name
     for name in ("aldi.exe", "../aldi.html", "aldi/../x.html", "carrefourx.html", "x-aldi.html", "aldi-.html"):
         assert not health.SNAPSHOT_NAME.match(name), name
@@ -339,6 +346,7 @@ def test_diagnostic_zip(client, monkeypatch):
         "carrefour",
         "intermarche",
         "coursesu",
+        "leclerc",
     }
 
 

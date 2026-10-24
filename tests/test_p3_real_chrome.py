@@ -463,7 +463,7 @@ def test_launch_flags_of_the_window(itm):
     if not cmdline.exists():
         pytest.skip("no /proc on this system")
     args = cmdline.read_bytes().decode().split("\0")[1:-1]
-    port = int((real.profile_dir / PORT_FILE).read_text())
+    port = parse_port_file((real.profile_dir / PORT_FILE).read_text())
     assert args == [
         "--remote-debugging-address=127.0.0.1",
         f"--remote-debugging-port={port}",

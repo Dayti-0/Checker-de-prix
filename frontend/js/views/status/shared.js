@@ -1,16 +1,19 @@
 // Shared by the views of P4 (Réglages › Enseignes, État des enseignes,
 // assistant, home cards): state of the retailers, state pills, store lists and
-// the automatic choice of the nearest Courses U store.
+// the automatic choice of the nearest store (Courses U, E.Leclerc: the
+// retailers whose `auto_store` is true).
 //
 //   await loadHealth()            GET /api/status/retailers → health.list, "status:changed"
 //   setupState(retailer)          { kind: "ready" | "store" | "check", label }
 //   statePill(kind, label)        pill with an icon and a text (never colour only)
-//   await autoPickCoursesU()      POST /api/retailers/coursesu/store/auto, "coursesu:auto"
+//   await autoPickStore(key)      POST /api/retailers/{key}/store/auto, "{key}:auto"
+//   await autoPickCoursesU()      the same for Courses U
 //   distanceText(store)           « ≈ 2 km », « même commune »
 //   await openSite(key)           « Ouvrir le site » (confirmation from a phone)
 //   watchStores()                 at startup (features/setup-banner.js): automatic
 //                                 choice once the settings are loaded, store chosen
-//                                 on the Courses U site read back after « J'ai terminé »
+//                                 on the site read back after « J'ai terminé »
+//   ofLabel(label), andList(words) « d'E.Leclerc », « Aldi, Lidl et Carrefour »
 
 import { api } from "../../core/api.js";
 import { html } from "../../core/html.js";
@@ -129,64 +132,108 @@ export function distanceText(store, location = state.settings && state.settings.
     return `≈ ${Math.max(1, Math.round(store.distance_km))} km`;
 }
 
-// Courses U: beyond this distance the nearest store is reported as far
+// Courses U, E.Leclerc: beyond this distance the nearest store is reported as far
 export const FAR_KM = 40;
 
-// ---------------------------------------------------------------- automatic choice (Courses U)
+// « d'Intermarché », « d'E.Leclerc », « de Courses U »
+export function ofLabel(label) {
+    return /^[aeiouyàâéèêîôû]/i.test(label) ? `d'${label}` : `de ${label}`;
+}
 
-// status: "idle" | "loading" | "done"; result: answer of /store/auto
-export const autoPick = { status: "idle", result: null };
+// « Aldi », « Aldi et Lidl », « Aldi, Lidl et Carrefour »
+export function andList(words) {
+    if (words.length < 2) return words.join("");
+    return `${words.slice(0, -1).join(", ")} et ${words[words.length - 1]}`;
+}
 
+// What a retailer calls its stores: « drive » for E.Leclerc Drive
+export function storeNoun(key) {
+    return key === "leclerc" ? "drive" : "magasin";
+}
+
+// ---------------------------------------------------------------- automatic choice (Courses U, E.Leclerc)
+
+// Retailers whose nearest store PrixMalin chooses by itself (RetailerInfo.auto_store)
+export function autoStoreKeys(retailers = state.retailers) {
+    const keys = (retailers || []).filter((r) => r.auto_store).map((r) => r.key);
+    return keys.length || (retailers || []).length ? keys : ["coursesu", "leclerc"];
+}
+
+// key → { status: "idle" | "loading" | "done", result: answer of /store/auto, queued }
+const autoPicks = {};
+
+export function autoPickOf(key) {
+    if (!autoPicks[key]) autoPicks[key] = { status: "idle", result: null, queued: false };
+    return autoPicks[key];
+}
+
+// The automatic choice of Courses U (kept for the callers of P4)
+export const autoPick = autoPickOf("coursesu");
+
+function labelOf(key) {
+    const r = (state.retailers || []).find((x) => x.key === key);
+    return r ? r.label : key;
+}
+
+// « Magasin Courses U », « Drive E.Leclerc »
+export function storeTitle(key) {
+    const noun = storeNoun(key);
+    return `${noun[0].toUpperCase()}${noun.slice(1)} ${labelOf(key)}`;
+}
+
+// Chooses the nearest store of `key` unless the user chose one himself.
+// initial: when a page loads (only once per postal code, see the backend).
 // A location saved while a choice runs (town chosen right after the postal
-// code): the choice is made again once the running one ends
-let queued = false;
-
-// Chooses the nearest Courses U store unless the user chose one himself.
-// initial: when a page loads (only once per postal code, see the backend)
-export async function autoPickCoursesU({ refresh = false, initial = false } = {}) {
-    if (autoPick.status === "loading") {
-        if (!initial) queued = true;
-        return autoPick.result;
+// code): the choice is made again once the running one ends.
+export async function autoPickStore(key, { refresh = false, initial = false } = {}) {
+    const pick = autoPickOf(key);
+    if (pick.status === "loading") {
+        if (!initial) pick.queued = true;
+        return pick.result;
     }
-    autoPick.status = "loading";
-    emit("coursesu:auto");
+    pick.status = "loading";
+    emit(`${key}:auto`);
     const query = [refresh && "refresh=true", initial && "initial=true"].filter(Boolean).join("&");
     try {
-        autoPick.result = await api(`/api/retailers/coursesu/store/auto${query ? `?${query}` : ""}`, {
+        pick.result = await api(`/api/retailers/${key}/store/auto${query ? `?${query}` : ""}`, {
             method: "POST",
             timeout: 120000,
         });
-        if (autoPick.result.status === "chosen") {
+        if (pick.result.status === "chosen") {
             await loadSettings();
             emit("results:stale");
-            const store = autoPick.result.store;
-            announce(`Magasin Courses U choisi automatiquement : ${store.name}`);
+            announce(`${storeTitle(key)} choisi automatiquement : ${pick.result.store.name}`);
         }
     } catch (err) {
-        autoPick.result = { status: "error", message: err.message };
+        pick.result = { status: "error", message: err.message };
     } finally {
-        autoPick.status = "done";
-        emit("coursesu:auto");
+        pick.status = "done";
+        emit(`${key}:auto`);
     }
-    if (queued) {
-        queued = false;
-        if (needsAutoPick()) return autoPickCoursesU();
+    if (pick.queued) {
+        pick.queued = false;
+        if (needsAutoPick(key)) return autoPickStore(key);
     }
-    return autoPick.result;
+    return pick.result;
 }
 
-// A new postal code: the nearest Courses U store is chosen again, unless the
-// user chose his own
-export function needsAutoPick() {
+export function autoPickCoursesU(options = {}) {
+    return autoPickStore("coursesu", options);
+}
+
+// A new postal code: the nearest store is chosen again, unless the user chose his own
+export function needsAutoPick(key = "coursesu") {
     const settings = state.settings;
     if (!settings || !settings.location) return false;
-    const chosen = settings.stores && settings.stores.coursesu;
+    const chosen = settings.stores && settings.stores[key];
     return !chosen || chosen.auto;
 }
 
 on("location:changed", () => {
-    autoPick.result = null;
-    if (needsAutoPick()) autoPickCoursesU();
+    for (const key of autoStoreKeys()) {
+        autoPickOf(key).result = null;
+        if (needsAutoPick(key)) autoPickStore(key);
+    }
 });
 
 // The state of the sites may change when a store is chosen or a check passed
@@ -201,15 +248,18 @@ let watching = false;
 export function watchStores() {
     if (watching) return;
     watching = true;
-    // Settings loaded with a postal code but no Courses U store (first start
-    // after an update, store not found the last time): choose it now
+    // Settings loaded with a postal code but no store (first start after an
+    // update, store not found the last time): choose it now
     on("settings:changed", () => {
         const settings = state.settings;
-        if (autoPick.status !== "idle" || !settings || !settings.location) return;
-        if (settings.stores && settings.stores.coursesu) return;
-        autoPickCoursesU({ initial: true });
+        if (!settings || !settings.location) return;
+        for (const key of autoStoreKeys()) {
+            if (autoPickOf(key).status !== "idle") continue;
+            if (settings.stores && settings.stores[key]) continue;
+            autoPickStore(key, { initial: true });
+        }
     });
-    // « J'ai terminé »: the store chosen on the Courses U site is saved
+    // « J'ai terminé »: the store chosen on the site is saved
     let setupMode = Boolean(state.browser && state.browser.setup_mode);
     on("browser:changed", () => {
         const now = Boolean(state.browser && state.browser.setup_mode);
@@ -218,11 +268,12 @@ export function watchStores() {
     });
 }
 
-async function afterSetup() {
-    loadHealth();
+// Reads back the store chosen on the site of `key` (nothing when the site was
+// not opened with « Ouvrir le site », see the backend)
+async function readBack(key) {
     let result = null;
     try {
-        result = await api("/api/retailers/coursesu/store/from-site?opened_only=true", {
+        result = await api(`/api/retailers/${key}/store/from-site?opened_only=true`, {
             method: "POST",
             timeout: 90000,
         });
@@ -232,15 +283,20 @@ async function afterSetup() {
     if (result && result.status === "chosen") {
         await loadSettings();
         emit("results:stale");
-        const message = `Magasin Courses U : ${result.store.name} (choisi sur le site)`;
+        const message = `${storeTitle(key)} : ${result.store.name} (choisi sur le site)`;
         notify(message);
         announce(message);
         return;
     }
     const settings = state.settings;
-    if (settings && settings.location && !(settings.stores && settings.stores.coursesu)) {
-        autoPickCoursesU({ initial: true });
+    if (settings && settings.location && !(settings.stores && settings.stores[key])) {
+        autoPickStore(key, { initial: true });
     }
+}
+
+async function afterSetup() {
+    loadHealth();
+    await Promise.all(autoStoreKeys().map(readBack));
 }
 
 // ---------------------------------------------------------------- « Ouvrir le site »

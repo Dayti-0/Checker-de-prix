@@ -126,33 +126,6 @@ export function bestPerUnit(products, unit, order = []) {
     return list.length ? rank(list, { sort: "unit", unit, order })[0] : null;
 }
 
-// ---------------------------------------------------------------- result filters (B31)
-
-export const RESULT_FILTERS = [
-    { id: "bio", label: "Bio", test: (p) => Boolean(p.bio) },
-    { id: "promo", label: "En promo", test: hasPromo },
-    { id: "available", label: "Disponible", test: isAvailable },
-    { id: "store_brand", label: "Marque distributeur", test: (p) => p.store_brand === true, group: "brand" },
-    { id: "national", label: "Marque nationale", test: (p) => p.store_brand === false, group: "brand" },
-];
-
-// Products that pass every active filter (the two brand filters: either of them)
-export function applyFilters(products, active = []) {
-    const ids = new Set(active);
-    const chosen = RESULT_FILTERS.filter((f) => ids.has(f.id));
-    if (!chosen.length) return [...products];
-    const brand = chosen.filter((f) => f.group === "brand");
-    const others = chosen.filter((f) => f.group !== "brand");
-    return products.filter(
-        (p) => others.every((f) => f.test(p)) && (!brand.length || brand.some((f) => f.test(p))),
-    );
-}
-
-// Number of products that each filter would keep: { bio: 2, promo: 1, ... }
-export function filterCounts(products) {
-    return Object.fromEntries(RESULT_FILTERS.map((f) => [f.id, products.filter(f.test).length]));
-}
-
 // ---------------------------------------------------------------- gaps and summary (B26)
 
 // Gap of `value` to the best one: { abs: 0.1, pct: 13 }, null for the best itself or without values
@@ -182,16 +155,16 @@ export function retailerState(result) {
 
 // Summary of a search.
 //   results: { key: StoreResult | {status: "loading"} }; keys: retailers shown,
-//   in display order; sort; filters: active result filters.
+//   in display order; sort.
 // Returns { unit, cheapest, bestUnit, best, headline, lines, savings, done, total }:
 //   lines: one per retailer { key, state, product, value, gap, bar } where
 //   product is its best relevant offer for the criterion of the sort and bar
 //   the width (0 to 100) of its proportional bar.
-export function summarize(results, keys, { sort = "price", filters = [] } = {}) {
+export function summarize(results, keys, { sort = "price" } = {}) {
     const products = [];
     for (const key of keys) {
         const result = results[key];
-        if (result && result.status === "ok") products.push(...applyFilters(relevantOf(result), filters));
+        if (result && result.status === "ok") products.push(...relevantOf(result));
     }
     const unit = dominantUnit(products);
     const cheap = cheapest(products, keys);
@@ -203,7 +176,7 @@ export function summarize(results, keys, { sort = "price", filters = [] } = {}) 
     const lines = keys.map((key) => {
         const result = results[key];
         const state = retailerState(result);
-        const own = state === "ok" ? applyFilters(relevantOf(result), filters) : [];
+        const own = state === "ok" ? relevantOf(result) : [];
         const product = byUnit ? bestPerUnit(own, unit, keys) : cheapest(own, keys);
         const value = product ? valueOf(product, criterion, unit) : null;
         // Products found, but none priced in the unit compared

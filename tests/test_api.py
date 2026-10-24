@@ -70,7 +70,7 @@ def test_search_endpoints(client):
 
 def test_retailers_and_store_selection(client):
     retailers = client.get("/api/retailers").json()
-    assert [r["key"] for r in retailers] == ["aldi", "lidl", "carrefour", "intermarche", "coursesu"]
+    assert [r["key"] for r in retailers] == ["aldi", "lidl", "carrefour", "intermarche", "coursesu", "leclerc"]
 
     bad = client.put("/api/retailers/coursesu/store", json={"url": "https://example.com"})
     assert bad.status_code == 400

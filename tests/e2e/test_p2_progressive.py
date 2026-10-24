@@ -71,17 +71,20 @@ def test_busy_state_and_announcements(desktop, delays):
     search(page, "farine", wait=False)
     expect(page.locator("#results")).to_have_attribute("aria-busy", "true")
     live = page.locator("#live-region")
-    expect(live).to_have_text("Recherche de « farine » dans 5 enseignes…")
+    expect(live).to_have_text("Recherche de « farine » dans 6 enseignes…")
     expect(page.locator(".summary-progress")).to_contain_text("enseignes ont répondu")
     wait_done(page)
-    expect(live).to_have_text("Terminé : le moins cher est Lidl, 0,75 €, Farine de blé T45. 2 enseignes indisponibles.")
-    expect(page.locator(".summary-foot")).to_have_text("5 enseignes comparées · 2 indisponibles")
+    expect(live).to_have_text("Terminé : le moins cher est Lidl, 0,75 €, Farine de blé T45. 3 enseignes indisponibles.")
+    expect(page.locator(".summary-foot")).to_have_text("6 enseignes comparées · 3 indisponibles")
     expect(page.locator("#updated")).to_have_text("Mis à jour à l'instant")
 
 
 def test_usual_time_then_slow_retailer_can_be_ignored(desktop, delays):
     page = desktop
-    delays.update({"carrefour": 6})
+    # Real seconds on the server, while the page's clock is moved forward: far
+    # longer than the steps below even on a busy PC (Carrefour must still be
+    # searching when « Ignorer » is clicked; the request is dropped with the page)
+    delays.update({"carrefour": 60})
     page.clock.install()
     page.goto(page.base)
     page.evaluate("localStorage.setItem('prixmalin.durations', JSON.stringify({carrefour: [8000, 7000, 9000]}))")
@@ -270,7 +273,7 @@ def test_a_retailer_unticked_while_searching_is_no_longer_awaited(desktop, delay
     page.locator(".store-toggle", has_text="Carrefour").click()
     wait_done(page)
     expect(page.locator("#live-region")).to_have_text(
-        "Terminé : le moins cher est Lidl, 0,75 €, Farine de blé T45. 2 enseignes indisponibles."
+        "Terminé : le moins cher est Lidl, 0,75 €, Farine de blé T45. 3 enseignes indisponibles."
     )
     expect(page.locator("[data-summary=carrefour]")).to_have_count(0)
     assert aborted, "the request of Carrefour should be cancelled"
@@ -282,7 +285,7 @@ def test_a_retailer_unticked_while_searching_is_no_longer_awaited(desktop, delay
 
 @pytest.mark.parametrize("viewport", ["mobile", "desktop"])
 def test_accessible_while_the_retailers_answer(request, viewport, delays):
-    """Filters shown but useless while searching: reachable with the keyboard (the row scrolls on a phone)."""
+    """No accessibility problem while the retailers answer (summary waiting, retailers row scrolling on a phone)."""
     from tests.e2e.axe import assert_accessible
 
     page = request.getfixturevalue(viewport)
@@ -290,9 +293,6 @@ def test_accessible_while_the_retailers_answer(request, viewport, delays):
     page.goto(page.base)
     search(page, "farine", wait=False)
     expect(page.locator("#results")).to_have_attribute("aria-busy", "true")
-    chips = page.get_by_test_id("result-filters").get_by_role("button")
-    expect(chips).to_have_count(5)
-    expect(chips.first).to_be_disabled()  # aria-disabled: still focusable
     assert_accessible(page, "recherche en cours")
     wait_done(page)
-    expect(page.get_by_test_id("result-filters").get_by_role("button", name=re.compile("^Bio"))).to_be_enabled()
+    assert_accessible(page, "recherche terminée")

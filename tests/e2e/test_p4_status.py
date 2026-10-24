@@ -34,7 +34,7 @@ def test_status_page(desktop):
         page.goto(f"{page.base}/#/etat")
         expect(page).to_have_title("État des enseignes · PrixMalin")
         cards = page.locator(".status-card")
-        expect(cards).to_have_count(5)
+        expect(cards).to_have_count(6)
 
         aldi = page.locator(".status-card[data-retailer=aldi]")
         expect(aldi).to_contain_text("Prêt")
@@ -80,7 +80,7 @@ def test_status_page_in_dark_mode_and_on_a_phone(dark, mobile):
         page.goto(page.base)
         search(page, "farine")
         page.goto(f"{page.base}/#/etat")
-        expect(page.locator(".status-card")).to_have_count(5)
+        expect(page.locator(".status-card")).to_have_count(6)
         assert_accessible(page, "état des enseignes")
         overflow = page.evaluate(OVERFLOW)
         assert overflow <= 0
@@ -159,7 +159,7 @@ def test_home_card_of_the_state(desktop):
     page.reload()
     card = page.locator(".home-status")
     expect(card).to_contain_text("Courses U demande une vérification anti-robot depuis 3 recherches.")
-    expect(card.locator(".pill")).to_have_count(5)
+    expect(card.locator(".pill")).to_have_count(6)
     assert_accessible(page, "accueil avec l'état des enseignes")
     card.get_by_role("link", name="Voir l'état des enseignes").click()
     expect(page).to_have_url(re.compile(r"#/etat$"))

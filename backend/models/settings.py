@@ -6,6 +6,7 @@ from pydantic import BaseModel, field_validator
 from pydantic_core import PydanticCustomError
 
 __all__ = [
+    "AutoPickPrefs",
     "AutoPickResult",
     "CoursesUPrefs",
     "Location",
@@ -25,7 +26,7 @@ __all__ = [
 
 
 def valid_store_id(value: str | None) -> bool:
-    """Store numbers of Intermarché (pdvRef) and Courses U: 2 to 8 digits."""
+    """Store numbers of Intermarché (pdvRef), Courses U and E.Leclerc (noPL, 6 digits): 2 to 8 digits."""
     return value is not None and value.isascii() and value.isdigit() and 2 <= len(value) <= 8
 
 
@@ -141,8 +142,9 @@ class StoreOption(BaseModel):
     name: str
     address: str | None = None
     distance_km: float | None = None
-    # Courses U: page of the store (https://www.coursesu.com/drive-…), services
-    # offered (« Drive », « Livraison », « Retrait ») and where it is
+    # Courses U, E.Leclerc: page of the store (https://www.coursesu.com/drive-…,
+    # https://fd12-courses.leclercdrive.fr/magasin-…), services offered
+    # (« Drive », « Livraison », « Retrait », « Retrait piéton ») and where it is
     url: str | None = None
     services: list[str] = []
     postal_code: str | None = None
@@ -160,12 +162,17 @@ class RetailerInfo(BaseModel):
     store: StoreSelection | None = None
     # Same prices everywhere in France (Aldi, Lidl)
     national: bool = False
-    # PrixMalin can list the stores near the user (Intermarché, Courses U)
+    # PrixMalin can list the stores near the user (Intermarché, Courses U, E.Leclerc)
     finds_stores: bool = False
+    # PrixMalin chooses the nearest store by itself (Courses U, E.Leclerc):
+    # POST /api/retailers/{key}/store/auto and /store/from-site
+    auto_store: bool = False
+    # Address of the page of a store, shown as example of the field « collez l'adresse de sa page »
+    store_url_example: str | None = None
 
 
 class AutoPickResult(BaseModel):
-    """Outcome of ``POST /api/retailers/coursesu/store/auto`` (always HTTP 200)."""
+    """Outcome of ``POST /api/retailers/{coursesu|leclerc}/store/auto`` and ``/store/from-site`` (always HTTP 200)."""
 
     # chosen: nearest store saved; kept: a store chosen by the user stays;
     # no_location: no postal code (or no town) yet; none: no store found
@@ -176,11 +183,15 @@ class AutoPickResult(BaseModel):
 
 
 class CoursesUPrefs(BaseModel):
-    """Preferences ``p4.coursesu`` (backend/services/prefs.py)."""
+    """Preferences of the automatic choice of a store: ``p4.coursesu``, ``p8.leclerc``."""
 
     # Postal code for which the nearest store was chosen automatically (or the
     # store removed by the user): no automatic choice at startup for it again
     auto_done_for: str | None = None
+
+
+# Same preferences for every retailer whose store is chosen automatically
+AutoPickPrefs = CoursesUPrefs
 
 
 class OnboardingState(BaseModel):

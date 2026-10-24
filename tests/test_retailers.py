@@ -4,9 +4,9 @@ from backend.scrapers.parsing import finalize_product
 from tests import fixtures
 
 
-def test_registry_contains_the_five_retailers():
-    assert list(SCRAPERS) == ["aldi", "lidl", "carrefour", "intermarche", "coursesu"]
-    assert {k for k, s in SCRAPERS.items() if s.needs_store} == {"intermarche", "coursesu"}
+def test_registry_contains_the_six_retailers():
+    assert list(SCRAPERS) == ["aldi", "lidl", "carrefour", "intermarche", "coursesu", "leclerc"]
+    assert {k for k, s in SCRAPERS.items() if s.needs_store} == {"intermarche", "coursesu", "leclerc"}
 
 
 def test_carrefour_json():

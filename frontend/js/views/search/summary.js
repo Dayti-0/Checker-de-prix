@@ -96,7 +96,6 @@ function lineBody(line, view) {
         let reason = "Aucun produit";
         if (line.state === "error") reason = failureLabel(result, view.now);
         else if (line.noUnit) reason = `Pas de prix au ${view.unit}`;
-        else if (view.filtered) reason = "Aucun produit avec ces filtres";
         return html`<span class="line-price none" aria-hidden="true">—</span><span class="line-reason">${icon(line.state === "error" ? "triangle-alert" : "info")}${reason}</span>`;
     }
     const p = line.product;
@@ -109,7 +108,7 @@ function lineBody(line, view) {
         <span class="line-name">${p.name}${fresh && html` <span class="line-fresh${result.stale ? " stale" : ""}">· ${fresh}</span>`}</span>`;
 }
 
-// Markup of #summary. view: { results, keys, label(key), usual(key), now, filtered,
+// Markup of #summary. view: { results, keys, label(key), usual(key), now,
 // done (all answered), unavailable (number) } + summarize() → summary
 export function summaryMarkup(summary, view) {
     const ctx = { ...view, unit: summary.unit, criterion: summary.criterion };

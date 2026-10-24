@@ -6,7 +6,9 @@
   a word with the query. Aldi and Lidl answer; Carrefour has a promotion, an
   organic product, EANs and an unavailable product; Intermarché asks for a store
   (``store_required``) until one is chosen; Courses U shows an anti-robot check
-  (``blocked``) until the user went through « Ouvrir le site » then « J'ai terminé ».
+  (``blocked``) until the user went through « Ouvrir le site » then « J'ai
+  terminé »; E.Leclerc asks for a drive (``store_required``) until one is chosen
+  (its drives: tests/e2e/catalog_p8.py).
 - ``backend.services.settings.geocode``: a few postal codes (see ``TOWNS``).
 - the PrixMalin browser: the Intermarché store finder, « Ouvrir le site »,
   « J'ai terminé » and the visible window switch.
@@ -149,6 +151,30 @@ BASE_CATALOG: dict[str, list[dict]] = {
         },
         {"name": "Huile de tournesol U", "brand": "U", "price": 1.99, "quantity_label": "1 L"},
     ],
+    # Never the cheapest of the searches of the other tests; the tuna in
+    # sunflower oil is cheaper than the oils but no oil (relevance, P8)
+    "leclerc": [
+        {
+            "name": "Farine de blé T45",
+            "brand": "Marque Repère",
+            "price": 0.82,
+            "unit_price_label": "0,82 € / kg",
+            "quantity_label": "1kg",
+        },
+        {
+            "name": "Huile de tournesol",
+            "brand": "Marque Repère",
+            "price": 1.92,
+            "unit_price_label": "1,92 € / l",
+            "quantity_label": "1L",
+        },
+        {
+            "name": "Thon albacore à l'huile de tournesol",
+            "brand": "Marque Repère",
+            "price": 0.89,
+            "quantity_label": "140g",
+        },
+    ],
 }
 
 INTERMARCHE_STORES = [
@@ -182,6 +208,7 @@ BLOCKED_MESSAGE = (
     "(Réglages → Ouvrir le site) et validez-la une fois."
 )
 STORE_MESSAGE = "Choisissez votre magasin Intermarché dans les réglages pour voir les prix."
+LECLERC_STORE_MESSAGE = "Choisissez votre drive E.Leclerc dans les réglages pour voir les prix."
 
 # Seconds before each retailer answers: a number or a (min, max) range
 DELAYS: dict[str, float | tuple[float, float]] = {}
@@ -252,6 +279,8 @@ async def fake_scrape(scraper, query, store):
     await _wait(scraper.key)
     if scraper.key == "intermarche" and store is None:
         raise StoreRequiredError(STORE_MESSAGE)
+    if scraper.key == "leclerc" and store is None:
+        raise StoreRequiredError(LECLERC_STORE_MESSAGE)
     if scraper.key == "coursesu" and "coursesu" not in state.unblocked:
         raise BlockedError(BLOCKED_MESSAGE)
     state.scrapes.append((scraper.key, query))

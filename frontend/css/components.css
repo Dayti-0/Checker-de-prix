@@ -62,6 +62,7 @@
 .carrefour-bg { background: var(--carrefour); color: var(--carrefour-text); }
 .intermarche-bg { background: var(--intermarche); color: var(--intermarche-text); }
 .coursesu-bg { background: var(--coursesu); color: var(--coursesu-text); }
+.leclerc-bg { background: var(--leclerc); color: var(--leclerc-text); }
 
 /* --- Retailer filters (js/components/store-filters.js) --- */
 

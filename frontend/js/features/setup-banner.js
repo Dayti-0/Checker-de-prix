@@ -9,7 +9,7 @@
 //   ([data-setup="<key>"]) ask for a confirmation first (the views of P4 use
 //   openSite() of views/status/shared.js);
 // - on a phone « J'ai terminé » stays at the bottom of the screen (css/stores.css);
-// - starts the watch of the stores (automatic choice of the Courses U store,
+// - starts the watch of the stores (automatic choice of the Courses U store and E.Leclerc drive,
 //   store chosen on the site read back after « J'ai terminé ») and opens the
 //   first-launch assistant (#/bienvenue) when nothing is set yet.
 

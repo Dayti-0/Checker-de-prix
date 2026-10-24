@@ -6,7 +6,7 @@ import zlib
 
 from playwright.sync_api import expect
 
-STORES = ["aldi", "lidl", "carrefour", "intermarche", "coursesu"]
+STORES = ["aldi", "lidl", "carrefour", "intermarche", "coursesu", "leclerc"]
 SUNFLOWER_FOOD = ["Thon", "Sardines", "Mayonnaise", "Chips"]
 
 

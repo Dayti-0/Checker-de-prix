@@ -72,7 +72,7 @@ export function mountLocationForm(el, { idPrefix = "location", onSaved = null } 
             ? loc.lat != null
                 ? `Localisation : ${loc.city || loc.postal_code}`
                 : `Code postal ${loc.postal_code} enregistré, commune introuvable pour l'instant : la recherche des magasins proches ne marchera pas.`
-            : "Sert à trouver vos magasins Intermarché et Courses U les plus proches.";
+            : "Sert à trouver vos magasins Intermarché, Courses U et E.Leclerc les plus proches.";
         renderCommunes();
     }
 

@@ -32,7 +32,8 @@ jobs:
 
   test:
     name: Tests (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    # Not ubuntu-latest: Playwright 1.56 installs no Chromium on Ubuntu 26.04 (October 2026)
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       fail-fast: false

@@ -87,14 +87,7 @@ export function unavailableBar(items, now = Date.now()) {
 }
 
 // « Aucun produit pour « chocolat noir » » with shorter searches, tips and « Ajouter quand même »
-export function noResults(query, { filtered = false } = {}) {
-    if (filtered) {
-        return html`<section class="no-results" data-key="none" data-testid="no-results" aria-labelledby="no-results-title">
-            <h2 id="no-results-title">Aucun produit avec ces filtres</h2>
-            <p>Les produits trouvés pour « ${query} » ne correspondent pas aux filtres choisis.</p>
-            <button class="btn-primary" type="button" data-action="clear-filters" data-focus="show-all">Afficher tous les produits</button>
-        </section>`;
-    }
+export function noResults(query) {
     const shorter = shorterQueries(query);
     return html`<section class="no-results" data-key="none" data-testid="no-results" aria-labelledby="no-results-title">
         <h2 id="no-results-title">Aucun produit pour « ${query} »</h2>

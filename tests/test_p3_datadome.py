@@ -26,6 +26,20 @@ BLOCK_URL = fixtures.DATADOME_BLOCK_JSON["url"]
         (CAPTCHA_URL, "Vous avez été bloqué(e).", "hard_block"),
         (CAPTCHA_URL, "You have been blocked", "hard_block"),
         (CAPTCHA_URL, "Faites glisser vers la droite pour compléter le puzzle", "captcha"),
+        # The slider captcha and its footer, shared with the block page: still a captcha
+        (
+            CAPTCHA_URL,
+            "Verification Required. Slide right to complete the puzzle. Why is this step needed? "
+            "We detected unusual activity from your device or network.",
+            "captcha",
+        ),
+        (
+            CAPTCHA_URL,
+            "Vérification requise. Faites glisser vers la droite pour compléter le puzzle. "
+            "Nous avons détecté une activité inhabituelle provenant de votre appareil.",
+            "captcha",
+        ),
+        (None, "We detected unusual activity from your device or network.", None),
         ("https://www.intermarche.com/", "", None),
         (None, '{"produits": []}', None),
         (None, "<html>Forbidden</html>", None),
@@ -161,10 +175,11 @@ def test_kill_switch_goes_back_to_the_shared_browser(tmp_path, monkeypatch):
     from backend.browser import BrowserManager
 
     manager = BrowserManager(tmp_path / "profile")
-    assert manager.is_dedicated("intermarche")
-    assert [w.store for w in manager.status().windows] == ["intermarche"]
+    assert manager.is_dedicated("intermarche") and manager.is_dedicated("leclerc")
+    assert [w.store for w in manager.status().windows] == ["intermarche", "leclerc"]
+    assert [w.label for w in manager.status().windows] == ["Intermarché", "E.Leclerc"]
     monkeypatch.setattr(config, "REAL_CHROME_STORES", ())
-    assert not manager.is_dedicated("intermarche")
+    assert not manager.is_dedicated("intermarche") and not manager.is_dedicated("leclerc")
     assert manager.status().windows == []
 
 

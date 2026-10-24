@@ -21,12 +21,14 @@ from backend.models import Product, StoreOption, StoreSelection
 from backend.scrapers.base import BaseScraper, BlockedError, HardBlockError, ScraperError, StoreRequiredError
 from backend.scrapers.common import (
     FetchResult,
-    classify_datadome,
+    classify_refusal,
     ensure_origin,
     hard_block_message,
     page_fetch,
+    refused_message,
     save_debug_text,
 )
+from backend.scrapers.common import refusal_record as _refusal_record
 from backend.scrapers.extract import products_from_json
 from backend.scrapers.parsing import clean_text, parse_price
 
@@ -43,6 +45,8 @@ CAPTCHA_MESSAGE = (
     "Intermarché demande une vérification : appuyez sur « Ouvrir le site », validez-la dans la "
     "fenêtre Chrome d'Intermarché ouverte par PrixMalin, puis appuyez sur « J'ai terminé »."
 )
+# A refusal of the API that is not DataDome: nothing to validate in the window
+REFUSED_MESSAGE = refused_message(LABEL)
 
 # Identifiers the site sends with each API call (taken from its own cookies)
 _IDENTIFIERS_JS = r"""
@@ -174,20 +178,33 @@ def check_answer(status: int, text: str) -> None:
     DataDome answers 403 with ``{"url": "https://geo.captcha-delivery.com/..."}``:
     ``t=bv`` (or « Accès temporairement restreint ») is a hard block, any other
     captcha URL a check the user can validate in the window. 429 (too many
-    requests) is treated like a hard block: PrixMalin backs off.
+    requests) is treated like a hard block: PrixMalin backs off. A refusal
+    (401, 403, 405) without any DataDome mark is not a check: there is nothing
+    to validate in the window (seen in October 2026), so it is an error.
     """
     head = (text or "")[:5000]
     if status in (401, 403, 405, 429) or "captcha-delivery.com" in head:
-        kind = classify_datadome(None, head)
-        if kind == "hard_block" or status == 429:
+        kind = classify_refusal(status, head)
+        if kind == "hard_block":
             raise HardBlockError(hard_block_message(LABEL), label=LABEL)
-        raise BlockedError(CAPTCHA_MESSAGE)
+        if kind == "captcha":
+            raise BlockedError(CAPTCHA_MESSAGE)
+        logger.warning("Intermarché refused the search (HTTP %s): %s", status, head[:200])
+        raise ScraperError(REFUSED_MESSAGE)
     if status == 0:
         logger.warning("Intermarché unreachable: %s", head[:200])
         raise ScraperError("Intermarché est injoignable. Vérifiez votre connexion Internet.")
     if not 200 <= status < 300:
         logger.warning("Intermarché answered HTTP %s: %s", status, head[:200])
         raise ScraperError("Intermarché a renvoyé une erreur. Réessayez plus tard.")
+
+
+def refusal_record(result: FetchResult) -> str:
+    """JSON kept in data/debug when the API does not answer 2xx: status, type and start of the body.
+
+    Neither the URL (it holds the store) nor the request headers.
+    """
+    return _refusal_record(result.status, result.content_type, result.text)
 
 
 def parse_stores(data: object) -> list[StoreOption]:
@@ -300,6 +317,9 @@ class IntermarcheScraper(BaseScraper):
         result = await page_fetch(
             page, SEARCH_API.format(pdv=quote(str(pdv), safe="")), "POST", await self._headers(page, "produits"), body
         )
+        if not result.ok:
+            # The exact answer of a refusal: what to fix (in the diagnostic of « État des enseignes »)
+            save_debug_text(self.key, "refused", refusal_record(result))
         self._check(result)
         data = self._json(result)
         if not has_products_list(data):

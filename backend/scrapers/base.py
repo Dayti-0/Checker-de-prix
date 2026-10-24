@@ -48,6 +48,10 @@ class BaseScraper(ABC):
     needs_store: bool = False
     # Shown in the settings panel
     store_hint: str = ""
+    # Message of a search whose site API answered without the product
+    # (last_source "api" although nothing was found), instead of « Aucun produit
+    # trouvé chez … »
+    empty_message: str | None = None
     # Set by each search: "api" (JSON of the site read by the scraper), "html"
     # (selectors of the scraper), "generic" (backend/scrapers/extract.py) or
     # "json-ld"; None when nothing was found

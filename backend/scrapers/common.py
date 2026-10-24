@@ -49,6 +49,10 @@ async ({url, method, headers, body, timeoutMs}) => {
 
 # Time left to an anti-bot challenge to pass by itself (Cloudflare often does)
 CHALLENGE_WAIT_SECONDS = 15
+# Cloudflare says « Vérification réussie » but the page keeps waiting for the
+# site (coursesu.com, October 2026): reloaded once after this time
+PASSED_RELOAD_AFTER_SECONDS = 3
+_CHALLENGE_PASSED = re.compile(r"v[ée]rification r[ée]ussie|verification successful|success!", re.I)
 
 # Debug snapshots kept per retailer (data/debug/{key}-{AAAAMMJJ-HHMMSS}-{status}.html)
 SNAPSHOTS_KEPT = 5
@@ -66,10 +70,27 @@ _CLOUDFLARE_MARKS = (
 )
 
 # DataDome's own block page: no captcha to solve, the connection is refused
+# (« Access blocked. » on E.Leclerc Drive). Not « We detected unusual activity
+# from your device or network »: that footer is on every DataDome page, the
+# slider captcha the user can solve included
 _DATADOME_HARD_TEXT = re.compile(
-    r"acc[eè]s temporairement restreint|temporairement restreint|you have been blocked|vous avez [eé]t[eé] bloqu[eé]",
+    r"acc[eè]s temporairement restreint|temporairement restreint|you have been blocked|vous avez [eé]t[eé] bloqu[eé]"
+    r"|access blocked|access is temporarily restricted",
     re.I,
 )
+# A puzzle to solve (« Slide right to complete the puzzle », « Verification Required »)
+_DATADOME_PUZZLE_TEXT = re.compile(
+    r"slide right|faites glisser|glissez vers la droite|verification required|v[eé]rification requise",
+    re.I,
+)
+
+
+def is_hard_block_text(text: str | None) -> bool:
+    """The text of a page says the connection is refused for a while (DataDome block page).
+
+    A text that also shows a puzzle to solve is a captcha, not a block.
+    """
+    return bool(text) and bool(_DATADOME_HARD_TEXT.search(text)) and not _DATADOME_PUZZLE_TEXT.search(text)
 
 
 def _datadome_url(text: str) -> str | None:
@@ -90,17 +111,23 @@ def classify_datadome(url: str | None, text: str | None = None) -> str | None:
 
     ``url`` is a page, iframe or JSON ``url`` value; ``text`` the text of the
     block page or the body of an API answer (``{"url": ...}``). ``t=bv`` in the
-    captcha URL, or the text « Accès temporairement restreint », is a hard block:
-    the connection is refused and there is nothing to solve. Any other
-    captcha-delivery.com URL is a captcha (or a check that passes by itself).
+    captcha URL, or the text « Accès temporairement restreint » / « Access
+    blocked », is a hard block: the connection is refused and there is nothing
+    to solve. A text showing a puzzle (« Slide right… ») is a captcha whatever
+    else it says; any other captcha-delivery.com URL is a captcha (or a check
+    that passes by itself).
     """
     url = url or _datadome_url(text or "") or ""
-    if text and _DATADOME_HARD_TEXT.search(text[:5000]):
+    head = (text or "")[:5000]
+    if "captcha-delivery.com" in url and "bv" in parse_qs(urlparse(url).query).get("t", []):
         return "hard_block"
-    if "captcha-delivery.com" not in url:
-        return "captcha" if "captcha-delivery.com" in (text or "")[:5000] else None
-    values = parse_qs(urlparse(url).query).get("t", [])
-    return "hard_block" if "bv" in values else "captcha"
+    if is_hard_block_text(head):
+        return "hard_block"
+    if "captcha-delivery.com" in url or "captcha-delivery.com" in head:
+        return "captcha"
+    if _DATADOME_HARD_TEXT.search(head):
+        return "captcha"  # a block text with a puzzle: the puzzle is shown
+    return None
 
 
 def classify_page(
@@ -127,6 +154,60 @@ def classify_page(
     if cloudflare_marks and _CHALLENGE_TITLE.search(title or ""):
         return "cloudflare"
     return None
+
+
+# Statuses of a refusal: DataDome answers them, but so does a firewall or the server
+REFUSAL_STATUSES = (401, 403, 405)
+# The script of a DataDome page (« var dd={'rt':'c','cid':…,'t':'fe',…} »), and its t=bv form
+_DD_SCRIPT = re.compile(r"var\s+dd\s*=\s*\{", re.I)
+_DD_SCRIPT_BLOCK = re.compile(r"var\s+dd\s*=\s*\{[^}]*['\"]t['\"]\s*:\s*['\"]bv['\"]", re.I)
+
+
+def is_datadome_answer(text: str | None) -> bool:
+    """The answer carries a mark of DataDome: its script, its captcha address or a block text."""
+    head = (text or "")[:60000]
+    return bool(_DD_SCRIPT.search(head)) or "captcha-delivery.com" in head or is_hard_block_text(head)
+
+
+def classify_refusal(status: int, text: str | None, url: str | None = None) -> str:
+    """What a refusal of a site protected by DataDome means (pure).
+
+    ``"hard_block"``: HTTP 429, ``t=bv`` or a block text (PrixMalin backs off);
+    ``"captcha"``: a mark of DataDome (captcha address, JSON ``{"url": …}``, its
+    script), a check the user validates in the window; ``"refused"``: no mark
+    of DataDome at all (a firewall, the server), nothing to validate in the
+    window (Intermarché, October 2026). ``url``: the captcha address if known.
+    """
+    head = (text or "")[:60000]
+    if status == 429 or _DD_SCRIPT_BLOCK.search(head):
+        return "hard_block"
+    kind = classify_datadome(url, head[:5000])
+    if kind:
+        return kind
+    if is_hard_block_text(head):
+        return "hard_block"
+    return "captcha" if is_datadome_answer(head) else "refused"
+
+
+def refused_message(label: str) -> str:
+    """Message of a refusal without any mark of DataDome (``classify_refusal`` → ``"refused"``)."""
+    return (
+        f"{label} a refusé la recherche. Réessayez dans un moment ; si cela se répète, "
+        "téléchargez le diagnostic depuis « État des enseignes » et envoyez-le."
+    )
+
+
+def refusal_record(status: int, content_type: str | None, text: str | None) -> str:
+    """JSON kept in data/debug for an answer that is not 2xx: status, type and start of the body.
+
+    Neither the URL (it holds the store, or the postal code of a store finder)
+    nor the request headers.
+    """
+    return json.dumps(
+        {"status": status, "content_type": content_type or "", "body": (text or "")[:20000]},
+        ensure_ascii=False,
+        indent=1,
+    )
 
 
 def blocked_message(label: str) -> str:
@@ -258,17 +339,37 @@ def raise_for_block(kind: str, label: str, captcha_message: str | None = None) -
     raise BlockedError(captcha_message or blocked_message(label))
 
 
+def challenge_passed(text: str | None) -> bool:
+    """The text of a Cloudflare page says its check passed (« Vérification réussie »)."""
+    return bool(_CHALLENGE_PASSED.search(text or ""))
+
+
 async def wait_for_clearance(page, label: str, captcha_message: str | None = None) -> None:
     """Give an anti-bot challenge time to pass by itself, else raise BlockedError.
 
-    A hard block (nothing to solve) raises HardBlockError at once.
+    A hard block (nothing to solve) raises HardBlockError at once. A Cloudflare
+    check that passed but stays on « En attente de la réponse » is reloaded once.
     """
     kind = await detect_block(page)
     waited = 0.0
+    reloaded = False
     while kind and kind != "hard_block" and waited < CHALLENGE_WAIT_SECONDS:
         await page.wait_for_timeout(1000)
         waited += 1
         kind = await detect_block(page)
+        if kind == "cloudflare" and not reloaded and waited >= PASSED_RELOAD_AFTER_SECONDS:
+            try:
+                text = await page.evaluate("() => document.body ? document.body.innerText.slice(0, 2000) : ''")
+            except Exception:  # noqa: BLE001 (page navigating)
+                text = ""
+            if challenge_passed(text):
+                reloaded = True
+                logger.info("%s: the check passed but the page waits, reloading it", label)
+                try:
+                    await page.reload(wait_until="domcontentloaded", timeout=30000)
+                except Exception as e:  # noqa: BLE001 (read again below)
+                    logger.debug("reload after a passed check: %s", e)
+                kind = await detect_block(page)
     if kind:
         raise_for_block(kind, label, captcha_message)
 
