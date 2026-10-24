@@ -237,7 +237,14 @@ def test_product_extension_points(desktop):
     expect(page.locator("[data-store=lidl] [data-testid=ext-badge]")).to_have_text("Badge Farine de blé T45")
     expect(page.locator("[data-store=aldi] [data-testid=ext-badge]")).to_have_count(0)
     expect(page.locator("[data-store=aldi] [data-testid=ext-action]").first).to_be_visible()
-    # The broken provider was reported in the console: not an error of the test
+    # The broken provider was reported in the console: not an error of the test. It is
+    # removed first: the retailers still answering would report it again afterwards
+    page.evaluate(
+        """async () => {
+            const { productBadges } = await import("/static/js/ext/product-badges.js");
+            productBadges.splice(productBadges.length - 1, 1);
+        }"""
+    )
     page.errors[:] = [e for e in page.errors if "provider en panne" not in e]
 
 
