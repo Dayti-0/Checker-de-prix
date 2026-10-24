@@ -1,0 +1,605 @@
+"""« Mon panier » (#/panier): live comparison (B59), honest verdict (B57), « Changer » (B60),
+plans (B61), readable on a phone and on a computer (B62), prices seen in the store (B71).
+
+Products: tests/e2e/catalog_p5.py (« beurre, sucre, lessive, jus d'orange (6 L) »):
+Carrefour has everything (17,39 €); Aldi has no washing liquid (15,12 € estimated), Lidl
+no orange juice (7,77 € found, 15,57 € estimated); Intermarché asks for a store, Courses U
+for its anti-robot check.
+"""
+
+import asyncio
+import re
+import threading
+
+import pytest
+from playwright.sync_api import expect
+
+from backend.browser import browser
+from backend.services import search
+from tests.e2e import fake
+from tests.e2e.axe import assert_accessible
+from tests.e2e.catalog_p5 import add, call, compare, demo_list, horizontal_overflow, pdf_pages
+
+
+class Gate:
+    """The searches of the retailers in ``held`` wait until ``release()``."""
+
+    def __init__(self) -> None:
+        self.event = threading.Event()
+        self.held: set[str] = set()
+
+    def release(self) -> None:
+        self.event.set()
+
+
+@pytest.fixture
+def gate(monkeypatch):
+    g = Gate()
+
+    async def gated(scraper, query, store):
+        if scraper.key in g.held:
+            while not g.event.is_set():  # noqa: ASYNC110 (set from the thread of the test)
+                await asyncio.sleep(0.02)
+        return await fake.fake_scrape(scraper, query, store)
+
+    monkeypatch.setattr(search, "_scrape", gated)
+    yield g
+    g.release()
+
+
+LECLERC_DRIVE = "https://fd12-courses.leclercdrive.fr/magasin-173301-173301-Bruges.aspx"
+
+
+def card(page, key):
+    return page.locator(f"[data-store-card={key}]")
+
+
+def cell(page, key, query):
+    item = next(i for i in call(page, "GET", "/api/list") if i["query"] == query)
+    return page.locator(f'[data-cell="{key}:{item["id"]}"]')
+
+
+def open_basket(page):
+    page.goto(f"{page.base}/#/panier")
+    expect(page.get_by_test_id("basket-verdict")).to_be_visible()
+
+
+def test_live_comparison_then_an_honest_verdict(desktop, gate):
+    page = desktop
+    demo_list(page)
+    gate.held = {"lidl"}
+    page.goto(f"{page.base}/#/liste")
+    page.get_by_role("button", name="Comparer mon panier").click()
+    expect(page).to_have_url(re.compile(r"#/panier$"))
+
+    # While Lidl is searched: progress, « Arrêter », the cells already read
+    progress = page.get_by_test_id("basket-progress")
+    expect(progress).to_contain_text(re.compile(r"Comparaison en cours : \d+/24 recherches"))
+    expect(page.get_by_role("button", name="Arrêter")).to_be_visible()
+    expect(card(page, "aldi")).to_contain_text("Tous les articles sont lus")
+    expect(card(page, "lidl")).to_contain_text("0 lu sur 4")
+    expect(cell(page, "aldi", "beurre")).to_contain_text("1,89 €")
+    expect(cell(page, "lidl", "beurre").get_by_text("En attente")).to_have_count(1)
+    expect(page.get_by_test_id("basket-verdict")).to_contain_text("Comparaison en cours")
+    expect(page.get_by_text("Panier le moins cher")).to_have_count(0)
+    # No price is « le moins cher » while Lidl has not answered for its item
+    expect(page.locator("td.cell.low")).to_have_count(0)
+    expect(page.get_by_text("(le moins cher)")).to_have_count(0)
+    # A retailer that cannot be searched says so, with its action, before the end
+    expect(card(page, "intermarche").get_by_role("link", name="Choisir mon magasin Intermarché")).to_be_visible()
+    expect(card(page, "coursesu").get_by_role("button", name="Ouvrir le site Courses U")).to_be_visible()
+    assert_accessible(page, "panier en cours")
+
+    gate.release()
+    verdict = page.get_by_test_id("basket-verdict")
+    expect(verdict).to_contain_text("Panier le moins cher")
+    expect(verdict).to_contain_text("Carrefour")
+    expect(verdict).to_contain_text("17,39 €")
+    expect(verdict).to_contain_text("Panier complet : 4/4 articles")
+    expect(page.get_by_role("button", name="Actualiser les prix")).to_be_visible()
+    expect(page.locator("#live-region")).to_contain_text("Comparaison terminée")
+    expect(cell(page, "lidl", "beurre")).to_have_class(re.compile(r"\blow\b"))
+
+    # Ranked by complete basket, then estimated total: Lidl (cheaper on what it has) after Aldi
+    order = page.locator("[data-store-card]").evaluate_all("(cards) => cards.map((c) => c.dataset.storeCard)")
+    assert order == ["carrefour", "aldi", "lidl", "intermarche", "coursesu", "leclerc"]
+    expect(card(page, "aldi")).to_contain_text("2e")
+    expect(card(page, "aldi")).to_contain_text("Total estimé15,12 €")
+    expect(card(page, "lidl")).to_contain_text("3e")
+    expect(card(page, "lidl")).to_contain_text("Articles trouvés7,77 €")
+    expect(card(page, "lidl")).to_contain_text("Total estimé15,57 €")
+    expect(card(page, "lidl")).to_contain_text("1 article introuvable")
+    expect(card(page, "lidl")).to_contain_text("Sur les 2 articles communs : 2,78 €")
+
+    # Retailers that could not be searched: their reason and their action
+    expect(card(page, "intermarche")).to_contain_text("Magasin à choisir")
+    expect(card(page, "intermarche").get_by_role("link", name="Choisir mon magasin Intermarché")).to_have_attribute(
+        "href", "#/reglages?enseigne=intermarche"
+    )
+    expect(card(page, "coursesu")).to_contain_text("Vérification requise")
+    expect(card(page, "coursesu").get_by_role("button", name="Ouvrir le site Courses U")).to_be_visible()
+
+    # Not compared at all: said once above the prices, no column of « Magasin à choisir »
+    table = page.get_by_role("table", name=re.compile("Prix de chaque article"))
+    expect(table.locator("thead th")).to_have_text(["Article", "Carrefour", "Aldi", "Lidl"])
+    expect(table).not_to_contain_text("Magasin à choisir")
+    left_out = page.get_by_text(
+        "Intermarché, Courses U et E.Leclerc ne sont pas comparées : voir leur carte plus haut."
+    )
+    expect(left_out).to_be_visible()
+
+    expect(cell(page, "lidl", "jus d'orange")).to_contain_text("Introuvable")
+    expect(cell(page, "lidl", "jus d'orange")).to_contain_text("compté 7,80 € dans l'estimation")
+    expect(cell(page, "aldi", "jus d'orange")).to_contain_text("6,90 €")  # 6 x 1 L for 6 L
+    expect(cell(page, "carrefour", "jus d'orange")).to_contain_text("6 × 1,45 €")
+    plans = page.get_by_test_id("plans")
+    expect(plans).to_contain_text("Tout chez Carrefour")
+    expect(plans.get_by_role("link", name="Suivre le plan Tout chez Carrefour")).to_have_attribute(
+        "href", "#/courses?plan=0"
+    )
+    assert_accessible(page, "panier")
+
+    # « Actualiser les prix » reads the sites again
+    with page.expect_request(re.compile(r"/api/basket/compare/stream\?.*refresh=true")):
+        page.get_by_role("button", name="Actualiser les prix").click()
+    expect(page.get_by_test_id("basket-verdict")).to_contain_text("Panier le moins cher")
+
+
+def test_stop_then_resume(desktop, gate):
+    page = desktop
+    demo_list(page)
+    gate.held = set(fake.CATALOG)
+    page.goto(f"{page.base}/#/panier")  # no comparison yet: it starts by itself
+    expect(page.get_by_test_id("basket-progress")).to_be_visible()
+    page.get_by_role("button", name="Arrêter").click()
+    expect(page.get_by_text(re.compile(r"Comparaison arrêtée : \d+/24 recherches faites\."))).to_be_visible()
+    expect(page.locator("#live-region")).to_have_text("Comparaison arrêtée")
+    expect(page.get_by_role("button", name="Arrêter")).to_have_count(0)
+    gate.release()
+    page.get_by_role("button", name="Reprendre").click()
+    expect(page.get_by_test_id("basket-verdict")).to_contain_text("Panier le moins cher")
+
+
+def test_no_complete_basket_is_never_called_the_cheapest(mobile):
+    page = mobile
+    demo_list(page)
+    add(page, "gâteau")  # only at Aldi: nobody has everything
+    page.goto(f"{page.base}/#/panier")
+    verdict = page.get_by_test_id("basket-verdict")
+    # Carrefour has as many items as Aldi (4/5): both are named
+    expect(verdict).to_contain_text("Aucune enseigne n'a tout : Aldi et Carrefour en ont le plus (4/5)")
+    expect(verdict).to_contain_text("Total estimé le plus bas : Aldi")
+    expect(verdict).to_contain_text("17,31 €")
+    expect(verdict).to_contain_text("estimé")
+    expect(
+        page.get_by_text(re.compile("^Total estimé : chaque article manquant est compté au prix médian"))
+    ).to_be_visible()
+    expect(page.get_by_text("Panier le moins cher")).to_have_count(0)
+    # Lidl, 2 items missing, cheaper on what it has, is not shown as cheaper than Aldi
+    expect(card(page, "aldi")).to_contain_text("1er")
+    expect(card(page, "lidl")).to_contain_text("2e")
+    expect(card(page, "lidl")).to_contain_text("2 articles introuvables")
+    expect(card(page, "lidl")).to_contain_text("17,76 €")
+    expect(page.get_by_test_id("plans")).to_contain_text("Lidl + Aldi")
+    assert horizontal_overflow(page) == 0
+
+
+def test_change_the_product_then_back_to_the_automatic_choice(desktop):
+    page = desktop
+    demo_list(page)
+    compare(page)
+    open_basket(page)
+    page.get_by_role("button", name="Changer le produit jus d'orange chez Aldi").click()
+    sheet = page.get_by_role("dialog", name="« jus d'orange » chez Aldi")
+    current = sheet.get_by_role("button", name=re.compile(r"^Choisir Jus d'orange 6x1L"))
+    expect(current).to_have_attribute("aria-current", "true")
+    expect(current).to_contain_text("Retenu")
+    assert_accessible(page, "feuille « Changer »")
+    sheet.get_by_role("button", name="Choisir Jus d'orange Rio D'oro (Aldi, 1,29 €)").click()
+    expect(sheet).to_be_hidden()
+    expect(page.get_by_role("status")).to_contain_text("Jus d'orange retenu chez Aldi")
+
+    juice = cell(page, "aldi", "jus d'orange")
+    expect(juice).to_contain_text("7,74 €")  # 6 x 1,29 € for the 6 L
+    expect(juice).to_contain_text("votre choix")
+    expect(page.locator("tfoot")).to_contain_text("10,72 €")
+    expect(page.get_by_role("button", name="Changer le produit jus d'orange chez Aldi")).to_be_focused()
+    page.reload()
+    expect(cell(page, "aldi", "jus d'orange")).to_contain_text("7,74 €")
+
+    page.get_by_role("button", name="Changer le produit jus d'orange chez Aldi").click()
+    page.get_by_role("dialog").get_by_role("button", name="Revenir au choix automatique").click()
+    expect(page.get_by_role("status")).to_contain_text("Aldi : retour au choix automatique")
+    expect(cell(page, "aldi", "jus d'orange")).to_contain_text("6,90 €")
+    assert next(i for i in call(page, "GET", "/api/list") if i["query"] == "jus d'orange")["picks"] == {}
+
+
+def test_not_available_here(desktop):
+    page = desktop
+    demo_list(page)
+    compare(page)
+    open_basket(page)
+    page.get_by_role("button", name="Changer le produit beurre chez Lidl").click()
+    page.get_by_role("dialog").get_by_role("button", name="Pas disponible chez Lidl").click()
+    expect(page.get_by_role("status")).to_contain_text("« beurre » : pas disponible chez Lidl")
+    expect(cell(page, "lidl", "beurre")).to_contain_text("Pas disponible ici")
+    lidl = card(page, "lidl")
+    expect(lidl).to_contain_text("1 article pas disponible ici")
+    expect(lidl).to_contain_text("1 article introuvable")  # the juice; the butter is not missing
+    beurre = next(i for i in call(page, "GET", "/api/list") if i["query"] == "beurre")
+    assert beurre["excluded"] == ["lidl"]
+
+    page.get_by_role("button", name="Changer le produit beurre chez Lidl").click()
+    page.get_by_role("dialog").get_by_role("button", name="Comparer de nouveau chez Lidl").click()
+    expect(cell(page, "lidl", "beurre")).to_contain_text("1,79 €")
+
+
+def test_an_item_not_available_here_is_never_a_complete_basket(desktop):
+    """Carrefour has everything but the butter is « pas disponible » there: never « Panier
+    le moins cher » nor « complet » for it (15,34 € without the butter), on the page, in the
+    plans, in the announce and on the home card."""
+    page = desktop
+    items = demo_list(page)
+    butter = next(i for i in items if i["query"] == "beurre")
+    call(page, "PATCH", f"/api/list/{butter['id']}", {"exclude_store": "carrefour"})
+    open_basket(page)
+    verdict = page.get_by_test_id("basket-verdict")
+    expect(verdict).to_contain_text("Aucune enseigne n'a tout : Aldi, Lidl et Carrefour en ont le plus (3/4)")
+    expect(verdict).to_contain_text("15,12 €")
+    expect(verdict).to_contain_text("estimé")
+    expect(page.get_by_text("Panier le moins cher")).to_have_count(0)
+    expect(page.get_by_text("complet", exact=True)).to_have_count(0)
+    carrefour = card(page, "carrefour")
+    expect(carrefour).to_contain_text("3/4 articles")
+    expect(carrefour).to_contain_text("Articles trouvés15,34 €")
+    expect(carrefour).to_contain_text("Total estimé17,18 €")
+    expect(carrefour).to_contain_text("1 article pas disponible ici")
+    expect(cell(page, "carrefour", "beurre")).to_contain_text("Pas disponible ici")
+    # The plans say the same: Carrefour alone is not « Tout chez Carrefour »
+    plans = page.get_by_test_id("plans")
+    expect(plans).not_to_contain_text("Tout chez")
+    expect(plans).to_contain_text("Chez Aldi seulement")
+    expect(plans).to_contain_text("Lidl + Aldi")
+    expect(page.locator("#live-region")).not_to_contain_text("Le moins cher pour tout le panier")
+    page.goto(f"{page.base}/#/")
+    home = page.get_by_test_id("list-card")
+    expect(home).to_contain_text("Aucune enseigne n'a tout")
+    expect(home).not_to_contain_text("Panier le moins cher")
+
+
+def test_a_retailer_that_fails_halfway_says_which_items_were_not_checked(desktop, monkeypatch):
+    """Lidl stops answering after its first search: its other items are « non vérifiés »
+    (not « introuvables »), the card says why it is not ranked and offers « Réessayer »."""
+    page = desktop
+    demo_list(page)
+    calls = {"lidl": 0, "fail": True}
+
+    async def tired(scraper, query, store):
+        if scraper.key == "lidl":
+            calls["lidl"] += 1
+            if calls["fail"] and calls["lidl"] > 1:
+                raise TimeoutError("simulated")
+        return await fake.fake_scrape(scraper, query, store)
+
+    monkeypatch.setattr(search, "_scrape", tired)
+    open_basket(page)
+    lidl = card(page, "lidl")
+    expect(lidl).to_contain_text("1/4 articles")
+    expect(lidl).to_contain_text("3 articles non vérifiés")
+    expect(lidl).not_to_contain_text("introuvable")
+    expect(lidl).to_contain_text("Pas classée : recherche interrompue (Trop lent à répondre).")
+    expect(lidl).to_contain_text("Le site Lidl met trop de temps à répondre.")
+    assert_accessible(page, "enseigne interrompue")
+    calls["fail"] = False
+    lidl.get_by_role("button", name="Réessayer Lidl").click()
+    expect(lidl).to_contain_text("3/4 articles")
+    expect(lidl).to_contain_text("1 article introuvable")
+    expect(lidl).not_to_contain_text("non vérifié")
+
+
+def test_nothing_to_compare(desktop):
+    """Every item « hors comparaison »: « Rien à comparer », never « Chargement du dernier
+    panier… » for ever nor five cards of « 0/0 article »."""
+    page = desktop
+    for query in ("beurre", "sucre"):
+        item = add(page, query)
+        call(page, "PATCH", f"/api/list/{item['id']}", {"compare": False})
+    page.goto(f"{page.base}/#/panier")
+    nothing = page.get_by_test_id("basket-nothing")
+    expect(nothing).to_contain_text("Rien à comparer")
+    expect(page.get_by_text("Hors comparaison : beurre, sucre.")).to_be_visible()
+    expect(page.get_by_text("Chargement du dernier panier")).to_have_count(0)
+    expect(page.get_by_role("button", name="Comparer mon panier")).to_have_count(0)
+    assert_accessible(page, "rien à comparer")
+    # A comparison of no item (asked elsewhere): the same, no card
+    compare(page)
+    page.reload()
+    expect(nothing).to_contain_text("Rien à comparer")
+    expect(page.locator("[data-store-card]")).to_have_count(0)
+    expect(page.get_by_text("0/0")).to_have_count(0)
+
+
+def test_type_a_price_seen_in_the_store(mobile):
+    page = mobile
+    demo_list(page)
+    compare(page)
+    open_basket(page)
+    page.get_by_role("button", name="Saisir le prix de lessive chez Aldi").click()
+    sheet = page.get_by_role("dialog", name="« lessive » chez Aldi")
+    expect(sheet.get_by_role("textbox", name="Prix (€)")).to_be_focused()
+    sheet.get_by_role("textbox", name="Prix (€)").fill("trois euros")
+    sheet.get_by_role("button", name="Enregistrer le prix").click()
+    expect(sheet.get_by_role("alert")).to_have_text("Indiquez un prix, par exemple 1,49.")
+    assert_accessible(page, "prix vu en magasin")
+    sheet.get_by_role("textbox", name="Prix (€)").fill("4,79")
+    sheet.get_by_role("textbox", name="Contenance").fill("2 L")
+    sheet.get_by_role("button", name="Enregistrer le prix").click()
+    expect(page.get_by_role("status")).to_contain_text("Prix saisi : 4,79 € chez Aldi")
+
+    # Counted, with its flag: Aldi has everything now, and is the cheapest
+    offer = page.locator("[data-item-card]").filter(has_text="lessive").locator("[data-offer=aldi]")
+    expect(offer).to_contain_text("4,79 €")
+    expect(offer).to_contain_text(re.compile(r"saisi le \d\d/\d\d"))
+    expect(offer).to_contain_text(re.compile(r"à mettre à jour avant le \d\d/\d\d"))
+    verdict = page.get_by_test_id("basket-verdict")
+    expect(verdict).to_contain_text("Panier le moins cher")
+    expect(verdict).to_contain_text("Aldi")
+    expect(verdict).to_contain_text("14,67 €")
+    expect(card(page, "aldi")).to_contain_text("1 prix saisi")
+
+
+def test_retailers_that_could_not_be_searched(desktop, monkeypatch):
+    page = desktop
+
+    async def end_setup():
+        # Like the real browser: « J'ai terminé » ends the setup of the retailer shown,
+        # whose results and circuit breaker are then reset (api/browser.py)
+        shown = next((k for k in reversed(fake.state.opened) if k), None)
+        await fake.fake_end_setup()
+        return shown
+
+    monkeypatch.setattr(browser, "end_setup", end_setup)
+    demo_list(page)
+    compare(page)
+    open_basket(page)
+    card(page, "coursesu").get_by_role("button", name="Ouvrir le site Courses U").click()
+    banner = page.locator("#setup-banner")
+    expect(banner).to_be_visible()
+    banner.get_by_role("button", name="J'ai terminé").click()
+    # Checked by the user: Courses U is searched again, and has only the butter
+    courses_u = card(page, "coursesu")
+    expect(courses_u).to_contain_text("1/4 articles")
+    expect(courses_u).to_contain_text("Pas classée : moins de la moitié des articles trouvés.")
+    card(page, "intermarche").get_by_role("link", name="Choisir mon magasin Intermarché").click()
+    expect(page).to_have_url(re.compile(r"#/reglages\?enseigne=intermarche$"))
+
+
+def test_on_a_phone_one_card_per_item(mobile):
+    page = mobile
+    demo_list(page)
+    compare(page)
+    open_basket(page)
+    expect(page.get_by_test_id("basket-table")).to_be_hidden()
+    beurre = page.locator("[data-item-card]").filter(has=page.get_by_role("heading", name="beurre"))
+    stores = beurre.locator("[data-offer]").evaluate_all("(offers) => offers.map((o) => o.dataset.offer)")
+    assert stores == ["lidl", "aldi", "carrefour"]  # cheapest first; not searched: said once
+    expect(beurre.locator("[data-offer=lidl]")).to_contain_text("(le moins cher)")
+    expect(
+        page.get_by_text("Intermarché, Courses U et E.Leclerc ne sont pas comparées : voir leur carte plus haut.")
+    ).to_be_visible()
+    # One name per product link: « Beurre doux, Lidl (nouvel onglet) »
+    expect(beurre.get_by_role("link", name=re.compile(r"^Beurre doux ?, Lidl \(nouvel onglet\)$"))).to_be_visible()
+    names = page.locator("[data-item-card] a.cell-name").evaluate_all(
+        "(links) => links.map((a) => a.textContent.replace(/\\s+/g, ' ').trim())"
+    )
+    assert names and len(names) == len(set(names)), names
+    assert_accessible(page, "panier sur téléphone")
+    for width in (390, 360):
+        page.set_viewport_size({"width": width, "height": 800})
+        assert horizontal_overflow(page) == 0, width
+    for scale in ("0.9", "1.6"):
+        page.add_init_script(f"localStorage.setItem('prixmalin.textScale', '{scale}')")
+        page.reload()
+        expect(page.get_by_test_id("basket-verdict")).to_be_visible()
+        assert horizontal_overflow(page) == 0, scale
+
+
+# In each card: no retailer name cut, no price or state under its button (JS, one entry per fault)
+LAYOUT_FAULTS = """() => {
+    const faults = [];
+    for (const badge of document.querySelectorAll("[data-item-card] .offer-store .badge")) {
+        if (badge.scrollWidth > badge.clientWidth + 1) faults.push(`coupé : ${badge.textContent}`);
+    }
+    for (const top of document.querySelectorAll("[data-item-card] .cell-top")) {
+        const [main, button] = top.children;
+        if (!main || !button) continue;
+        const a = main.getBoundingClientRect();
+        const b = button.getBoundingClientRect();
+        const apart = a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top;
+        if (!apart) faults.push(`sous le bouton : ${main.textContent}`);
+    }
+    return faults;
+}"""
+
+
+def test_item_cards_never_cut_a_name_or_hide_a_price(mobile):
+    page = mobile
+    demo_list(page)
+    # Intermarché answers too: its name is the longest one of the cards
+    call(page, "PUT", "/api/retailers/intermarche/store", {"id": "08012", "name": "Intermarché Montpellier"})
+    compare(page)
+    open_basket(page)
+    sucre = page.locator("[data-item-card]").filter(has=page.get_by_role("heading", name="sucre"))
+    expect(sucre.locator("[data-offer=intermarche]")).to_contain_text("Introuvable")
+    expect(sucre.get_by_role("button", name="Saisir le prix de sucre chez Intermarché")).to_be_visible()
+    assert page.evaluate(LAYOUT_FAULTS) == []
+    for width, scale in ((360, "1"), (360, "1.6"), (390, "1.3")):
+        page.set_viewport_size({"width": width, "height": 800})
+        page.add_init_script(f"localStorage.setItem('prixmalin.textScale', '{scale}')")
+        page.reload()
+        expect(sucre.locator("[data-offer=intermarche]")).to_be_visible()
+        assert page.evaluate(LAYOUT_FAULTS) == [], (width, scale)
+        assert horizontal_overflow(page) == 0, (width, scale)
+
+
+def test_live_cards_say_once_the_retailers_that_failed(mobile, gate):
+    page = mobile
+    demo_list(page)
+    gate.held = {"lidl"}
+    page.goto(f"{page.base}/#/panier")  # no comparison yet: it starts by itself
+    expect(page.get_by_test_id("basket-progress")).to_be_visible()
+    expect(card(page, "intermarche")).to_contain_text("Magasin à choisir")
+    expect(card(page, "coursesu")).to_contain_text("Vérification requise")
+    expect(card(page, "leclerc")).to_contain_text("Magasin à choisir")
+    beurre = page.locator("[data-item-card]").filter(has=page.get_by_role("heading", name="beurre"))
+    expect(beurre.locator("[data-offer=aldi]")).to_contain_text("1,89 €")
+    expect(beurre.get_by_text("En attente")).to_have_count(1)  # Lidl
+    expect(beurre.locator("[data-offer=intermarche], [data-offer=coursesu], [data-offer=leclerc]")).to_have_count(0)
+    expect(
+        page.get_by_text("Intermarché, Courses U et E.Leclerc ne sont pas comparées : voir leur carte plus haut.")
+    ).to_be_visible()
+    gate.release()
+    expect(page.get_by_test_id("basket-verdict")).to_contain_text("Panier le moins cher")
+    expect(beurre.locator("[data-offer]")).to_have_count(3)
+
+
+def test_on_a_computer_a_table_in_dark_mode(dark):
+    page = dark
+    demo_list(page)
+    compare(page)
+    open_basket(page)
+    table = page.get_by_role("table", name=re.compile("Prix de chaque article"))
+    expect(table).to_be_visible()
+    expect(page.get_by_test_id("basket-items")).to_be_hidden()
+    sticky = page.locator(".basket-table thead th").first.evaluate("(th) => getComputedStyle(th).position")
+    assert sticky == "sticky"
+    expect(table.locator("tfoot")).to_contain_text("17,39 €")
+    assert_accessible(page, "panier en sombre")
+
+    # The sheet « Changer » is drawn by css/basket.css (not the browser's buttons)
+    page.get_by_role("button", name="Changer le produit jus d'orange chez Aldi").click()
+    sheet = page.get_by_role("dialog", name="« jus d'orange » chez Aldi")
+    choice = sheet.get_by_role("button", name=re.compile(r"^Choisir Jus d'orange 6x1L"))
+    expect(choice).to_be_visible()
+    style = choice.evaluate(
+        "(b) => ({ list: getComputedStyle(b.closest('ul')).listStyleType, align: getComputedStyle(b).textAlign,"
+        " height: b.getBoundingClientRect().height })"
+    )
+    assert style["list"] == "none" and style["align"] == "left" and style["height"] >= 44, style
+    assert_accessible(page, "feuille « Changer » en sombre")
+
+
+def test_the_table_never_widens_the_page_nor_hides_its_last_row(desktop):
+    """Six retailers compared: the hidden texts of the cells stayed in place beyond the
+    page (125 px of sideways scroll at 1024 px); the totals stuck at the bottom covered
+    the last row."""
+    page = desktop
+    demo_list(page)
+    for query in ("farine", "huile de tournesol"):
+        add(page, query)
+    call(
+        page, "PUT", "/api/retailers/intermarche/store", {"id": "12345", "name": "Intermarché Test", "address": "1 rue"}
+    )
+    fake.state.unblocked.add("coursesu")
+    call(page, "PUT", "/api/retailers/leclerc/store", {"url": LECLERC_DRIVE})
+    compared = compare(page)
+    assert all(b["status"] == "ok" for b in compared["stores"])
+    for width in (920, 1024):
+        page.set_viewport_size({"width": width, "height": 900})
+        open_basket(page)
+        table = page.get_by_role("table", name=re.compile("Prix de chaque article"))
+        expect(table.locator("thead th")).to_have_count(7)
+        page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+        assert horizontal_overflow(page) == 0, width
+    # A table a little taller than the window scrolls in its box: its last row stays readable
+    page.set_viewport_size({"width": 1440, "height": 700})
+    page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+    box = page.evaluate(
+        "() => { const b = document.querySelector('.table-scroll'); return [b.clientHeight, b.scrollHeight]; }"
+    )
+    assert box[1] > box[0], box  # it does scroll in its box
+    gap = page.evaluate(
+        """() => {
+            const last = document.querySelector(".basket-table tbody tr:last-child").getBoundingClientRect();
+            const foot = document.querySelector(".basket-table tfoot td").getBoundingClientRect();
+            return foot.top - last.bottom;
+        }"""
+    )
+    assert gap >= -1, gap
+
+
+def test_second_store_when_it_is_worth_the_trip(desktop):
+    page = desktop
+    demo_list(page)
+    compare(page)
+    open_basket(page)
+    plans = page.get_by_test_id("plans")
+    expect(plans.locator(".plan")).to_have_count(1)
+    expect(plans).to_contain_text("Un deuxième magasin n'est proposé que s'il fait économiser au moins 3,00 €.")
+
+    page.get_by_text("Réglages du panier").click()
+    saving = page.get_by_role("spinbutton", name=re.compile("Proposer un deuxième magasin"))
+    expect(saving).to_have_value("3")
+    saving.fill("2")
+    page.get_by_role("button", name="Enregistrer les réglages").click()
+    expect(page.get_by_role("status")).to_contain_text("Réglages du panier enregistrés")
+    expect(plans.locator(".plan")).to_have_count(2)
+    pair = plans.locator(".plan").nth(1)
+    expect(pair).to_contain_text(re.compile(r"Aldi \+ Lidl|Lidl \+ Aldi"))
+    expect(pair).to_contain_text("14,67 €")
+    expect(pair).to_contain_text("2,72 € de moins qu'en un seul magasin")
+    expect(pair.get_by_role("link", name=re.compile("^Suivre le plan"))).to_have_attribute("href", "#/courses?plan=1")
+
+
+def test_the_list_changed_since_the_comparison(desktop):
+    page = desktop
+    demo_list(page)
+    compare(page)
+    add(page, "sucre", quantity=2)  # quantity changed: the totals are not right any more
+    open_basket(page)
+    notice = page.get_by_text("Votre liste a changé depuis cette comparaison.")
+    expect(notice).to_be_visible()
+    expect(page.get_by_role("button", name=re.compile("^Changer le produit"))).to_have_count(0)
+    page.get_by_role("button", name="Comparer à nouveau").click()
+    expect(page.get_by_text("Votre liste a changé depuis cette comparaison.")).to_have_count(0)
+    expect(cell(page, "lidl", "sucre")).to_contain_text("3 × 0,99 €")
+
+
+def test_empty_list(desktop):
+    page = desktop
+    page.goto(f"{page.base}/#/panier")
+    expect(page.get_by_role("heading", name="Votre liste est vide")).to_be_visible()
+    page.get_by_role("link", name="Ajouter des articles").click()
+    expect(page).to_have_url(re.compile(r"#/liste$"))
+
+
+def test_printed_basket_fits_on_one_a4_page(desktop):
+    page = desktop
+    demo_list(page)
+    for query in ("café", "riz", "pâtes", "yaourts", "pommes", "papier toilette"):  # not sold anywhere here
+        add(page, query)
+    compare(page)
+    open_basket(page)
+    page.emulate_media(media="print")
+    expect(page.get_by_role("table", name=re.compile("Prix de chaque article"))).to_be_visible()
+    expect(page.get_by_role("button", name="Actualiser les prix")).to_be_hidden()
+    assert pdf_pages(page) == 1
+
+
+def test_printed_basket_of_found_items_and_two_plans_fits_on_one_a4_page(desktop):
+    """Seven items found and two plans printed on two pages, the totals repeated in the
+    middle of the table: one page, the totals once, after the last item."""
+    page = desktop
+    call(page, "PATCH", "/api/basket/prefs", {"min_saving": 0.5})
+    demo_list(page)
+    for query in ("farine", "huile de tournesol", "gâteau"):
+        add(page, query)
+    compared = compare(page)
+    assert len(compared["plans"]) == 2 and compared["stores"][0]["found_count"] >= 6
+    open_basket(page)
+    expect(page.get_by_test_id("plans").locator(".plan")).to_have_count(2)
+    page.emulate_media(media="print")
+    table = page.get_by_role("table", name=re.compile("Prix de chaque article"))
+    assert table.locator("tfoot").evaluate("(el) => getComputedStyle(el).display") == "table-row-group"
+    assert pdf_pages(page) == 1
+    call(page, "PATCH", "/api/basket/prefs", {"min_saving": 3})

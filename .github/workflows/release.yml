@@ -1,0 +1,54 @@
+# Release of PrixMalin on a tag v*: a clean zip (PrixMalin-x.y.z.zip, no tests nor
+# development files, .bat in CRLF) and its notes taken from CHANGELOG.md.
+# mettre-a-jour.bat downloads the zip of the latest release.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Zip and GitHub release
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: The tag is the version of the app
+        id: version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          app=$(python -c "import backend; print(backend.__version__)")
+          if [ "$version" != "$app" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME}, but backend/__init__.py gives ${app}"
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+      - name: Zip
+        run: python .github/scripts/build_release.py "${{ steps.version.outputs.version }}" dist
+      - name: The .bat files of the zip are in CRLF
+        run: |
+          python - "dist/PrixMalin-${{ steps.version.outputs.version }}.zip" <<'PY'
+          import sys, zipfile
+          with zipfile.ZipFile(sys.argv[1]) as z:
+              bats = [n for n in z.namelist() if n.endswith(".bat")]
+              assert bats, "no .bat in the zip"
+              for name in bats:
+                  data = z.read(name)
+                  assert data.count(b"\n") == data.count(b"\r\n"), name
+              assert not [n for n in z.namelist() if "/tests/" in n], "tests in the zip"
+          PY
+      - name: Notes from CHANGELOG.md
+        run: python .github/scripts/release_notes.py "${{ steps.version.outputs.version }}" > notes.md
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME" "dist/PrixMalin-${VERSION}.zip"
+          --title "PrixMalin ${VERSION}" --notes-file notes.md --verify-tag

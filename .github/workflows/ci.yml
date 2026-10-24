@@ -1,0 +1,131 @@
+# Lint and tests of PrixMalin, on every push and pull request: Linux (Python 3.11,
+# 3.13, 3.14) and Windows (Python 3.13: the Proactor loop of the browser thread,
+# the paths and the launchers of the user's PC).
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install ruff
+        run: python -m pip install -r requirements-dev.txt
+      - name: ruff check
+        run: ruff check .
+      - name: ruff format --check
+        run: ruff format --check .
+
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    # Not ubuntu-latest: Playwright 1.56 installs no Chromium on Ubuntu 26.04 (October 2026)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13", "3.14"]
+    env:
+      # A missing Chromium makes the browser tests fail instead of skipping them
+      PRIXMALIN_REQUIRE_BROWSER: "1"
+      PRIXMALIN_TEST_ARTIFACTS: test-artifacts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - name: Install the dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Playwright version
+        id: playwright
+        run: echo "version=$(python -c 'import importlib.metadata as m; print(m.version("playwright"))')" >> "$GITHUB_OUTPUT"
+      - name: Cache of the Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      - name: Install Chromium and its system libraries
+        run: python -m playwright install --with-deps chromium
+      - name: Tests
+        run: python -m pytest -q
+      - name: Screenshots and pages of the failed tests
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-artifacts-python-${{ matrix.python-version }}
+          path: |
+            test-artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  test-windows:
+    name: Tests Windows (Python ${{ matrix.python-version }})
+    runs-on: windows-2025
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13"]
+    defaults:
+      run:
+        shell: bash
+    env:
+      PRIXMALIN_REQUIRE_BROWSER: "1"
+      PRIXMALIN_TEST_ARTIFACTS: test-artifacts
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - name: Install the dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Playwright version
+        id: playwright
+        run: echo "version=$(python -c 'import importlib.metadata as m; print(m.version("playwright"))')" >> "$GITHUB_OUTPUT"
+      - name: Cache of the Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/AppData/Local/ms-playwright
+          key: ms-playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      - name: Install Chromium
+        run: python -m playwright install chromium
+      - name: Tests
+        run: python -m pytest -q
+      - name: Screenshots and pages of the failed tests
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-artifacts-windows-python-${{ matrix.python-version }}
+          path: |
+            test-artifacts/
+          if-no-files-found: ignore
+          retention-days: 7

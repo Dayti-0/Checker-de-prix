@@ -1,0 +1,15 @@
+# Dependencies of PrixMalin. requirements.txt pins every version (Windows,
+# Linux, macOS, Python 3.11 to 3.14); regenerate it after a change here with:
+#   uv pip compile --universal --python-version 3.11 requirements.in -o requirements.txt
+fastapi>=0.110.0
+uvicorn>=0.23.0
+# Pinned: the version whose Chromium is tested (CI cache key, PLAYWRIGHT_INSTALL_ARGS)
+playwright==1.56.0
+playwright-stealth>=2.0.0
+# Intermarché: drives the installed Chrome over CDP without Runtime.enable (backend/real_chrome.py)
+patchright>=1.56.0
+pydantic>=2.0.0
+aiosqlite>=0.19.0
+httpx>=0.25.0
+# QR code of the address for the phone (console, Réglages › Sur le téléphone)
+segno>=1.6.0

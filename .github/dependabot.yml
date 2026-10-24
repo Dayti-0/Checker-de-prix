@@ -1,0 +1,27 @@
+# Weekly updates of the dependencies (requirements.in / requirements.txt) and
+# of the GitHub actions. After a change of requirements.in, requirements.txt is
+# compiled again (see CLAUDE.md): Dependabot updates the pinned versions only.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      python:
+        patterns: ["*"]
+        exclude-patterns: ["playwright"]
+    ignore:
+      # Pinned on purpose: the version whose Chromium is tested (cache of the CI, PLAYWRIGHT_INSTALL_ARGS)
+      - dependency-name: playwright
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]

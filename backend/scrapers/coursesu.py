@@ -1,473 +1,570 @@
-import asyncio
-import json
+"""Courses U: search page of the chosen store, and the national directory of stores (area of P4).
+
+Prices depend on the store: visiting its page (``https://www.coursesu.com/drive-superu-roujan``)
+sets the store cookies, then ``/recherche?q=`` shows its prices. The page is
+visited again when the browser context changes or after ``REVISIT_SECONDS``.
+
+The stores come from the national directory ``/drive-france`` (about 1,100
+drives), read from inside the Courses U tab (``fetch_store_directory``):
+
+1. ``fetch('/drive-france')`` in the page; a challenge page makes it load as a
+   real page instead (and ``BlockedError`` when the check does not pass);
+2. ``parse_store_directory(html)`` (one block per store); when it finds fewer
+   than ``MIN_DIRECTORY_STORES``, the link-based reader (``_DIRECTORY_LINKS_JS`` +
+   ``cards_to_stores``) is tried and the HTML is saved in
+   ``data/debug/coursesu-stores.html``;
+3. nothing at all: the page of the department (``/drive-herault``), saved in
+   ``data/debug/coursesu-stores-departement.html`` when it gives nothing either
+   (the snapshot of /drive-france is kept).
+
+The markup of the directory was not seen live (research of 2026, mcp-superU):
+the fixtures of tests/fixtures/coursesu.py are synthetic.
+"""
+
+import html as html_lib
 import logging
 import re
+import time
+import unicodedata
+from dataclasses import dataclass
+from urllib.parse import quote
 
-from backend.models import ScrapedProduct
-from backend.scrapers.base import BaseScraper
-from backend.scrapers.browser import create_stealth_browser, accept_cookies
+from backend import config
+from backend.models import Product, StoreOption, StoreSelection
+from backend.scrapers.base import BaseScraper, BlockedError, StoreRequiredError
+from backend.scrapers.common import (
+    accept_cookies,
+    ensure_origin,
+    page_fetch,
+    save_debug_snapshot,
+    wait_for_clearance,
+)
+from backend.scrapers.extract import extract_cards, extract_json_ld
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("prixmalin.coursesu")
 
-SEARCH_URL = "https://www.coursesu.com/recherche?q={query}"
-HOME_URL = "https://www.coursesu.com"
+BASE_URL = "https://www.coursesu.com"
+SEARCH_URL = BASE_URL + "/recherche?q={query}"
+DIRECTORY_URL = BASE_URL + "/drive-france"
+
+# The store page is visited again after this time (the site forgets the store)
+REVISIT_SECONDS = 20 * 60
+# Fewer stores than this in /drive-france: the reader is probably outdated
+MIN_DIRECTORY_STORES = 50
+# Directory page kept when it gave few stores (data/debug/coursesu-stores.html),
+# department page kept when it gave none
+DIRECTORY_SNAPSHOT = "coursesu-stores.html"
+DEPARTMENT_SNAPSHOT = "coursesu-stores-departement.html"
+
+STORE_GONE = "Ce magasin n'existe plus sur Courses U, choisissez-en un autre."
+DIRECTORY_BLOCKED = (
+    "Courses U bloque la recherche : cliquez sur « Ouvrir le site », validez la vérification, puis réessayez."
+)
+
+TILE_OPTIONS = {
+    "cardSelector": "[data-pid], .product-tile, .product-item",
+    "nameSelector": ".product-tile__name, .product-name, .pdp-link a, .tile-body a, [itemprop='name']",
+    "priceSelector": ".sales .value, [itemprop='price'], .product-price, .price-sales, [class*='price__value' i]",
+    "unitSelector": (
+        "[class*='unit-price' i], [class*='price-per' i], [class*='unitPrice' i], [class*='pricePerUnit' i]"
+    ),
+    "brandSelector": ".product-brand, [class*='brand' i]",
+}
+
+_STORE_URL = re.compile(r"^https://www\.coursesu\.com/[\w-]+/?$")
+
+# Banners of the drive pages: /drive-superu-roujan, /drive-uexpress-lyon3bonnel...
+# (not /drive-herault, /drive-dept-paris, /drive-pieton-paris: lists of stores)
+BANNERS = ("superu", "hyperu", "uexpress", "marcheu", "marcheru", "marketu", "utile", "u")
+_BANNER = "(?:" + "|".join(BANNERS) + ")"
+# A query string or a fragment may follow the path (/drive-superu-roujan?origin=annuaire)
+_STORE_LINK = re.compile(
+    r"""href=["'](?:https?://www\.coursesu\.com)?/drive-(""" + _BANNER + r"""-[\w-]+?)/?(?:[?#][^"']*)?["']""",
+    re.I,
+)
+_STORE_PATH = re.compile(
+    r"^(?:https?://www\.coursesu\.com)?/drive-(" + _BANNER + r"-[\w-]+?)/?(?:[?#].*)?$", re.I | re.S
+)
+# Opening tags of the address and of the name of a store
+_ADDRESS_TAG = re.compile(
+    r"""<(?P<tag>\w+)\b[^>]*\bclass\s*=\s*["'][^"']*\bstores-text-address\b[^"']*["'][^>]*>""", re.I
+)
+_NAME_TAG = re.compile(r"<(?P<tag>\w+)\b(?P<attrs>[^>]*\bdata-store-name\b[^>]*)>", re.I)
+_NAME_VALUE = re.compile(r"""\bdata-store-name\s*=\s*(?:"([^"]*)"|'([^']*)')""", re.I)
+_VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
+# Longest text taken as the name of a store (more: the element holds the whole entry)
+_MAX_NAME = 120
+_POSTAL_TOWN = re.compile(r"\b(\d{5})\s+([^,\d][^,]*)$")
+_POSTAL = re.compile(r"\b\d{5}\b")
+_TAG = re.compile(r"<[^>]+>")
+_BLOCK_END = re.compile(r"<br\s*/?>|</(?:address|div|li|p)\s*>", re.I)
+_SERVICES = (("Drive", r"\bdrive\b"), ("Livraison", r"\blivraison\b"), ("Retrait", r"\bretrait\b"))
+
+# Pages of anti-robot checks (Cloudflare, DataDome)
+_CHALLENGE_MARKERS = ("captcha-delivery.com", "cf-chl", "challenge-platform")
+
+
+def store_name_from_url(url: str) -> str:
+    """'https://www.coursesu.com/drive-superu-roujan' -> 'Super U Roujan'."""
+    slug = url.rstrip("/").rsplit("/", 1)[-1]
+    slug = re.sub(r"^(drive|magasin|livraison)-", "", slug)
+    banners = {
+        "superu": "Super U",
+        "hyperu": "Hyper U",
+        "uexpress": "U Express",
+        "marcheu": "Marché U",
+        "marcheru": "Marché U",
+        "marketu": "Market U",
+        "utile": "Utile",
+    }
+    words = slug.split("-")
+    first = banners.get(words[0], words[0].capitalize()) if words else ""
+    return " ".join([first] + [w.capitalize() for w in words[1:]]).strip()
+
+
+def is_store_url(url: str) -> bool:
+    return bool(_STORE_URL.match(url.strip()))
+
+
+def store_url_from_href(href: str) -> str | None:
+    """Canonical page of a store from a link of the site, or None for another page."""
+    match = _STORE_PATH.match((href or "").strip())
+    return f"{BASE_URL}/drive-{match.group(1).lower()}" if match else None
+
+
+# ---------------------------------------------------------------- directory: pure parsing
+
+
+def _clean_text(fragment: str) -> str:
+    """Text of an HTML fragment: <br> and ends of blocks (</div>, </p>) become « , »,
+    tags removed, entities decoded."""
+    text = _BLOCK_END.sub(", ", fragment or "")
+    text = html_lib.unescape(_TAG.sub(" ", text))
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"\s*,\s*(,\s*)*", ", ", text)
+    return text.strip(" ,")
+
+
+def _inner_html(html: str, opening: re.Match) -> str:
+    """Content of the element opened by ``opening`` (group ``tag``) up to its own
+    closing tag: elements of the same name inside it are counted."""
+    tag = opening.group("tag").lower()
+    if tag in _VOID_TAGS or opening.group(0).endswith("/>"):
+        return ""
+    depth = 1
+    for match in re.finditer(r"<(/?)" + re.escape(tag) + r"\b[^>]*>", html[opening.end() :], re.I):
+        if match.group(1):
+            depth -= 1
+            if depth == 0:
+                return html[opening.end() : opening.end() + match.start()]
+        elif not match.group(0).endswith("/>"):
+            depth += 1
+    return html[opening.end() :]
+
+
+def _store_name(block: str, url: str) -> str:
+    """Name of a store entry: value of ``data-store-name``, else the text of the
+    element that carries it (tags inside it included), else from its link."""
+    value = _NAME_VALUE.search(block)
+    candidates = [(value.group(1) or value.group(2)) if value else None]
+    element = _NAME_TAG.search(block)
+    # The entry itself carrying the attribute: its text is the whole entry
+    if element and "data-wrapper-store-details" not in element.group("attrs"):
+        candidates.append(_inner_html(block, element))
+    for candidate in candidates:
+        name = _clean_text(candidate or "")
+        if name and len(name) <= _MAX_NAME:
+            return name
+    return store_name_from_url(url)
+
+
+def _first(pattern: str, text: str, flags: int = re.I | re.S) -> str | None:
+    match = re.search(pattern, text, flags)
+    return match.group(1) if match else None
+
+
+def _postal_town(address: str | None) -> tuple[str | None, str | None]:
+    match = _POSTAL_TOWN.search(address or "")
+    return (match.group(1), match.group(2).strip()) if match else (None, None)
+
+
+def _services(text: str) -> list[str]:
+    return [label for label, pattern in _SERVICES if re.search(pattern, text, re.I)]
+
+
+def _float(value: str | None) -> float | None:
+    try:
+        return float(value) if value else None
+    except ValueError:
+        return None
+
+
+def _dedupe(stores: list[StoreOption]) -> list[StoreOption]:
+    seen: set[str] = set()
+    unique = []
+    for store in stores:
+        key = store.id or store.url or ""
+        if key in seen or (store.url and store.url in seen):
+            continue
+        seen.update(k for k in (store.id, store.url) if k)
+        unique.append(store)
+    return unique
+
+
+def parse_store_directory(html: str) -> list[StoreOption]:
+    """Stores of a directory page (/drive-france, /drive-herault...), one block per store.
+
+    A block starts with the element carrying ``data-wrapper-store-details``;
+    entries without a link to a store page are skipped, duplicates removed.
+    """
+    html = html or ""
+    starts = []
+    for marker in re.finditer(r"data-wrapper-store-details", html):
+        tag_start = html.rfind("<", 0, marker.start())
+        starts.append(tag_start if tag_start >= 0 else marker.start())
+    stores = []
+    for start, end in zip(starts, [*starts[1:], len(html)], strict=False):
+        block = html[start:end]
+        link = _STORE_LINK.search(block)
+        if not link:
+            continue
+        url = f"{BASE_URL}/drive-{link.group(1).lower()}"
+        address_tag = _ADDRESS_TAG.search(block)
+        address = _clean_text(_inner_html(block, address_tag))[:300] if address_tag else None
+        postal_code, city = _postal_town(address)
+        stores.append(
+            StoreOption(
+                id=_first(r"""data-store-id=["']?(\d+)""", block) or "",
+                name=_store_name(block, url),
+                address=address or None,
+                url=url,
+                services=_services(_clean_text(block)),
+                postal_code=postal_code,
+                city=city,
+                lat=_float(_first(r"""data-(?:store-)?lat(?:itude)?=["']?(-?\d+(?:\.\d+)?)""", block)),
+                lon=_float(_first(r"""data-(?:store-)?(?:lng|lon|longitude)=["']?(-?\d+(?:\.\d+)?)""", block)),
+            )
+        )
+    return _dedupe(stores)
+
+
+def cards_to_stores(cards: list[dict]) -> list[StoreOption]:
+    """Stores of the link-based reader: ``[{href, text, id}]`` collected by _DIRECTORY_LINKS_JS.
+
+    The address is the line holding the postal code (with the line before it
+    when it starts with the postal code); the name comes from the address of
+    the page of the store.
+    """
+    stores = []
+    for card in cards or []:
+        if not isinstance(card, dict):
+            continue
+        url = store_url_from_href(str(card.get("href") or ""))
+        if not url:
+            continue
+        text = str(card.get("text") or "")[:300]
+        lines = [re.sub(r"\s+", " ", line).strip(" ,") for line in text.splitlines()]
+        lines = [line for line in lines if line]
+        address = None
+        for i, line in enumerate(lines):
+            if _POSTAL.search(line):
+                before = lines[i - 1] if i and re.match(r"^\d{5}\b", line) else None
+                address = f"{before}, {line}" if before else line
+                break
+        postal_code, city = _postal_town(address)
+        store_id = str(card.get("id") or "")
+        stores.append(
+            StoreOption(
+                id=store_id if store_id.isdigit() else "",
+                name=store_name_from_url(url),
+                address=address,
+                url=url,
+                services=_services(text),
+                postal_code=postal_code,
+                city=city,
+            )
+        )
+    return _dedupe(stores)
+
+
+def is_challenge_response(status: int, text: str) -> bool:
+    """The answer of a fetch() is an anti-robot check, not the directory.
+
+    Cloudflare also adds its scripts to normal pages: the markers only count
+    when the page holds no store.
+    """
+    if status in (403, 429, 503):
+        return True
+    has_marker = any(marker in (text or "") for marker in _CHALLENGE_MARKERS)
+    return has_marker and "data-wrapper-store-details" not in text and not _STORE_LINK.search(text or "")
+
+
+def department_slug(name: str) -> str:
+    """'Côtes-d'Armor' -> 'cotes-darmor' (/drive-cotes-darmor); Paris -> 'dept-paris'."""
+    text = unicodedata.normalize("NFKD", name or "").encode("ascii", "ignore").decode().lower()
+    text = re.sub(r"['’]", "", text)
+    slug = re.sub(r"[^a-z0-9]+", "-", text).strip("-")
+    return "dept-paris" if slug == "paris" else slug
+
+
+def site_store_selection(info: dict | None, directory: list[StoreOption] | None = None) -> StoreSelection | None:
+    """Store chosen on the site, from what ``_SITE_STORE_JS`` read in its pages, or None.
+
+    ``info``: ``{link, id, name}`` (``window.storeLink``, store id of the page
+    or of the ``storeId`` cookie). Without a link, the id is looked up in the
+    ``directory`` (the stores read in /drive-france).
+    """
+    if not isinstance(info, dict):
+        return None
+    store_id = str(info.get("id") or "").strip()
+    store_id = store_id if store_id.isascii() and store_id.isdigit() and 2 <= len(store_id) <= 8 else None
+    url = store_url_from_href(str(info.get("link") or ""))
+    if url and is_store_url(url):
+        return StoreSelection(id=store_id, name=store_name_from_url(url), url=url)
+    if store_id:
+        for option in directory or []:
+            if option.id == store_id and option.url:
+                return StoreSelection(id=store_id, name=option.name, url=option.url, address=option.address)
+    return None
+
+
+@dataclass
+class StoreVisit:
+    url: str
+    generation: int
+    at: float
+
+
+def needs_store_visit(visit: StoreVisit | None, url: str, generation: int, now: float) -> bool:
+    """The store page must be visited (again) before searching."""
+    return visit is None or visit.url != url or visit.generation != generation or now - visit.at > REVISIT_SECONDS
+
+
+# ---------------------------------------------------------------- JS run in the page (collect only)
+
+# Store links of a directory page and the text around each of them: climb from
+# the link while the parent holds no other store, stop at the first element
+# whose text holds a postal code
+_DIRECTORY_LINKS_JS = r"""
+(html) => {
+  const pattern = /^\/drive-(?:superu|hyperu|uexpress|marcheu|marcheru|marketu|utile|u)-[\w-]+?\/?$/i;
+  const base = "https://www.coursesu.com";
+  const pathOf = (a) => {
+    try { return new URL(a.getAttribute("href") || "", base).pathname.replace(/\/$/, ""); }
+    catch (e) { return ""; }
+  };
+  const storePaths = (el) => new Set([...el.querySelectorAll('a[href*="/drive-"]')]
+    .map(pathOf).filter((p) => pattern.test(p)));
+  const lines = (el) => {
+    const out = [];
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const t = walker.currentNode.textContent.replace(/\s+/g, " ").trim();
+      if (t) out.push(t);
+    }
+    return out.join("\n").slice(0, 300);
+  };
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const cards = [];
+  for (const a of doc.querySelectorAll('a[href*="/drive-"]')) {
+    if (!pattern.test(pathOf(a))) continue;
+    let box = a;
+    while (box.parentElement && storePaths(box.parentElement).size <= 1) {
+      box = box.parentElement;
+      if (/\b\d{5}\b/.test(box.textContent || "")) break;
+    }
+    const holder = a.closest("[data-store-id]") || box.querySelector("[data-store-id]");
+    const id = holder ? holder.getAttribute("data-store-id") : null;
+    cards.push({href: a.getAttribute("href"), text: lines(box), id});
+  }
+  return cards;
+}
+"""
+
+# Store chosen on the site, from the globals of its pages (Nov 2025 capture)
+_SITE_STORE_JS = r"""
+() => {
+  const pick = (...values) => values.find((v) => v !== undefined && v !== null && v !== "") ?? null;
+  const dl = window.dataLayerNC || {};
+  const tc = window.tc_vars || {};
+  const user = window.User || {};
+  const cookie = (document.cookie.match(/(?:^|;\s*)storeId=([^;]+)/) || [])[1];
+  return {
+    link: typeof window.storeLink === "string" ? window.storeLink : null,
+    id: pick(dl.store_id, tc.store_id, user.storeId, cookie),
+    name: pick(dl.store_name, tc.store_name),
+  };
+}
+"""
 
 
 class CoursesUScraper(BaseScraper):
-    store_name = "Courses U"
+    key = "coursesu"
+    label = "Courses U"
+    home_url = BASE_URL + "/"
+    needs_store = True
+    store_hint = (
+        "Les prix ne s'affichent qu'une fois un magasin choisi. PrixMalin choisit le plus proche "
+        "de votre code postal ; vous pouvez en prendre un autre dans la liste, sur le site "
+        "(« Ouvrir le site ») ou en collant l'adresse de sa page."
+    )
 
-    def __init__(self):
-        self._store_configured = False
-        self._store_id: str | None = None
-        self._store_name_label: str | None = None
+    def __init__(self) -> None:
+        # Store page visited last (it sets the store cookies): url, browser context, time
+        self._visit: StoreVisit | None = None
+        # When the site was last opened with « Ouvrir le site » (the store chosen
+        # there is read back after « J'ai terminé »), None once read back
+        self.site_opened_at: float | None = None
 
-    async def search(self, query: str) -> list[ScrapedProduct]:
-        return await asyncio.to_thread(self._search_sync, query)
+    def setup_url(self, store: StoreSelection | None) -> str:
+        """Page shown by « Ouvrir le site » (called by POST /api/browser/setup)."""
+        self.site_opened_at = time.time()
+        # The tab leaves the store page: visit it again before the next search
+        self._visit = None
+        return super().setup_url(store)
 
-    def _search_sync(self, query: str) -> list[ScrapedProduct]:
-        url = SEARCH_URL.format(query=query)
-        products: list[ScrapedProduct] = []
-        api_data: list[dict] = []
+    # ------------------------------------------------------------ search
 
-        with create_stealth_browser() as (browser, context, page):
-            # Intercept API responses
-            def handle_response(response):
-                try:
-                    resp_url = response.url
-                    if response.status == 200:
-                        content_type = response.headers.get("content-type", "")
-                        if "json" in content_type:
-                            if any(
-                                k in resp_url
-                                for k in [
-                                    "search",
-                                    "produit",
-                                    "product",
-                                    "recherche",
-                                    "catalog",
-                                    "algolia",
-                                    "api",
-                                ]
-                            ):
-                                data = response.json()
-                                if isinstance(data, (dict, list)):
-                                    api_data.append(
-                                        data
-                                        if isinstance(data, dict)
-                                        else {"items": data}
-                                    )
-                except Exception:
-                    pass
-
-            page.on("response", handle_response)
-
-            try:
-                page.goto(url, wait_until="networkidle", timeout=30000)
-                accept_cookies(page)
-
-                # Wait for products with broader selectors
-                try:
-                    page.wait_for_selector(
-                        ", ".join(
-                            [
-                                "[class*='product']",
-                                "[class*='Product']",
-                                "[data-testid*='product']",
-                                "[data-product]",
-                                "article",
-                                "[class*='search-result']",
-                                "[class*='SearchResult']",
-                            ]
-                        ),
-                        timeout=15000,
-                    )
-                except Exception:
-                    logger.warning("Courses U: no product cards for '%s'", query)
-
-                page.wait_for_timeout(1500)
-
-                # Strategy 1: Try __NEXT_DATA__ (SSR-rendered data)
-                products = self._parse_next_data(page)
-
-                # Strategy 2: Try intercepted API data
-                if not products and api_data:
-                    products = self._parse_api_data(api_data)
-
-                # Strategy 3: Fallback to HTML parsing
-                if not products:
-                    products = self._parse_html(page)
-
-                # Log if we found products but no prices (store not configured)
-                if products:
-                    priced = sum(1 for p in products if p.price is not None)
-                    if priced == 0:
-                        logger.info(
-                            "Courses U: found %d products but none have prices "
-                            "(store may not be configured)",
-                            len(products),
-                        )
-
-            except Exception as e:
-                logger.error("Courses U scraper error: %s", e)
-
+    async def search(self, page, query: str, store: StoreSelection | None) -> list[Product]:
+        self.last_source = None
+        if store and store.url:
+            await self._visit_store(page, store)
+        products = await self._read_results(page, query)
+        if store and store.url and products and all(p.price is None for p in products):
+            # The site forgot the store: visit its page again and search once more
+            logger.info("Courses U: no price for '%s', visiting the store page again", query)
+            self._visit = None
+            await self._visit_store(page, store)
+            products = await self._read_results(page, query)
+        if not products:
+            await save_debug_snapshot(page, self.key)
         return products
 
-    def _parse_next_data(self, page) -> list[ScrapedProduct]:
-        """Try to extract product data from __NEXT_DATA__ script tag."""
-        products: list[ScrapedProduct] = []
+    async def _visit_store(self, page, store: StoreSelection) -> None:
+        # Imported here: backend.browser imports the scrapers package
+        from backend.browser import browser
+
+        if not needs_store_visit(self._visit, store.url, browser.context_generation, time.monotonic()):
+            return
+        response = await page.goto(store.url, wait_until="domcontentloaded", timeout=30000)
+        if response is not None and response.status == 404:
+            self._visit = None
+            raise StoreRequiredError(STORE_GONE)
+        await wait_for_clearance(page, self.label)
+        await accept_cookies(page)
+        self._visit = StoreVisit(store.url, browser.context_generation, time.monotonic())
+        await self._check_store(page, store)
+
+    async def _check_store(self, page, store: StoreSelection) -> None:
+        """Log (never fail) when the page shows another store than the one chosen."""
         try:
-            script = page.query_selector("script#__NEXT_DATA__")
-            if not script:
-                return products
-            raw = script.inner_text()
-            data = json.loads(raw)
-            props = data.get("props", {}).get("pageProps", {})
-            search_results = props.get("searchResults")
-            initial_data = props.get("initialData")
-            prop_data = props.get("data")
-            items = (
-                props.get("products", [])
-                or (search_results.get("products", []) if isinstance(search_results, dict) else [])
-                or (initial_data.get("products", []) if isinstance(initial_data, dict) else [])
-                or (prop_data.get("products", []) if isinstance(prop_data, dict) else [])
-                or props.get("results", [])
-            )
-            # If "data" or "searchResults" was a list, use it directly as items
-            if not items:
-                for candidate in [search_results, initial_data, prop_data]:
-                    if isinstance(candidate, list) and candidate:
-                        items = candidate
-                        break
-            if not items and "dehydratedState" in props:
-                dehydrated = props["dehydratedState"]
-                queries = dehydrated.get("queries", []) if isinstance(dehydrated, dict) else []
-                for q in queries:
-                    state = q.get("state", {}) if isinstance(q, dict) else {}
-                    state_data = state.get("data", {}) if isinstance(state, dict) else {}
-                    if isinstance(state_data, dict):
-                        items = (
-                            state_data.get("products", [])
-                            or state_data.get("items", [])
-                            or state_data.get("hits", [])
-                        )
-                        if items:
-                            break
-                    elif isinstance(state_data, list):
-                        items = state_data
-                        break
+            shown = await page.evaluate(_SITE_STORE_JS)
+        except Exception as e:  # noqa: BLE001 (a check only)
+            logger.debug("Courses U store check: %s", e)
+            return
+        shown_url = store_url_from_href(str((shown or {}).get("link") or ""))
+        shown_id = str((shown or {}).get("id") or "")
+        if (store.id and shown_id and shown_id != store.id) or (shown_url and shown_url != store.url.rstrip("/")):
+            logger.warning("Courses U shows the store %s (%s) instead of %s", shown_id, shown_url, store.url)
 
-            for item in items:
-                try:
-                    product = self._item_to_product(item)
-                    if product:
-                        products.append(product)
-                except Exception as e:
-                    logger.debug("Courses U __NEXT_DATA__ item parse error: %s", e)
-
-        except Exception as e:
-            logger.debug("Courses U __NEXT_DATA__ parse error: %s", e)
-        return products
-
-    def _item_to_product(self, item: dict) -> ScrapedProduct | None:
-        """Convert a product dict (from API or __NEXT_DATA__) to ScrapedProduct."""
-        name = (
-            item.get("title")
-            or item.get("name")
-            or item.get("label", "")
-        )
-        if not name:
-            return None
-
-        price = None
-        for key in ["price", "currentPrice", "unitPrice", "sellingPrice"]:
-            val = item.get(key)
-            if isinstance(val, (int, float)):
-                price = float(val)
-                break
-            if isinstance(val, dict):
-                price = val.get("value") or val.get("price") or val.get("amount")
-                if price is not None:
-                    price = float(price)
-                    break
-        if price is None:
-            pricing = item.get("pricing", {})
-            if isinstance(pricing, dict):
-                price = pricing.get("price") or pricing.get("currentPrice")
-                if price is not None:
-                    price = float(price)
-
-        price_per_unit = None
-        ppu = item.get("pricePerUnit") or item.get("unitPrice")
-        if isinstance(ppu, str):
-            price_per_unit = ppu
-        elif isinstance(ppu, dict):
-            price_per_unit = ppu.get("label") or ppu.get("formatted")
-
-        image_url = item.get("image") or item.get("imageUrl") or item.get("img")
-        if isinstance(image_url, dict):
-            image_url = image_url.get("url") or image_url.get("src")
-        if isinstance(image_url, list) and image_url:
-            image_url = (
-                image_url[0]
-                if isinstance(image_url[0], str)
-                else image_url[0].get("url")
-            )
-        if not image_url:
-            media = item.get("media", {})
-            if isinstance(media, dict):
-                image_url = media.get("url") or media.get("src")
-            elif isinstance(media, list) and media:
-                image_url = (
-                    media[0] if isinstance(media[0], str) else media[0].get("url")
-                )
-
-        slug = item.get("url") or item.get("slug") or item.get("href", "")
-        product_url = (
-            slug
-            if slug.startswith("http")
-            else f"https://www.coursesu.com{slug}"
-            if slug
-            else ""
-        )
-
-        return ScrapedProduct(
-            name=name,
-            price=price,
-            price_per_unit=price_per_unit,
-            image_url=image_url,
-            product_url=product_url,
-            store_name=self.store_name,
-        )
-
-    def _parse_api_data(self, api_responses: list[dict]) -> list[ScrapedProduct]:
-        products: list[ScrapedProduct] = []
-        for data in api_responses:
-            try:
-                inner_data = data.get("data")
-                items = (
-                    data.get("products", [])
-                    or data.get("items", [])
-                    or data.get("hits", [])
-                    or (inner_data.get("products", []) if isinstance(inner_data, dict) else [])
-                    or data.get("results", [])
-                )
-                # If "data" was a list, use it directly
-                if not items and isinstance(inner_data, list):
-                    items = inner_data
-                for item in items:
-                    try:
-                        if isinstance(item, dict):
-                            product = self._item_to_product(item)
-                            if product:
-                                products.append(product)
-                    except Exception as e:
-                        logger.debug("Courses U API item parse error: %s", e)
-            except Exception as e:
-                logger.debug("Courses U API response parse error: %s", e)
-
-        return products
-
-    def _parse_html(self, page) -> list[ScrapedProduct]:
-        products: list[ScrapedProduct] = []
-
-        selectors = [
-            "[class*='productCard']",
-            "[class*='ProductCard']",
-            "[class*='product-card']",
-            "[data-testid*='product']",
-            "[data-product]",
-            ".product-card",
-            ".product-item",
-            ".product-tile",
-            "article",
-            "[class*='search-result'] > div",
-            "[class*='SearchResult'] > div",
-        ]
-
-        cards = []
-        for sel in selectors:
-            cards = page.query_selector_all(sel)
-            if cards:
-                logger.debug(
-                    "Courses U: found %d cards with selector '%s'",
-                    len(cards),
-                    sel,
-                )
-                break
-
-        for card in cards:
-            try:
-                product = self._parse_card(card)
-                if product:
-                    products.append(product)
-            except Exception as e:
-                logger.debug("Courses U card parse error: %s", e)
-
-        return products
-
-    def _parse_card(self, card) -> ScrapedProduct | None:
-        name = None
-        for sel in [
-            "[class*='title']",
-            "[class*='Title']",
-            "[class*='name']",
-            "[class*='Name']",
-            "h2",
-            "h3",
-            "a[title]",
-            ".product-name",
-            "p",
-        ]:
-            el = card.query_selector(sel)
-            if el:
-                name = el.get_attribute("title") or el.inner_text()
-                name = name.strip()
-                if name and len(name) > 2:
-                    break
-                name = None
-
-        if not name:
-            return None
-
-        price = None
-        for sel in [
-            "[class*='price']",
-            "[class*='Price']",
-            "[data-testid*='price']",
-            ".price",
-        ]:
-            el = card.query_selector(sel)
-            if el:
-                price = self._parse_price(el.inner_text())
-                if price:
-                    break
-
-        price_per_unit = None
-        for sel in [
-            "[class*='unit-price']",
-            "[class*='unitPrice']",
-            "[class*='UnitPrice']",
-            "[class*='price-per']",
-            "[class*='pricePer']",
-        ]:
-            el = card.query_selector(sel)
-            if el:
-                price_per_unit = el.inner_text().strip()
-                if price_per_unit:
-                    break
-
-        image_url = None
-        img = card.query_selector("img")
-        if img:
-            image_url = (
-                img.get_attribute("src")
-                or img.get_attribute("data-src")
-            )
-            if not image_url:
-                srcset = img.get_attribute("srcset")
-                if srcset:
-                    image_url = srcset.split(",")[0].split(" ")[0]
-
-        product_url = ""
-        link = card.query_selector("a[href]")
-        if link:
-            href = link.get_attribute("href")
-            if href:
-                product_url = (
-                    href
-                    if href.startswith("http")
-                    else f"https://www.coursesu.com{href}"
-                )
-
-        return ScrapedProduct(
-            name=name,
-            price=price,
-            price_per_unit=price_per_unit,
-            image_url=image_url,
-            product_url=product_url,
-            store_name=self.store_name,
-        )
-
-    @staticmethod
-    def _parse_price(text: str) -> float | None:
-        text = text.replace("\xa0", " ").strip()
-        match = re.search(r"(\d+)[.,](\d{1,2})", text)
-        if match:
-            return float(f"{match.group(1)}.{match.group(2)}")
-        match = re.search(r"(\d+)", text)
-        if match:
-            return float(match.group(1))
-        return None
-
-    async def setup_location(self, postal_code: str) -> bool:
-        """Configure the nearest Courses U store for the given postal code."""
+    async def _read_results(self, page, query: str) -> list[Product]:
+        await page.goto(SEARCH_URL.format(query=quote(query)), wait_until="domcontentloaded", timeout=30000)
+        await wait_for_clearance(page, self.label)
+        await accept_cookies(page)
         try:
-            result = await asyncio.to_thread(self._setup_location_sync, postal_code)
-            return result
-        except Exception as e:
-            logger.error("Courses U location setup error: %s", e)
-            return False
+            await page.wait_for_selector(
+                "[data-pid], .product-tile, .product-item, [class*='no-result' i], [class*='noresult' i]",
+                timeout=12000,
+            )
+        except Exception:  # noqa: BLE001 (timeout: the page is read anyway)
+            logger.info("Courses U: no product tile for '%s'", query)
+        await page.wait_for_timeout(500)
 
-    def _setup_location_sync(self, postal_code: str) -> bool:
-        with create_stealth_browser() as (browser, context, page):
+        products = self.found(await extract_cards(page, self.key, BASE_URL, **TILE_OPTIONS), "html")
+        if not products:
+            cards = await extract_cards(page, self.key, BASE_URL, linkPattern=r"/p/|\.html")
+            products = self.found(cards, "generic")
+        if not products:
+            products = self.found(await extract_json_ld(page, self.key, BASE_URL), "json-ld")
+        return products
+
+    # ------------------------------------------------------------ stores
+
+    async def fetch_store_directory(self, page, department_name: str | None = None) -> dict:
+        """Every Courses U store: ``{"stores": [StoreOption...], "method": ...}``.
+
+        ``method``: "blocs" (parse_store_directory), "liens" (link-based reader)
+        or "département" (page of ``department_name``). Raises BlockedError when
+        the anti-robot check does not pass.
+        """
+        try:
+            await ensure_origin(page, self.home_url, self.label)
+        except BlockedError as e:
+            if type(e) is not BlockedError:  # another kind of block keeps its message
+                raise
+            raise BlockedError(DIRECTORY_BLOCKED) from e
+        stores, method = await self._read_directory(page, DIRECTORY_URL, MIN_DIRECTORY_STORES, DIRECTORY_SNAPSHOT)
+        if not stores and department_name:
+            # A department has a few dozen drives: its page is kept only when it gives none
+            url = f"{BASE_URL}/drive-{department_slug(department_name)}"
+            stores, _ = await self._read_directory(page, url, 1, DEPARTMENT_SNAPSHOT)
+            method = "département"
+        logger.info("Courses U : %d magasins (méthode=%s)", len(stores), method)
+        return {"stores": stores, "method": method}
+
+    async def _read_directory(self, page, url: str, minimum: int, snapshot: str) -> tuple[list[StoreOption], str]:
+        """Stores of a directory page; fewer than ``minimum``: the link-based reader
+        is tried and the page is saved in data/debug/``snapshot``."""
+        html = await self._directory_html(page, url)
+        stores, method = parse_store_directory(html), "blocs"
+        if len(stores) < minimum:
             try:
-                page.goto(HOME_URL, wait_until="domcontentloaded", timeout=30000)
-                accept_cookies(page)
+                cards = await page.evaluate(_DIRECTORY_LINKS_JS, html)
+            except Exception as e:  # noqa: BLE001 (fallback reader only)
+                logger.info("Courses U: link-based reader failed: %s", e)
+                cards = []
+            by_links = cards_to_stores(cards)
+            if len(by_links) > len(stores):
+                stores, method = by_links, "liens"
+            self._save_directory(html, snapshot)
+        return stores, method
 
-                # Try to find and click the store selector
-                for sel in [
-                    ".store-selector",
-                    "[data-testid='store-selector']",
-                    ".header-store",
-                    ".choose-store",
-                    "[class*='store-selector']",
-                    "[class*='StoreSelector']",
-                    "button[class*='store']",
-                    "button[class*='magasin']",
-                ]:
-                    btn = page.query_selector(sel)
-                    if btn:
-                        btn.click()
-                        page.wait_for_timeout(1000)
-                        break
+    async def _directory_html(self, page, url: str) -> str:
+        result = await page_fetch(page, url, headers={"accept": "text/html"}, timeout_ms=30000)
+        if result.ok and not is_challenge_response(result.status, result.text):
+            return result.text
+        if result.status == 404:
+            return ""
+        # Anti-robot check (or fetch refused): load the page itself and let the check pass
+        logger.info("Courses U: %s answered %s to fetch(), loading the page", url, result.status)
+        self._visit = None  # the tab leaves the store page: visit it again before searching
+        response = await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+        try:
+            await wait_for_clearance(page, self.label)
+        except BlockedError as e:
+            if type(e) is not BlockedError:  # another kind of block keeps its message
+                raise
+            raise BlockedError(DIRECTORY_BLOCKED) from e
+        if response is not None and response.status == 404:
+            return ""
+        await accept_cookies(page)
+        return await page.content()
 
-                # Enter postal code
-                for sel in [
-                    "input[placeholder*='postal']",
-                    "input[placeholder*='ville']",
-                    "input[placeholder*='code']",
-                    "input[placeholder*='adresse']",
-                    "input[name*='postal']",
-                    "input[name*='location']",
-                    "input[name*='search']",
-                    "input[name*='address']",
-                    ".store-search input",
-                    "[class*='store'] input",
-                ]:
-                    inp = page.query_selector(sel)
-                    if inp:
-                        inp.fill(postal_code)
-                        page.wait_for_timeout(1000)
-                        inp.press("Enter")
-                        page.wait_for_timeout(2000)
+    def _save_directory(self, html: str, snapshot: str = DIRECTORY_SNAPSHOT) -> None:
+        """Keep the directory page that gave few stores, to fix the reader."""
+        try:
+            path = config.DEBUG_DIR / snapshot
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(html or "", encoding="utf-8")
+            logger.info("Courses U: directory page saved in %s", path)
+        except OSError as e:
+            logger.debug("Courses U directory snapshot: %s", e)
 
-                        # Click first store result
-                        for result_sel in [
-                            ".store-list .store-item:first-child",
-                            ".store-results button:first-child",
-                            ".store-result:first-child",
-                            "[class*='store-list'] button:first-child",
-                            "[class*='storeList'] button:first-child",
-                            "[class*='result'] button:first-child",
-                        ]:
-                            result = page.query_selector(result_sel)
-                            if result:
-                                result.click()
-                                self._store_configured = True
-                                return True
-                        break
+    async def read_site_store(self, page) -> dict | None:
+        """What the pages of the site say about the store chosen there (``_SITE_STORE_JS``).
 
-            except Exception as e:
-                logger.error("Courses U store setup error: %s", e)
-
-        return False
+        Read after « Ouvrir le site » + « J'ai terminé »; ``site_store_selection``
+        turns it into a store.
+        """
+        await ensure_origin(page, self.home_url, self.label)
+        return await page.evaluate(_SITE_STORE_JS)

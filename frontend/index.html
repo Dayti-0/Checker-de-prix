@@ -2,90 +2,76 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PrixMalin - Comparateur de prix supermarchés</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#15803d">
+    <title>PrixMalin</title>
+    <!-- Text size and theme of this device, before the first render -->
+    <script src="/static/js/boot.js?v=__VERSION__"></script>
+    <link rel="stylesheet" href="/static/css/tokens.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/base.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/shell.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/components.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/home.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/search.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/results.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/list.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/basket.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/shopping.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/print.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/settings.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/stores.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/status.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/onboarding.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/tracking.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/product.css?v=__VERSION__">
+    <link rel="stylesheet" href="/static/css/system.css?v=__VERSION__">
 </head>
 <body>
-    <header>
-        <div class="header-content">
-            <h1>PrixMalin</h1>
-            <p class="subtitle">Comparez les prix des supermarchés français</p>
+    <header class="topbar">
+        <a class="brand" href="#/">Prix<span>Malin</span></a>
+        <div class="topbar-actions">
+            <!-- Buttons added by the features (js/features/), e.g. the alerts bell -->
+            <div id="header-extras" class="header-extras"></div>
+            <div class="text-size" role="group" aria-label="Taille du texte">
+                <button id="text-smaller" type="button" title="Texte plus petit" aria-label="Texte plus petit">A−</button>
+                <button id="text-bigger" type="button" title="Texte plus grand" aria-label="Texte plus grand">A+</button>
+            </div>
+            <a id="location-chip" class="chip" href="#/reglages" title="Code postal et magasins">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                <span id="location-label">Code postal</span>
+            </a>
+            <a id="settings-btn" class="icon-btn" href="#/reglages" aria-label="Réglages" title="Réglages">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg>
+            </a>
         </div>
     </header>
 
-    <main>
-        <section class="search-section">
-            <form id="search-form" class="search-form">
-                <div class="search-bar">
-                    <input
-                        type="text"
-                        id="search-input"
-                        placeholder="Rechercher un produit (ex: Huile de tournesol, Farine, Eau...)"
-                        autocomplete="off"
-                        required
-                    >
-                    <button type="submit" id="search-btn">Rechercher</button>
-                </div>
-            </form>
+    <div id="setup-banner" class="setup-banner" hidden>
+        <span>Le navigateur PrixMalin est ouvert : faites vos réglages sur le site, puis</span>
+        <button id="setup-banner-done" class="btn-primary small" type="button">J'ai terminé</button>
+    </div>
 
-            <div class="search-options">
-                <div class="store-filters">
-                    <span class="filter-label">Enseignes :</span>
-                    <label class="store-checkbox"><input type="checkbox" value="aldi" checked><span class="store-tag aldi">Aldi</span></label>
-                    <label class="store-checkbox"><input type="checkbox" value="carrefour" checked><span class="store-tag carrefour">Carrefour</span></label>
-                    <label class="store-checkbox"><input type="checkbox" value="coursesu" checked><span class="store-tag coursesu">Courses U</span></label>
-                    <label class="store-checkbox"><input type="checkbox" value="intermarche" checked><span class="store-tag intermarche">Intermarch&eacute;</span></label>
-                </div>
+    <!-- Links of the views that have a `nav` entry (js/shell/nav.js) -->
+    <nav class="primary-nav" aria-label="Navigation principale">
+        <div id="primary-nav" class="nav-links"></div>
+    </nav>
 
-                <div class="location-config">
-                    <button type="button" id="location-btn" class="location-btn" title="Configurer votre code postal">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                        <span id="location-label">Code postal</span>
-                    </button>
-                </div>
-            </div>
-        </section>
-
-        <div id="location-modal" class="modal hidden">
-            <div class="modal-backdrop"></div>
-            <div class="modal-content">
-                <h3>Configurer votre localisation</h3>
-                <p class="modal-description">Entrez votre code postal pour voir les prix des magasins proches (n&eacute;cessaire pour Courses U et Intermarch&eacute;).</p>
-                <form id="location-form">
-                    <input type="text" id="postal-input" placeholder="Code postal (ex: 34000)" pattern="[0-9]{5}" maxlength="5" required>
-                    <div class="modal-actions">
-                        <button type="button" id="modal-cancel" class="btn-secondary">Annuler</button>
-                        <button type="submit" class="btn-primary">Enregistrer</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-
-        <section id="loading" class="loading hidden">
-            <div class="spinner"></div>
-            <p>Recherche en cours dans les supermarchés...</p>
-        </section>
-
-        <section id="errors" class="errors hidden"></section>
-
-        <section id="results-section" class="results-section hidden">
-            <div class="results-header">
-                <h2>Résultats pour "<span id="query-display"></span>"</h2>
-                <span id="results-count" class="results-count"></span>
-            </div>
-            <div id="results-grid" class="results-grid"></div>
-        </section>
-
-        <section id="no-results" class="no-results hidden">
-            <p>Aucun résultat trouvé. Essayez un autre terme de recherche.</p>
-        </section>
+    <main id="main">
+        <!-- Shown by the views that ask for them (`shell` of the view module) -->
+        <form id="search-form" class="search" role="search" hidden>
+            <input id="q" type="search" placeholder="Farine, huile de tournesol, eau…" autocomplete="off" enterkeyhint="search" aria-label="Produit à rechercher" required>
+            <button type="submit" class="btn-primary">Comparer</button>
+        </form>
+        <div id="store-filters" class="store-filters" aria-label="Enseignes" hidden></div>
+        <!-- The view of the route (js/routes.js) -->
+        <div id="view"></div>
     </main>
 
-    <footer>
-        <p>PrixMalin &mdash; Comparateur de prix à usage personnel</p>
-    </footer>
+    <div id="toast-region">
+        <div id="toast" class="toast" role="status" hidden></div>
+    </div>
+    <div id="live-region" class="visually-hidden" aria-live="polite"></div>
 
-    <script src="/static/app.js"></script>
+    <script type="module" src="/static/js/main.js?v=__VERSION__"></script>
 </body>
 </html>

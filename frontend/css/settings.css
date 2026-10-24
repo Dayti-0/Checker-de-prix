@@ -1,0 +1,21 @@
+/* Settings page (js/views/settings/): sections, forms */
+
+.settings-page { max-width: 46rem; margin: 0 auto; }
+.page-title { margin: .2rem 0 1rem; font-size: var(--text-130); }
+
+.settings-section {
+    padding: 1rem 1.1rem;
+    margin-bottom: 1rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+.settings-section h3 { margin: 0 0 .7rem; font-size: var(--text-110); }
+.row { display: flex; gap: .55rem; }
+.row input { flex: 1; min-width: 0; padding: .7rem .85rem; border: 1px solid var(--border); border-radius: var(--radius-70); background: var(--surface); }
+
+.commune-list { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .55rem; }
+
+.switch { display: flex; gap: .7rem; align-items: flex-start; font-size: var(--text-95); }
+.switch input { margin-top: .2rem; width: 1.2rem; height: 1.2rem; accent-color: var(--primary); }

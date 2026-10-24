@@ -1,491 +1,340 @@
-import asyncio
+"""Intermarché: the site's own JSON API, called from inside an intermarche.com tab.
+
+The API is protected by DataDome, which only lets real browser sessions through,
+hence the in-page fetch(). Endpoints and fields as used by the site in 2026.
+
+The tab belongs to a dedicated real Chrome window (backend/real_chrome.py): no
+cookie banner clicked by script, a pause after the site loaded, a challenge
+shown in the tab is reported without loading the site again, and a refused
+connection (hard block) is never retried.
+"""
+
 import json
 import logging
 import re
+import secrets
+import unicodedata
 from urllib.parse import quote
 
-from backend.models import ScrapedProduct
-from backend.scrapers.base import BaseScraper
-from backend.scrapers.browser import create_stealth_browser, accept_cookies
+from backend import config
+from backend.models import Product, StoreOption, StoreSelection
+from backend.scrapers.base import BaseScraper, BlockedError, HardBlockError, ScraperError, StoreRequiredError
+from backend.scrapers.common import (
+    FetchResult,
+    classify_refusal,
+    ensure_origin,
+    hard_block_message,
+    page_fetch,
+    refused_message,
+    save_debug_text,
+)
+from backend.scrapers.common import refusal_record as _refusal_record
+from backend.scrapers.extract import products_from_json
+from backend.scrapers.parsing import clean_text, parse_price
 
 logger = logging.getLogger(__name__)
 
-SEARCH_URL = "https://www.intermarche.com/recherche/{query}"
-HOME_URL = "https://www.intermarche.com"
+BASE_URL = "https://www.intermarche.com"
+SEARCH_API = BASE_URL + "/api/service/produits/v4/pdvs/{pdv}/products/byKeywordAndCategory"
+STORES_API = BASE_URL + "/api/service/pdvs/v4/pdvs/zone?lat={lat}&lon={lon}&min=10&r=15000"
+# Results asked per search (one request: the site itself asks for 20 to 40)
+PAGE_SIZE = 40
+
+LABEL = "Intermarché"
+CAPTCHA_MESSAGE = (
+    "Intermarché demande une vérification : appuyez sur « Ouvrir le site », validez-la dans la "
+    "fenêtre Chrome d'Intermarché ouverte par PrixMalin, puis appuyez sur « J'ai terminé »."
+)
+# A refusal of the API that is not DataDome: nothing to validate in the window
+REFUSED_MESSAGE = refused_message(LABEL)
+
+# Identifiers the site sends with each API call (taken from its own cookies)
+_IDENTIFIERS_JS = r"""
+() => {
+  const pick = (n) => {
+    const c = document.cookie.split('; ').find((v) => v.startsWith(n + '='));
+    return c ? decodeURIComponent(c.slice(n.length + 1)) : '';
+  };
+  let device = '';
+  try { device = String(JSON.parse(pick('itm_device_id')).id || ''); } catch (e) {}
+  if (!device) device = crypto.randomUUID();
+  return {device, session: pick('itm_usid') || device, ua: navigator.userAgent};
+}
+"""
+
+# Store chosen directly on the website (when the user did it in the browser)
+_STORAGE_JS = r"""
+() => ({
+  store: sessionStorage.getItem('itm-store') || localStorage.getItem('itm-store') || '',
+  analytic: localStorage.getItem('persist:analytic') || '',
+})
+"""
+
+
+def _slugify(text: str) -> str:
+    text = unicodedata.normalize("NFKD", text.lower())
+    text = "".join(c for c in text if not unicodedata.combining(c))
+    return re.sub(r"[^a-z0-9]+", "-", text).strip("-")
+
+
+def _find_key(value: object, pattern: re.Pattern, depth: int = 0) -> str | None:
+    if isinstance(value, str) and value[:1] in "{[":
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return None
+    if depth > 6:
+        return None
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            if pattern.match(key) and isinstance(nested, (str, int)) and str(nested).strip():
+                return str(nested).strip().strip('"')
+            found = _find_key(nested, pattern, depth + 1)
+            if found:
+                return found
+    if isinstance(value, list):
+        for nested in value:
+            found = _find_key(nested, pattern, depth + 1)
+            if found:
+                return found
+    return None
+
+
+def store_from_storage(storage: dict) -> str | None:
+    raw = (storage.get("store") or "").strip().strip('"')
+    if re.fullmatch(r"\d{3,}", raw):
+        return raw
+    pattern = re.compile(r"^(pdvRef|pdvReference|storeRef|storeCode|reference|ref)$", re.I)
+    return _find_key(raw, pattern) or _find_key(storage.get("analytic") or "", re.compile(r"^(pdvRef|storeRef)$", re.I))
+
+
+def parse_search_json(data: object) -> list[Product]:
+    if not isinstance(data, dict):
+        return []
+    items = data.get("produits") or data.get("products")
+    if items is None and isinstance(data.get("data"), dict):
+        items = data["data"].get("produits") or data["data"].get("products")
+    if not isinstance(items, list):
+        return []
+
+    products = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        name = clean_text(item.get("libelle") or item.get("label") or item.get("name"))
+        if not name:
+            continue
+        price = parse_price(item.get("prix") if item.get("prix") is not None else item.get("unitPrice"))
+        old_price = parse_price(item.get("prixBarre"))
+
+        unit_label = None
+        per_kg = parse_price(item.get("prixKg"))
+        if per_kg is not None:
+            unit = item.get("unitePrixVente")
+            unit_text = unit.get("value") if isinstance(unit, dict) else unit
+            unit_label = f"{per_kg:.2f} {unit_text or '€/kg'}".replace(".", ",")
+
+        images = item.get("images")
+        image = images[0] if isinstance(images, list) and images and isinstance(images[0], str) else None
+        ean13 = str(item.get("produitEan13") or "").strip()
+        product_id = str(item.get("idProduit") or "").strip()
+        ean = ean13 or product_id
+        stock = item.get("stock")
+
+        products.append(
+            Product(
+                store="intermarche",
+                name=name,
+                brand=clean_text(item.get("marque")) or None,
+                price=price,
+                unit_price_label=unit_label,
+                quantity_label=clean_text(item.get("conditionnement")) or None,
+                image_url=image,
+                product_url=f"{BASE_URL}/produit/{_slugify(name)}/{ean}" if ean else BASE_URL,
+                promo=f"Au lieu de {old_price:.2f} €".replace(".", ",")
+                if old_price and price and old_price > price
+                else None,
+                available=item.get("dispoCataloguePdv") is not False and stock != 0,
+                ean=ean13 if re.fullmatch(r"\d{8,14}", ean13) else None,
+                sku=product_id or str(item.get("itemId") or "").strip() or None,
+            )
+        )
+    return products
+
+
+def has_products_list(data: object) -> bool:
+    """The answer has the expected shape (a list of products, maybe empty)."""
+    if not isinstance(data, dict):
+        return False
+    if isinstance(data.get("produits"), list) or isinstance(data.get("products"), list):
+        return True
+    nested = data.get("data")
+    return isinstance(nested, dict) and any(isinstance(nested.get(k), list) for k in ("produits", "products"))
+
+
+def check_answer(status: int, text: str) -> None:
+    """Turn an API answer of the site into the right error (pure function).
+
+    DataDome answers 403 with ``{"url": "https://geo.captcha-delivery.com/..."}``:
+    ``t=bv`` (or « Accès temporairement restreint ») is a hard block, any other
+    captcha URL a check the user can validate in the window. 429 (too many
+    requests) is treated like a hard block: PrixMalin backs off. A refusal
+    (401, 403, 405) without any DataDome mark is not a check: there is nothing
+    to validate in the window (seen in October 2026), so it is an error.
+    """
+    head = (text or "")[:5000]
+    if status in (401, 403, 405, 429) or "captcha-delivery.com" in head:
+        kind = classify_refusal(status, head)
+        if kind == "hard_block":
+            raise HardBlockError(hard_block_message(LABEL), label=LABEL)
+        if kind == "captcha":
+            raise BlockedError(CAPTCHA_MESSAGE)
+        logger.warning("Intermarché refused the search (HTTP %s): %s", status, head[:200])
+        raise ScraperError(REFUSED_MESSAGE)
+    if status == 0:
+        logger.warning("Intermarché unreachable: %s", head[:200])
+        raise ScraperError("Intermarché est injoignable. Vérifiez votre connexion Internet.")
+    if not 200 <= status < 300:
+        logger.warning("Intermarché answered HTTP %s: %s", status, head[:200])
+        raise ScraperError("Intermarché a renvoyé une erreur. Réessayez plus tard.")
+
+
+def refusal_record(result: FetchResult) -> str:
+    """JSON kept in data/debug when the API does not answer 2xx: status, type and start of the body.
+
+    Neither the URL (it holds the store) nor the request headers.
+    """
+    return _refusal_record(result.status, result.content_type, result.text)
+
+
+def parse_stores(data: object) -> list[StoreOption]:
+    results = data.get("resultats") if isinstance(data, dict) else data
+    if not isinstance(results, list):
+        return []
+    stores = []
+    for r in results:
+        if not isinstance(r, dict) or not r.get("storeCode"):
+            continue
+        name = clean_text(r.get("entityLabel")) or "Intermarché"
+        banner = clean_text(r.get("tradeNameLabel"))
+        if banner and banner.lower() not in name.lower():
+            name = f"{banner} {name}"
+        addresses = r.get("addresses") or [{}]
+        a = addresses[0] if isinstance(addresses[0], dict) else {}
+        address = ", ".join(
+            part
+            for part in (clean_text(a.get("address")), f"{a.get('postCode') or ''} {a.get('townLabel') or ''}".strip())
+            if part
+        )
+        distance = r.get("distance")
+        stores.append(
+            StoreOption(
+                id=str(r["storeCode"]),
+                name=name,
+                address=address or None,
+                distance_km=round(distance / 1000, 1) if isinstance(distance, (int, float)) else None,
+            )
+        )
+    return sorted(stores, key=lambda s: s.distance_km if s.distance_km is not None else 1e9)
 
 
 class IntermarcheScraper(BaseScraper):
-    store_name = "Intermarché"
+    key = "intermarche"
+    label = "Intermarché"
+    home_url = BASE_URL + "/"
+    needs_store = True
+    store_hint = "Les prix dépendent du magasin : choisissez le vôtre dans la liste (code postal requis)."
 
-    def __init__(self):
-        self._store_configured = False
-        self._store_id: str | None = None
-        self._store_name_label: str | None = None
+    def setup_url(self, store: StoreSelection | None) -> str:
+        return self.home_url
 
-    async def search(self, query: str) -> list[ScrapedProduct]:
-        return await asyncio.to_thread(self._search_sync, query)
+    async def _headers(self, page, service: str | None) -> dict:
+        ids = await page.evaluate(_IDENTIFIERS_JS)
+        headers = {
+            "accept": "application/json",
+            "content-type": "application/json",
+            "x-itm-device-fp": ids["device"],
+            "x-itm-session-id": ids["session"],
+            "x-itm-user-agent": ids["ua"],
+            "x-red-version": "3",
+            "x-red-device": "red_fo_desktop",
+            "x-is-server": "false",
+            "x-call-trace": "web",
+            "x-b3-traceid": secrets.token_hex(16),
+            "x-b3-spanid": secrets.token_hex(8),
+            "x-b3-sampled": "1",
+        }
+        if service:
+            headers["x-service-name"] = service
+        if service == "produits":
+            headers.update(
+                {
+                    "x-optional-oauth": "true",
+                    "x-itm-navigation-personalization-optout": "false",
+                    "x-itm-sponsored-page": "true",
+                }
+            )
+        return headers
 
-    def _search_sync(self, query: str) -> list[ScrapedProduct]:
-        url = SEARCH_URL.format(query=quote(query, safe=""))
-        products: list[ScrapedProduct] = []
-        api_data: list[dict] = []
+    def _check(self, result: FetchResult) -> None:
+        check_answer(result.status, result.text)
 
-        with create_stealth_browser() as (browser, context, page):
-            # Intercept API responses
-            def handle_response(response):
-                try:
-                    resp_url = response.url
-                    if response.status == 200:
-                        content_type = response.headers.get("content-type", "")
-                        if "json" in content_type:
-                            # Broad matching for search/product API endpoints
-                            if any(
-                                k in resp_url
-                                for k in [
-                                    "search",
-                                    "product",
-                                    "article",
-                                    "recherche",
-                                    "catalog",
-                                    "algolia",
-                                ]
-                            ):
-                                data = response.json()
-                                if isinstance(data, (dict, list)):
-                                    api_data.append(
-                                        data
-                                        if isinstance(data, dict)
-                                        else {"items": data}
-                                    )
-                except Exception:
-                    pass
+    async def _open_site(self, page) -> None:
+        """Park the tab on intermarche.com (pause after a load, no script click on the cookie banner)."""
+        await ensure_origin(
+            page,
+            self.home_url,
+            self.label,
+            settle=config.REAL_CHROME_SETTLE_SECONDS,
+            accept=False,
+            reload_on_block=False,
+            captcha_message=CAPTCHA_MESSAGE,
+        )
 
-            page.on("response", handle_response)
-
-            try:
-                page.goto(url, wait_until="networkidle", timeout=30000)
-                accept_cookies(page)
-
-                # Wait for products with multiple selector strategies
-                try:
-                    page.wait_for_selector(
-                        ", ".join(
-                            [
-                                "[class*='product']",
-                                "[class*='Product']",
-                                "[data-testid*='product']",
-                                "article",
-                                "[class*='search-result']",
-                                "[class*='SearchResult']",
-                            ]
-                        ),
-                        timeout=15000,
-                    )
-                except Exception:
-                    logger.warning("Intermarché: no product cards for '%s'", query)
-
-                page.wait_for_timeout(2000)
-
-                # Strategy 1: Try __NEXT_DATA__ (SSR-rendered data)
-                if not products:
-                    products = self._parse_next_data(page)
-
-                # Strategy 2: Try intercepted API data
-                if not products and api_data:
-                    products = self._parse_api_data(api_data)
-
-                # Strategy 3: Fallback to HTML parsing
-                if not products:
-                    products = self._parse_html(page)
-
-                if products:
-                    priced = sum(1 for p in products if p.price is not None)
-                    if priced == 0:
-                        logger.warning(
-                            "Intermarché: found %d products but none have prices "
-                            "(store may not be configured)",
-                            len(products),
-                        )
-                else:
-                    logger.debug(
-                        "Intermarché: page title='%s', url='%s'",
-                        page.title(),
-                        page.url,
-                    )
-
-            except Exception as e:
-                logger.error("Intermarché scraper error: %s", e)
-
-        return products
-
-    def _parse_next_data(self, page) -> list[ScrapedProduct]:
-        """Try to extract product data from __NEXT_DATA__ script tag."""
-        products: list[ScrapedProduct] = []
+    def _json(self, result: FetchResult) -> object:
         try:
-            script = page.query_selector("script#__NEXT_DATA__")
-            if not script:
-                return products
-            raw = script.inner_text()
-            data = json.loads(raw)
-            # Navigate the Next.js data structure to find products
-            props = data.get("props", {}).get("pageProps", {})
-            # Try various common structures
-            search_results = props.get("searchResults")
-            initial_data = props.get("initialData")
-            prop_data = props.get("data")
-            items = (
-                props.get("products", [])
-                or (search_results.get("products", []) if isinstance(search_results, dict) else [])
-                or (initial_data.get("products", []) if isinstance(initial_data, dict) else [])
-                or (prop_data.get("products", []) if isinstance(prop_data, dict) else [])
-                or props.get("results", [])
-            )
-            # If "data" or "searchResults" was a list, use it directly as items
-            if not items:
-                for candidate in [search_results, initial_data, prop_data]:
-                    if isinstance(candidate, list) and candidate:
-                        items = candidate
-                        break
-            if not items and "dehydratedState" in props:
-                # React Query pattern
-                dehydrated = props["dehydratedState"]
-                queries = dehydrated.get("queries", []) if isinstance(dehydrated, dict) else []
-                for q in queries:
-                    state = q.get("state", {}) if isinstance(q, dict) else {}
-                    state_data = state.get("data", {}) if isinstance(state, dict) else {}
-                    if isinstance(state_data, dict):
-                        items = (
-                            state_data.get("products", [])
-                            or state_data.get("items", [])
-                            or state_data.get("hits", [])
-                            or state_data.get("articles", [])
-                        )
-                        if items:
-                            break
-                    elif isinstance(state_data, list):
-                        items = state_data
-                        break
+            return result.json()
+        except ValueError as e:
+            save_debug_text(self.key, "error", result.text[:200000], ".txt")
+            raise ScraperError("Intermarché a renvoyé une réponse illisible. Réessayez plus tard.") from e
 
-            for item in items:
-                try:
-                    product = self._item_to_product(item)
-                    if product:
-                        products.append(product)
-                except Exception as e:
-                    logger.debug("Intermarché __NEXT_DATA__ item parse error: %s", e)
+    async def search(self, page, query: str, store: StoreSelection | None) -> list[Product]:
+        self.last_source = None
+        await self._open_site(page)
+        pdv = store.id if store and store.id else store_from_storage(await page.evaluate(_STORAGE_JS))
+        if not pdv:
+            raise StoreRequiredError("Choisissez votre magasin Intermarché dans les réglages pour voir les prix.")
 
-        except Exception as e:
-            logger.debug("Intermarché __NEXT_DATA__ parse error: %s", e)
+        body = {
+            "keyword": query,
+            "page": 1,
+            "size": PAGE_SIZE,
+            "filtres": [],
+            "tri": "pertinence",
+            "ordreTri": None,
+            "catalog": ["PDV"],
+        }
+        result = await page_fetch(
+            page, SEARCH_API.format(pdv=quote(str(pdv), safe="")), "POST", await self._headers(page, "produits"), body
+        )
+        if not result.ok:
+            # The exact answer of a refusal: what to fix (in the diagnostic of « État des enseignes »)
+            save_debug_text(self.key, "refused", refusal_record(result))
+        self._check(result)
+        data = self._json(result)
+        if not has_products_list(data):
+            # The site changed its answer: keep it to update the scraper
+            save_debug_text(self.key, "json", result.text[:500000])
+        products = self.found(parse_search_json(data), "api")
+        if not products:
+            products = self.found(products_from_json(data, self.key, BASE_URL), "generic")
         return products
 
-    def _item_to_product(self, item: dict) -> ScrapedProduct | None:
-        """Convert a product dict (from API or __NEXT_DATA__) to ScrapedProduct."""
-        name = (
-            item.get("title")
-            or item.get("name")
-            or item.get("label")
-            or item.get("designation", "")
-        )
-        if not name:
-            return None
-
-        price = None
-        for key in ["price", "currentPrice", "unitPrice", "sellingPrice"]:
-            val = item.get(key)
-            if isinstance(val, (int, float)):
-                price = float(val)
-                break
-            if isinstance(val, dict):
-                price = val.get("value") or val.get("price") or val.get("amount")
-                if price is not None:
-                    price = float(price)
-                    break
-        # Try nested price structure
-        if price is None:
-            pricing = item.get("pricing", {})
-            if isinstance(pricing, dict):
-                price = pricing.get("price") or pricing.get("currentPrice")
-                if price is not None:
-                    price = float(price)
-
-        price_per_unit = None
-        for key in ["pricePerUnit", "unitPrice", "pricePerKg"]:
-            ppu = item.get(key)
-            if isinstance(ppu, str):
-                price_per_unit = ppu
-                break
-            if isinstance(ppu, dict):
-                price_per_unit = ppu.get("label") or ppu.get("formatted")
-                if price_per_unit:
-                    break
-
-        image_url = item.get("image") or item.get("imageUrl") or item.get("img")
-        if isinstance(image_url, dict):
-            image_url = image_url.get("url") or image_url.get("src")
-        if isinstance(image_url, list) and image_url:
-            image_url = (
-                image_url[0]
-                if isinstance(image_url[0], str)
-                else image_url[0].get("url")
-            )
-        # Handle nested media/images
-        if not image_url:
-            media = item.get("media", {})
-            if isinstance(media, dict):
-                image_url = media.get("url") or media.get("src")
-            elif isinstance(media, list) and media:
-                image_url = (
-                    media[0] if isinstance(media[0], str) else media[0].get("url")
-                )
-
-        slug = item.get("url") or item.get("slug") or item.get("href", "")
-        product_url = (
-            slug
-            if slug.startswith("http")
-            else f"https://www.intermarche.com{slug}"
-            if slug
-            else ""
-        )
-
-        return ScrapedProduct(
-            name=name,
-            price=price,
-            price_per_unit=price_per_unit,
-            image_url=image_url,
-            product_url=product_url,
-            store_name=self.store_name,
-        )
-
-    def _parse_api_data(self, api_responses: list[dict]) -> list[ScrapedProduct]:
-        products: list[ScrapedProduct] = []
-        for data in api_responses:
-            try:
-                inner_data = data.get("data")
-                items = (
-                    data.get("products", [])
-                    or data.get("items", [])
-                    or data.get("hits", [])
-                    or (inner_data.get("products", []) if isinstance(inner_data, dict) else [])
-                    or data.get("articles", [])
-                    or data.get("results", [])
-                )
-                # If "data" was a list, use it directly
-                if not items and isinstance(inner_data, list):
-                    items = inner_data
-                for item in items:
-                    try:
-                        if isinstance(item, dict):
-                            product = self._item_to_product(item)
-                            if product:
-                                products.append(product)
-                    except Exception as e:
-                        logger.debug("Intermarché API item parse error: %s", e)
-            except Exception as e:
-                logger.debug("Intermarché API response parse error: %s", e)
-
-        return products
-
-    def _parse_html(self, page) -> list[ScrapedProduct]:
-        products: list[ScrapedProduct] = []
-
-        selectors = [
-            "[class*='productCard']",
-            "[class*='ProductCard']",
-            "[class*='product-card']",
-            "[data-testid*='product']",
-            ".product-card",
-            ".product-item",
-            ".product-tile",
-            "article",
-            "[class*='search-result'] > div",
-            "[class*='SearchResult'] > div",
-        ]
-
-        cards = []
-        for sel in selectors:
-            cards = page.query_selector_all(sel)
-            if cards:
-                logger.debug(
-                    "Intermarché: found %d cards with selector '%s'",
-                    len(cards),
-                    sel,
-                )
-                break
-
-        for card in cards:
-            try:
-                product = self._parse_card(card)
-                if product:
-                    products.append(product)
-            except Exception as e:
-                logger.debug("Intermarché card parse error: %s", e)
-
-        return products
-
-    def _parse_card(self, card) -> ScrapedProduct | None:
-        name = None
-        for sel in [
-            "[class*='title']",
-            "[class*='Title']",
-            "[class*='name']",
-            "[class*='Name']",
-            "h2",
-            "h3",
-            "a[title]",
-            "p",
-        ]:
-            el = card.query_selector(sel)
-            if el:
-                name = el.get_attribute("title") or el.inner_text()
-                name = name.strip()
-                if name and len(name) > 2:
-                    break
-                name = None
-
-        if not name:
-            return None
-
-        price = None
-        for sel in [
-            "[class*='price']",
-            "[class*='Price']",
-            "[data-testid*='price']",
-            ".price",
-        ]:
-            el = card.query_selector(sel)
-            if el:
-                price = self._parse_price(el.inner_text())
-                if price:
-                    break
-
-        price_per_unit = None
-        for sel in [
-            "[class*='unit-price']",
-            "[class*='unitPrice']",
-            "[class*='UnitPrice']",
-            "[class*='price-per']",
-            "[class*='pricePer']",
-        ]:
-            el = card.query_selector(sel)
-            if el:
-                price_per_unit = el.inner_text().strip()
-                if price_per_unit:
-                    break
-
-        image_url = None
-        img = card.query_selector("img")
-        if img:
-            image_url = (
-                img.get_attribute("src")
-                or img.get_attribute("data-src")
-            )
-            if not image_url:
-                srcset = img.get_attribute("srcset")
-                if srcset:
-                    image_url = srcset.split(",")[0].split(" ")[0]
-
-        product_url = ""
-        link = card.query_selector("a[href]")
-        if link:
-            href = link.get_attribute("href")
-            if href:
-                product_url = (
-                    href
-                    if href.startswith("http")
-                    else f"https://www.intermarche.com{href}"
-                )
-
-        return ScrapedProduct(
-            name=name,
-            price=price,
-            price_per_unit=price_per_unit,
-            image_url=image_url,
-            product_url=product_url,
-            store_name=self.store_name,
-        )
-
-    @staticmethod
-    def _parse_price(text: str) -> float | None:
-        text = text.replace("\xa0", " ").strip()
-        match = re.search(r"(\d+)[.,](\d{1,2})", text)
-        if match:
-            return float(f"{match.group(1)}.{match.group(2)}")
-        match = re.search(r"(\d+)", text)
-        if match:
-            return float(match.group(1))
-        return None
-
-    async def setup_location(self, postal_code: str) -> bool:
-        """Configure the nearest Intermarché store for the given postal code."""
-        try:
-            result = await asyncio.to_thread(self._setup_location_sync, postal_code)
-            return result
-        except Exception as e:
-            logger.error("Intermarché location setup error: %s", e)
-            return False
-
-    def _setup_location_sync(self, postal_code: str) -> bool:
-        with create_stealth_browser() as (browser, context, page):
-            try:
-                page.goto(HOME_URL, wait_until="domcontentloaded", timeout=30000)
-                accept_cookies(page)
-
-                # Try to find and click the store selector
-                for sel in [
-                    ".store-selector",
-                    "[data-testid='store-selector']",
-                    ".header-pdv",
-                    ".choose-store",
-                    ".pdv-selector",
-                    "[class*='store-selector']",
-                    "[class*='StoreSelector']",
-                    "button[class*='pdv']",
-                    "button[class*='store']",
-                ]:
-                    btn = page.query_selector(sel)
-                    if btn:
-                        btn.click()
-                        page.wait_for_timeout(1000)
-                        break
-
-                # Enter postal code
-                for sel in [
-                    "input[placeholder*='postal']",
-                    "input[placeholder*='ville']",
-                    "input[placeholder*='code']",
-                    "input[placeholder*='adresse']",
-                    "input[name*='postal']",
-                    "input[name*='location']",
-                    "input[name*='search']",
-                    "input[name*='address']",
-                    ".store-search input",
-                    "[class*='store'] input",
-                ]:
-                    inp = page.query_selector(sel)
-                    if inp:
-                        inp.fill(postal_code)
-                        page.wait_for_timeout(1000)
-                        inp.press("Enter")
-                        page.wait_for_timeout(2000)
-
-                        # Click first store result
-                        for result_sel in [
-                            ".store-list .store-item:first-child",
-                            ".store-results button:first-child",
-                            ".pdv-item:first-child button",
-                            ".store-result:first-child",
-                            "[class*='store-list'] button:first-child",
-                            "[class*='storeList'] button:first-child",
-                            "[class*='result'] button:first-child",
-                        ]:
-                            result = page.query_selector(result_sel)
-                            if result:
-                                result.click()
-                                self._store_configured = True
-                                return True
-                        break
-
-            except Exception as e:
-                logger.error("Intermarché store setup error: %s", e)
-
-        return False
+    async def find_stores(self, page, lat: float, lon: float) -> list[StoreOption]:
+        await self._open_site(page)
+        result = await page_fetch(page, STORES_API.format(lat=lat, lon=lon), headers=await self._headers(page, None))
+        self._check(result)
+        data = self._json(result)
+        if not isinstance(data, dict) or not isinstance(data.get("resultats"), list):
+            save_debug_text(self.key, "json", result.text[:500000])
+        return parse_stores(data)

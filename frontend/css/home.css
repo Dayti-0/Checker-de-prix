@@ -1,0 +1,6 @@
+/* Home page (js/views/home/): welcome and its cards */
+
+.welcome { text-align: center; padding: 1.6rem .5rem; color: var(--muted); font-size: var(--text-105); }
+.suggestions { display: flex; flex-wrap: wrap; gap: .55rem; justify-content: center; margin: 1rem 0; }
+.suggestion { border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius-pill); padding: .5rem 1rem; }
+.suggestion:hover { border-color: var(--primary); color: var(--primary-text); }
