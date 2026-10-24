@@ -83,7 +83,7 @@ def install(fake, mp) -> None:
 # --- Helpers of the P5 E2E tests (tests/e2e/test_p5_*.py) ----------------------
 
 HEADERS = {"X-PrixMalin": "1"}
-STORES = ["aldi", "lidl", "carrefour", "intermarche", "coursesu"]
+STORES = ["aldi", "lidl", "carrefour", "intermarche", "coursesu", "leclerc"]
 
 
 def call(page, method: str, path: str, body=None):

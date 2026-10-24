@@ -13,7 +13,7 @@ from tests.e2e import fake
 from tests.e2e.server import reset_data
 
 HEADERS = {"X-PrixMalin": "1"}
-STORES = ["aldi", "lidl", "carrefour", "intermarche", "coursesu"]
+STORES = ["aldi", "lidl", "carrefour", "intermarche", "coursesu", "leclerc"]
 
 
 @pytest.fixture
@@ -106,8 +106,8 @@ def test_live_basket_fills_cell_by_cell(base, monkeypatch):
             events.append((name, data))
     names = [n for n, _ in events]
     assert names[0] == "start" and names[-1] == "done"
-    assert names.count("line") == events[0][1]["total"] == 20
-    assert names.count("store") == 5
+    assert names.count("line") == events[0][1]["total"] == 24
+    assert names.count("store") == 6
     done = events[-1][1]["comparison"]
     posted = httpx.post(f"{base}/api/basket/compare", json={"stores": STORES}, headers=HEADERS, timeout=30).json()
     assert [(b["store"], b["total"], b["estimated_total"]) for b in done["stores"]] == [

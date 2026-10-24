@@ -47,6 +47,9 @@ def gate(monkeypatch):
     g.release()
 
 
+LECLERC_DRIVE = "https://fd12-courses.leclercdrive.fr/magasin-173301-173301-Bruges.aspx"
+
+
 def card(page, key):
     return page.locator(f"[data-store-card={key}]")
 
@@ -71,7 +74,7 @@ def test_live_comparison_then_an_honest_verdict(desktop, gate):
 
     # While Lidl is searched: progress, « Arrêter », the cells already read
     progress = page.get_by_test_id("basket-progress")
-    expect(progress).to_contain_text(re.compile(r"Comparaison en cours : \d+/20 recherches"))
+    expect(progress).to_contain_text(re.compile(r"Comparaison en cours : \d+/24 recherches"))
     expect(page.get_by_role("button", name="Arrêter")).to_be_visible()
     expect(card(page, "aldi")).to_contain_text("Tous les articles sont lus")
     expect(card(page, "lidl")).to_contain_text("0 lu sur 4")
@@ -99,7 +102,7 @@ def test_live_comparison_then_an_honest_verdict(desktop, gate):
 
     # Ranked by complete basket, then estimated total: Lidl (cheaper on what it has) after Aldi
     order = page.locator("[data-store-card]").evaluate_all("(cards) => cards.map((c) => c.dataset.storeCard)")
-    assert order == ["carrefour", "aldi", "lidl", "intermarche", "coursesu"]
+    assert order == ["carrefour", "aldi", "lidl", "intermarche", "coursesu", "leclerc"]
     expect(card(page, "aldi")).to_contain_text("2e")
     expect(card(page, "aldi")).to_contain_text("Total estimé15,12 €")
     expect(card(page, "lidl")).to_contain_text("3e")
@@ -120,7 +123,9 @@ def test_live_comparison_then_an_honest_verdict(desktop, gate):
     table = page.get_by_role("table", name=re.compile("Prix de chaque article"))
     expect(table.locator("thead th")).to_have_text(["Article", "Carrefour", "Aldi", "Lidl"])
     expect(table).not_to_contain_text("Magasin à choisir")
-    left_out = page.get_by_text("Intermarché et Courses U ne sont pas comparées : voir leur carte plus haut.")
+    left_out = page.get_by_text(
+        "Intermarché, Courses U et E.Leclerc ne sont pas comparées : voir leur carte plus haut."
+    )
     expect(left_out).to_be_visible()
 
     expect(cell(page, "lidl", "jus d'orange")).to_contain_text("Introuvable")
@@ -147,7 +152,7 @@ def test_stop_then_resume(desktop, gate):
     page.goto(f"{page.base}/#/panier")  # no comparison yet: it starts by itself
     expect(page.get_by_test_id("basket-progress")).to_be_visible()
     page.get_by_role("button", name="Arrêter").click()
-    expect(page.get_by_text(re.compile(r"Comparaison arrêtée : \d+/20 recherches faites\."))).to_be_visible()
+    expect(page.get_by_text(re.compile(r"Comparaison arrêtée : \d+/24 recherches faites\."))).to_be_visible()
     expect(page.locator("#live-region")).to_have_text("Comparaison arrêtée")
     expect(page.get_by_role("button", name="Arrêter")).to_have_count(0)
     gate.release()
@@ -380,7 +385,7 @@ def test_on_a_phone_one_card_per_item(mobile):
     assert stores == ["lidl", "aldi", "carrefour"]  # cheapest first; not searched: said once
     expect(beurre.locator("[data-offer=lidl]")).to_contain_text("(le moins cher)")
     expect(
-        page.get_by_text("Intermarché et Courses U ne sont pas comparées : voir leur carte plus haut.")
+        page.get_by_text("Intermarché, Courses U et E.Leclerc ne sont pas comparées : voir leur carte plus haut.")
     ).to_be_visible()
     # One name per product link: « Beurre doux, Lidl (nouvel onglet) »
     expect(beurre.get_by_role("link", name=re.compile(r"^Beurre doux ?, Lidl \(nouvel onglet\)$"))).to_be_visible()
@@ -445,12 +450,13 @@ def test_live_cards_say_once_the_retailers_that_failed(mobile, gate):
     expect(page.get_by_test_id("basket-progress")).to_be_visible()
     expect(card(page, "intermarche")).to_contain_text("Magasin à choisir")
     expect(card(page, "coursesu")).to_contain_text("Vérification requise")
+    expect(card(page, "leclerc")).to_contain_text("Magasin à choisir")
     beurre = page.locator("[data-item-card]").filter(has=page.get_by_role("heading", name="beurre"))
     expect(beurre.locator("[data-offer=aldi]")).to_contain_text("1,89 €")
     expect(beurre.get_by_text("En attente")).to_have_count(1)  # Lidl
-    expect(beurre.locator("[data-offer=intermarche], [data-offer=coursesu]")).to_have_count(0)
+    expect(beurre.locator("[data-offer=intermarche], [data-offer=coursesu], [data-offer=leclerc]")).to_have_count(0)
     expect(
-        page.get_by_text("Intermarché et Courses U ne sont pas comparées : voir leur carte plus haut.")
+        page.get_by_text("Intermarché, Courses U et E.Leclerc ne sont pas comparées : voir leur carte plus haut.")
     ).to_be_visible()
     gate.release()
     expect(page.get_by_test_id("basket-verdict")).to_contain_text("Panier le moins cher")
@@ -484,7 +490,7 @@ def test_on_a_computer_a_table_in_dark_mode(dark):
 
 
 def test_the_table_never_widens_the_page_nor_hides_its_last_row(desktop):
-    """Five retailers compared: the hidden texts of the cells stayed in place beyond the
+    """Six retailers compared: the hidden texts of the cells stayed in place beyond the
     page (125 px of sideways scroll at 1024 px); the totals stuck at the bottom covered
     the last row."""
     page = desktop
@@ -495,13 +501,14 @@ def test_the_table_never_widens_the_page_nor_hides_its_last_row(desktop):
         page, "PUT", "/api/retailers/intermarche/store", {"id": "12345", "name": "Intermarché Test", "address": "1 rue"}
     )
     fake.state.unblocked.add("coursesu")
+    call(page, "PUT", "/api/retailers/leclerc/store", {"url": LECLERC_DRIVE})
     compared = compare(page)
     assert all(b["status"] == "ok" for b in compared["stores"])
     for width in (920, 1024):
         page.set_viewport_size({"width": width, "height": 900})
         open_basket(page)
         table = page.get_by_role("table", name=re.compile("Prix de chaque article"))
-        expect(table.locator("thead th")).to_have_count(6)
+        expect(table.locator("thead th")).to_have_count(7)
         page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
         assert horizontal_overflow(page) == 0, width
     # A table a little taller than the window scrolls in its box: its last row stays readable
