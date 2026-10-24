@@ -1,6 +1,7 @@
 """Adding a product of the results to « Ma liste » (B32): the sheet, « ✓ », « Annuler »."""
 
 import re
+import time
 
 import pytest
 from playwright.sync_api import expect
@@ -14,6 +15,17 @@ T45_LISTED = "Retirer Farine de blé T45 Belbake (Lidl, 0,75 €) de ma liste"
 
 def list_items(page):
     return page.request.get(f"{page.base}/api/list").json()
+
+
+def wait_for_item(page, ready, timeout=15):
+    """The only line of the list, once ``ready(line)`` (the saving may still be on its way)."""
+    deadline = time.monotonic() + timeout
+    while True:
+        items = list_items(page)
+        if len(items) == 1 and ready(items[0]):
+            return items[0]
+        assert time.monotonic() < deadline, items
+        page.wait_for_timeout(100)
 
 
 def boxes_overlap(a, b):
@@ -186,7 +198,8 @@ def test_a_line_written_differently_keeps_its_quantity_and_undo_keeps_it(desktop
     expect(sheet.locator("#sheet-note")).to_have_text("« Crème fraîche » est déjà dans votre liste (quantité 3).")
     sheet.get_by_role("button", name="Enregistrer").click()
     expect(page.get_by_role("status")).to_contain_text("Ajouté à « Crème fraîche »")
-    [item] = list_items(page)
+    # The message of the first addition may still be shown: wait for the server
+    item = wait_for_item(page, lambda i: "lidl" in i["picks"])
     assert (item["query"], item["quantity"], sorted(item["picks"])) == ("Crème fraîche", 3, ["carrefour", "lidl"])
 
     # « Annuler » takes the product of Lidl back, never the whole line
