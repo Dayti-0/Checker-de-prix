@@ -195,9 +195,36 @@ def test_release_workflow_and_update_script():
     assert "api.github.com/repos/Dayti-0/Checker-de-prix/releases/latest" in text
     assert "Invoke-WebRequest" in text and "'venv', 'data', '.git'" in text
     assert "lancer.bat" in text and "%TEMP%\\prixmalin-mise-a-jour.bat" in text
+    # No release yet (GitHub answers 404): nothing to update, not « check Internet »
+    assert "if ($status -eq 404)" in text and "rien a mettre a jour" in text and "exit 2" in text
+    assert text.index("if errorlevel 2 goto :nothing_new") < text.index("if errorlevel 1 goto :zip_failed")
 
 
 def test_update_state_text_in_french():
-    state = updates.state_of(updates.UpdatePrefs(latest="9.0.0", checked_at=1.0, failed=True))
+    state = updates.state_of(updates.UpdatePrefs(latest="9.0.0", checked_at=1.0, failure="network"))
     assert state.available and state.error == "La dernière vérification n'a pas pu joindre Internet."
     assert json.loads(state.model_dump_json())["current"] == __version__
+
+
+# --- review: GitHub refusing is not « no Internet » ----------------------------------
+
+
+@pytest.mark.parametrize(
+    ("answer", "expected"),
+    [
+        (httpx.ConnectError("no network"), "La dernière vérification n'a pas pu joindre Internet."),
+        (httpx.Response(403, json={"message": "API rate limit exceeded"}), "GitHub"),
+        (httpx.Response(503, text="unavailable"), "GitHub"),
+    ],
+)
+def test_update_check_failures(monkeypatch, answer, expected):
+    def handler(request):
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(updates, "HTTP_TRANSPORT", httpx.MockTransport(handler))
+    state = run(updates.check())
+    assert expected in state.error
+    if expected == "GitHub":
+        assert "Internet" not in state.error

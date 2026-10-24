@@ -52,6 +52,7 @@ Le dossier des données est `%LOCALAPPDATA%\PrixMalin` (tapez-le dans la barre d
 
 - [ ] Réglages › À propos : version affichée ; **Vérifier maintenant** répond « Vous avez la dernière version » ou « Aucune version publiée pour l'instant ».
 - [ ] Dossier venu de git : PrixMalin fermé, double-clic sur `mettre-a-jour.bat` → `git pull --ff-only`, puis PrixMalin redémarre.
+- [ ] Dossier venu d'un zip, **avant** la première version publiée : `mettre-a-jour.bat` dit « Aucune version publiee pour l'instant : rien a mettre a jour », puis relance PrixMalin (pas de message sur Internet).
 - [ ] Dossier venu d'un zip (après la première version publiée) : `mettre-a-jour.bat` télécharge `PrixMalin-x.y.z.zip`, remplace les fichiers, garde `venv` et les données, puis relance.
 - [ ] `mettre-a-jour.bat` avec PrixMalin ouvert : « PrixMalin est ouvert : fermez sa fenetre noire… ».
 

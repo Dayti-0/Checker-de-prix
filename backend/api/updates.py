@@ -46,7 +46,7 @@ class UpdatePrefs(BaseModel):
     checked_at: float | None = None
     latest: str | None = None  # "3.1.0", None when the repository has no release
     url: str | None = None  # page of the release
-    failed: bool = False  # the last check could not reach GitHub
+    failure: str | None = None  # last check: "network" (no Internet) or "github" (GitHub refused or failed)
 
 
 class UpdateState(BaseModel):
@@ -108,6 +108,12 @@ def release_of(data: object) -> tuple[str, str | None] | None:
     return ".".join(map(str, version)), url
 
 
+FAILURE_MESSAGES = {
+    "network": "La dernière vérification n'a pas pu joindre Internet.",
+    "github": "GitHub n'a pas répondu à la dernière vérification.",
+}
+
+
 def state_of(p: UpdatePrefs) -> UpdateState:
     return UpdateState(
         current=__version__,
@@ -116,7 +122,7 @@ def state_of(p: UpdatePrefs) -> UpdateState:
         enabled=p.enabled,
         checked_at=p.checked_at,
         url=p.url,
-        error="La dernière vérification n'a pas pu joindre Internet." if p.failed else None,
+        error=FAILURE_MESSAGES.get(p.failure or ""),
     )
 
 
@@ -139,21 +145,24 @@ async def fetch_latest() -> tuple[str, str | None] | None:
 
 async def check(now: float | None = None) -> UpdateState:
     now = now or time.time()
+    found, failure = None, None
     try:
         found = await fetch_latest()
-        failed = False
+    except httpx.HTTPStatusError as e:  # 403 (limit of the GitHub API), 5xx: Internet works
+        logger.info("Update check refused by GitHub: HTTP %s", e.response.status_code)
+        failure = "github"
     except (httpx.HTTPError, ValueError) as e:
         logger.info("Update check failed: %s", e)
-        found, failed = None, True
+        failure = "network"
 
     def change(p: UpdatePrefs) -> None:
         p.checked_at = now
-        p.failed = failed
-        if not failed:
+        p.failure = failure
+        if failure is None:
             p.latest, p.url = found if found else (None, None)
 
     p = await prefs.update(UPDATES_SECTION, UpdatePrefs, change)
-    if not failed:
+    if failure is None:
         logger.info("Update check: latest %s, current %s", p.latest or "none", __version__)
     return state_of(p)
 
