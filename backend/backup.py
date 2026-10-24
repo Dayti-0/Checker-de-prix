@@ -17,6 +17,7 @@
 
 import asyncio
 import errno
+import json
 import logging
 import os
 import re
@@ -28,17 +29,23 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from backend import __version__, config, database
 from backend.errors import AppError
+from backend.models import Settings
 from backend.services import hooks
+from backend.services.settings import SETTINGS_KEY
 
 logger = logging.getLogger("prixmalin.backup")
 
 BACKUP_FORMAT = "prixmalin"
 BACKUP_VERSION = 1
 MAX_RESTORE_BYTES = 10 * 1024 * 1024
+
+# Rows of the settings table that belong to this PC: never in a backup, never
+# changed by a restore (a phone must not turn off its own access or announce a version)
+PC_ONLY_SETTINGS = ("pref:p7.security", "pref:p7.updates")
 
 COPIES_DIR = "backups"
 KEEP_COPIES = 7
@@ -153,11 +160,36 @@ def backup_file_name(day: date | None = None) -> str:
     return f"prixmalin-sauvegarde-{(day or date.today()):%Y-%m-%d}.json"
 
 
+def check_settings_section(data: Any) -> dict[str, str]:
+    """The part « settings » (rows of the settings table): text values, the settings of
+    the app for the key ``settings``, a JSON object for each ``pref:*``. ValueError otherwise."""
+    if not isinstance(data, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in data.items()):
+        raise ValueError("settings: text keys and values expected")
+    for key, value in data.items():
+        if key == SETTINGS_KEY:
+            Settings.model_validate_json(value)
+        elif key.startswith("pref:") and not isinstance(json.loads(value), dict):
+            raise ValueError(f"{key}: JSON object expected")
+    return data
+
+
+# Checks of the parts whose format is known here (the others are checked by their restore_fn)
+SECTION_CHECKS: dict[str, Callable[[Any], Any]] = {"settings": check_settings_section}
+
+
+def without_pc_settings(data: Any) -> Any:
+    if isinstance(data, dict):
+        return {k: v for k, v in data.items() if k not in PC_ONLY_SETTINGS}
+    return data
+
+
 async def export_all(now: float | None = None) -> dict:
     sections = {}
     for name, (export_fn, _restore_fn) in sorted(hooks.backups().items()):
         try:
             sections[name] = await export_fn()
+            if name == "settings":
+                sections[name] = without_pc_settings(sections[name])
         except Exception as e:
             logger.exception("Backup of %s failed", name)
             raise AppError("La sauvegarde n'a pas pu être faite. Réessayez dans un instant.", 500, "backup") from e
@@ -203,13 +235,25 @@ async def restore_all(request: RestoreRequest) -> RestoreResult:
     providers = hooks.backups()
     restored = [name for name in backup.sections if name in providers]
     ignored = sorted(name for name in backup.sections if name not in providers)
+    for name in restored:
+        check = SECTION_CHECKS.get(name)
+        try:
+            if check is not None:
+                check(backup.sections[name])
+        except (ValueError, RecursionError, ValidationError) as e:
+            logger.warning("Restore refused, part %s: %s", name, type(e).__name__)
+            raise AppError("Ce fichier de sauvegarde est abîmé : rien n'a été changé.", 422, "backup_invalid") from e
     try:
         async with database.transaction():
             for name in restored:
                 export_fn, restore_fn = providers[name]
                 data = backup.sections[name]
+                current = await export_fn() if request.mode == "merge" or name == "settings" else None
                 if request.mode == "merge":
-                    data = merge_section(await export_fn(), data)
+                    data = merge_section(current, data)
+                if name == "settings":
+                    # The settings of this PC stay as they are, whatever the file says
+                    data = {**without_pc_settings(data), **{k: current[k] for k in PC_ONLY_SETTINGS if k in current}}
                 await restore_fn(data)
     except AppError:
         raise

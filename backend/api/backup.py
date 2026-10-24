@@ -47,7 +47,7 @@ async def api_restore(request: Request):
     raw = await read_limited(request, backup.MAX_RESTORE_BYTES)
     try:
         body = backup.RestoreRequest.model_validate(json.loads(raw))
-    except (ValueError, ValidationError) as e:
+    except (ValueError, RecursionError, ValidationError) as e:  # RecursionError: « [[[[…]]]] »
         raise AppError(
             "Ce fichier n'est pas une sauvegarde de PrixMalin : rien n'a été changé.", 422, "backup_invalid"
         ) from e

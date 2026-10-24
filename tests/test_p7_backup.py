@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from backend import backup, config, main
+from backend import backup, config, main, security
 from backend.services import hooks
 from tests.conftest import run
 
@@ -265,3 +265,68 @@ def test_daily_copy_and_rotation(client):
 def test_no_copy_without_a_database(tmp_path):
     assert run(backup.daily_copy(date(2026, 10, 22))) is None
     assert not backup.copies_dir().exists()
+
+
+# --- review: deep files, parts checked, settings of the PC kept ----------------------
+
+PC_ADDRESS = "http://192.168.1.10:8000"
+
+
+def test_deeply_nested_backup_is_refused_cleanly(client):
+    body = b"[" * 200000 + b"]" * 200000
+    answer = client.post("/api/restore", content=body, headers={"content-type": "application/json"})
+    assert answer.status_code == 422 and answer.json()["code"] == "backup_invalid"
+
+
+def backup_with(settings: dict) -> dict:
+    return {"format": "prixmalin", "version": 1, "sections": {"settings": settings}}
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"settings": {"x": 1}},  # not text
+        {"settings": "pas du json"},  # the settings of P4: not a Settings
+        {"settings": json.dumps({"show_browser": "peut-être"})},
+        {"pref:p4.coursesu": "pas du json"},  # preferences: a JSON object
+        {"pref:p4.coursesu": "[1, 2]"},
+        ["une", "liste"],
+        {"pref:p4.coursesu": "[" * 100000 + "]" * 100000},  # too deep for json.loads
+    ],
+)
+def test_settings_section_is_validated(client, settings):
+    client.patch("/api/settings", json={"show_browser": True})
+    before = client.get("/api/backup").json()["sections"]["settings"]
+    answer = client.post("/api/restore", json={"mode": "replace", "backup": backup_with(settings)})
+    assert answer.status_code == 422 and answer.json()["code"] == "backup_invalid"
+    assert client.get("/api/backup").json()["sections"]["settings"] == before
+    assert client.get("/api/settings").json()["show_browser"] is True
+
+
+def test_settings_of_the_pc_stay_out_of_the_backup(client):
+    client.patch("/api/security", json={"allow_lan": False})
+    client.patch("/api/updates", json={"enabled": False})
+    saved = client.get("/api/backup").json()["sections"]["settings"]
+    assert "pref:p7.security" not in saved and "pref:p7.updates" not in saved
+
+
+@pytest.mark.parametrize("mode", ["replace", "merge"])
+def test_restore_never_changes_the_settings_of_the_pc(client, mode):
+    # A phone restores a file that disables its access and announces a fake version
+    forged = backup_with(
+        {
+            "pref:p7.security": json.dumps({"allow_lan": False}),
+            "pref:p7.updates": json.dumps({"latest": "99.0.0", "url": "https://evil.example/", "checked_at": 1}),
+        }
+    )
+    cookie = f"{security.ACCESS_COOKIE}={security.access_token(security.access_secret())}"
+    headers = {"Cookie": cookie, "X-PrixMalin": "1"}
+    with TestClient(main.app, client=("192.168.1.20", 5000), base_url=PC_ADDRESS, headers=headers) as phone:
+        assert phone.post("/api/restore", json={"mode": mode, "backup": forged}).status_code == 200
+        assert phone.get("/api/settings").status_code == 200  # still allowed
+    assert client.get("/api/security").json()["allow_lan"] is True
+    assert client.get("/api/updates").json()["latest"] is None
+    # The PC keeps its own values after a « replace » too
+    client.patch("/api/security", json={"allow_lan": False})
+    client.post("/api/restore", json={"mode": "replace", "backup": backup_with({})})
+    assert client.get("/api/security").json()["allow_lan"] is False
