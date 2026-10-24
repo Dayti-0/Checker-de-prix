@@ -101,6 +101,33 @@ def test_lancer_bat_steps():
     assert "installer-raccourci.bat" in text and "choice /c ON" in text
 
 
+def test_lancer_bat_never_waits_unseen_in_the_shortcut_window():
+    """Review n° 2: the shortcut opens a minimized window, a question there is never seen."""
+    text = (ROOT / "lancer.bat").read_text(encoding="ascii")
+    lines = [line.strip() for line in text.splitlines()]
+    assert 'if /i "%~1"=="/raccourci" set "FROM_SHORTCUT=1"' in lines
+    shortcut = text[text.index("\n:shortcut\n") : text.index("\n:no_shortcut\n")]
+    assert shortcut.index("if defined FROM_SHORTCUT goto :start") < shortcut.index("choice ")
+    assert "PrixMalin.lnk" in shortcut  # a shortcut already on the Desktop: no question
+    assert all("/t " in line and "/d " in line for line in lines if line.startswith("choice "))
+    installer = (ROOT / "installer-raccourci.bat").read_text(encoding="ascii")
+    assert "$link.Arguments = '/raccourci'" in installer and "$link.WindowStyle = 7" in installer
+
+
+def test_lancer_bat_offers_the_next_port():
+    """Review n° 3: after a double-click the window closes, lancer.bat changes the port itself."""
+    from backend import instance
+
+    text = (ROOT / "lancer.bat").read_text(encoding="ascii")
+    lines = [line.strip() for line in text.splitlines()]
+    assert instance.EXIT_PORT_TAKEN == 3
+    assert 'if "%CODE%"=="3" goto :port_taken' in lines
+    port = text[text.index("\n:port_taken\n") : text.index("\n:port_refused\n")]
+    assert "set /a NEXT_PORT=PRIXMALIN_PORT+1" in port and 'set "PRIXMALIN_PORT=%NEXT_PORT%"' in port
+    assert '>"venv\\.prixmalin-port" echo %NEXT_PORT%' in port and "goto :start" in port
+    assert 'set /p PRIXMALIN_PORT=<"venv\\.prixmalin-port"' in text
+
+
 def test_requirements_have_segno():
     assert "segno" in (ROOT / "requirements.in").read_text(encoding="utf-8")
     assert "segno==" in (ROOT / "requirements.txt").read_text(encoding="utf-8")

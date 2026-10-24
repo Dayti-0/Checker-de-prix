@@ -13,6 +13,7 @@ Le dossier des données est `%LOCALAPPDATA%\PrixMalin` (tapez-le dans la barre d
 - [ ] **venv cassé** : renommez `venv\Scripts\python.exe` en `python.old`, relancez : « L'environnement virtuel ne marche plus : il est recree », puis tout fonctionne.
 - [ ] **Python introuvable** (facultatif, sur un PC sans Python) : message en français qui rappelle la case « Add python.exe to PATH ».
 - [ ] **Port** : `set PRIXMALIN_PORT=8010` puis `lancer.bat` dans la même invite : la page s'ouvre sur `http://localhost:8010`.
+- [ ] **Port pris, par double-clic** : occupez le port 8000 (`python -m http.server 8000` dans une autre invite), puis double-cliquez sur `lancer.bat` : « Le port 8000 est déjà utilisé par un autre programme », puis « Lancer PrixMalin sur le port 8001 ? (O/N, oui dans 20 s) » ; sans rien toucher, PrixMalin démarre sur 8001 au bout de 20 s. Fermez-le et relancez : il démarre directement sur 8001 (retenu dans `venv\.prixmalin-port`). Répondre « N » : message, puis la fenêtre attend une touche.
 
 ## Une seule instance
 
@@ -21,8 +22,11 @@ Le dossier des données est `%LOCALAPPDATA%\PrixMalin` (tapez-le dans la barre d
 
 ## Raccourci
 
-- [ ] Après « O » : icône **PrixMalin** sur le Bureau et dans le menu Démarrer (icône PrixMalin si `frontend\icons\prixmalin.ico` existe, sinon celle de Windows). Le raccourci lance PrixMalin fenêtre réduite et ouvre la page.
+- [ ] Après « O » : icône **PrixMalin** sur le Bureau et dans le menu Démarrer (icône PrixMalin si `frontend\icons\prixmalin.ico` existe, sinon celle de Windows). Le raccourci lance PrixMalin fenêtre réduite et ouvre la page. Propriétés du raccourci : cible `…\lancer.bat /raccourci`.
+- [ ] Sans réponse pendant 30 s, la question du raccourci répond « N » toute seule et PrixMalin démarre.
 - [ ] `installer-raccourci.bat` lancé à la main recrée les raccourcis (chemin avec espaces et accents compris).
+- [ ] **Raccourci après un venv recréé** : supprimez le dossier `venv`, puis lancez PrixMalin **par le raccourci** : tout se réinstalle dans la fenêtre réduite puis la page s'ouvre, **sans** question du raccourci. Double-clic sur `lancer.bat` ensuite : pas de question non plus (le raccourci existe déjà sur le Bureau).
+- [ ] `installer-raccourci.bat` lancé **avant** le premier `lancer.bat`, puis premier lancement par le raccourci : aucune question, la page s'ouvre.
 
 ## Données et sauvegarde
 

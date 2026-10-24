@@ -3,8 +3,8 @@
 - ``ensure_single_instance()``: before anything else, ``GET 127.0.0.1:PORT/api/version``
   (1 s). PrixMalin answers: its page is opened (``PRIXMALIN_OPEN_BROWSER=1``,
   set by lancer.bat), « PrixMalin est déjà ouvert » and exit 0. Another
-  program uses the port: a French message that proposes ``PRIXMALIN_PORT``,
-  exit 1. Then ``lock_data_dir()`` takes ``data/prixmalin.lock`` (msvcrt or
+  program uses the port: a French message, exit 3 (``EXIT_PORT_TAKEN``: lancer.bat
+  then offers the next port). Then ``lock_data_dir()`` takes ``data/prixmalin.lock`` (msvcrt or
   fcntl) before the browser can start: two PrixMalin on two ports never
   share a browser profile.
 - ``lan_ip()``: address of the PC on the Wi-Fi (UDP socket « connected » to an
@@ -82,14 +82,20 @@ def can_bind(host: str, port: int) -> bool:
     return True
 
 
-def port_taken_message(port: int) -> str:
-    return (
-        f"\n  Le port {port} est déjà utilisé par un autre programme.\n"
-        "  Fermez ce programme, ou choisissez un autre port pour PrixMalin,\n"
-        "  dans cette fenêtre noire :\n"
-        f"      set PRIXMALIN_PORT={port + 1}\n"
-        "      lancer.bat\n"
+# Exit code of run() when the port is used by another program: lancer.bat then
+# offers the next port (any other code: « PrixMalin s'est arrete sur une erreur »)
+EXIT_PORT_TAKEN = 3
+
+
+def port_taken_message(port: int, from_launcher: bool = False) -> str:
+    """French message (pure): lancer.bat offers the next port itself, otherwise PRIXMALIN_PORT."""
+    advice = (
+        "  Fermez ce programme, ou acceptez le port suivant que lancer.bat va proposer."
+        if from_launcher
+        else "  Fermez ce programme, ou lancez PrixMalin sur un autre port\n"
+        f"  (variable PRIXMALIN_PORT, par exemple {port + 1})."
     )
+    return f"\n  Le port {port} est déjà utilisé par un autre programme.\n{advice}\n"
 
 
 def local_url(port: int) -> str:
@@ -114,15 +120,15 @@ def ensure_single_instance(port: int | None = None) -> None:
             open_page(url)
         raise SystemExit(0)
     if state == "other":
-        print(port_taken_message(port), file=sys.stderr, flush=True)
-        raise SystemExit(1)
+        print(port_taken_message(port, config.OPEN_BROWSER), file=sys.stderr, flush=True)
+        raise SystemExit(EXIT_PORT_TAKEN)
 
 
 def check_port(host: str, port: int) -> None:
-    """The port is free on the address PrixMalin listens on (exit 1 with a French message)."""
+    """The port is free on the address PrixMalin listens on (exit 3 with a French message)."""
     if not can_bind(host, port):
-        print(port_taken_message(port), file=sys.stderr, flush=True)
-        raise SystemExit(1)
+        print(port_taken_message(port, config.OPEN_BROWSER), file=sys.stderr, flush=True)
+        raise SystemExit(EXIT_PORT_TAKEN)
 
 
 def _try_lock(path: Path):

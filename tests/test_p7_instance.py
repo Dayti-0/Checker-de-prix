@@ -108,9 +108,17 @@ def test_port_taken_by_another_program(listening, monkeypatch, no_side_effects, 
     monkeypatch.setattr(config, "PORT", port)
     with pytest.raises(SystemExit) as stop:
         main.run()
-    assert stop.value.code == 1 and calls == [] and opened == []
+    assert stop.value.code == instance.EXIT_PORT_TAKEN == 3 and calls == [] and opened == []
     err = capsys.readouterr().err
-    assert f"Le port {port} est déjà utilisé" in err and f"set PRIXMALIN_PORT={port + 1}" in err
+    assert f"Le port {port} est déjà utilisé" in err and f"PRIXMALIN_PORT, par exemple {port + 1}" in err
+    assert "fenêtre noire" not in err
+
+
+def test_port_taken_message_from_lancer_bat():
+    """After a double-click, the window closes: lancer.bat offers the next port itself (review n° 3)."""
+    text = instance.port_taken_message(8000, from_launcher=True)
+    assert "Le port 8000 est déjà utilisé" in text and "lancer.bat va proposer" in text
+    assert "set PRIXMALIN_PORT" not in text and "fenêtre noire" not in text
 
 
 def test_check_port(capsys):
@@ -121,7 +129,7 @@ def test_check_port(capsys):
         assert not instance.can_bind("127.0.0.1", port)
         with pytest.raises(SystemExit) as stop:
             instance.check_port("127.0.0.1", port)
-        assert stop.value.code == 1
+        assert stop.value.code == instance.EXIT_PORT_TAKEN
     assert instance.can_bind("127.0.0.1", free_port())
 
 
