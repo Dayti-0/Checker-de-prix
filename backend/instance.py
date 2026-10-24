@@ -214,14 +214,23 @@ def usable_lan_ip(address: str | None) -> bool:
     return ip.is_private and not (ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip in CGNAT)
 
 
+LAN_PREFIXES = ("192.168.", "10.", "172.")
+
+
+def rank_lan_ips(addresses: Iterable[str]) -> list[str]:
+    """Usable addresses, best first: 192.168.x.x (the Wi-Fi of a box), then 10.x.x.x
+    (often a VPN), then 172.16-31.x.x (often WSL or Hyper-V); same kind: given order."""
+
+    def kind(address: str) -> int:
+        return next((i for i, prefix in enumerate(LAN_PREFIXES) if address.startswith(prefix)), len(LAN_PREFIXES))
+
+    return sorted((a for a in dict.fromkeys(addresses) if usable_lan_ip(a)), key=kind)
+
+
 def pick_lan_ip(addresses: Iterable[str]) -> str | None:
-    """The best address for the phone: 192.168.x.x, then 10.x.x.x, then 172.16-31.x.x."""
-    usable = [a for a in dict.fromkeys(addresses) if usable_lan_ip(a)]
-    for prefix in ("192.168.", "10.", "172."):
-        for address in usable:
-            if address.startswith(prefix):
-                return address
-    return usable[0] if usable else None
+    """The best address for the phone (see rank_lan_ips)."""
+    ranked = rank_lan_ips(addresses)
+    return ranked[0] if ranked else None
 
 
 def _udp_probe() -> str | None:
@@ -241,14 +250,25 @@ def _host_addresses() -> list[str]:
         return []
 
 
+def lan_ips(
+    udp_probe: Callable[[], str | None] = _udp_probe, host_addresses: Callable[[], list[str]] = _host_addresses
+) -> list[str]:
+    """Addresses of the PC on its networks, best first.
+
+    The address of the default route (the UDP probe) goes first among those of
+    its kind: with a VPN that takes the default route, the Wi-Fi of the box
+    (192.168.x.x) still wins over the VPN (10.x.x.x).
+    """
+    first = udp_probe()
+    return rank_lan_ips([*([first] if first else []), *host_addresses()])
+
+
 def lan_ip(
     udp_probe: Callable[[], str | None] = _udp_probe, host_addresses: Callable[[], list[str]] = _host_addresses
 ) -> str | None:
     """Address of the PC on the Wi-Fi or the cable, or None (no network)."""
-    first = udp_probe()
-    if usable_lan_ip(first):
-        return first
-    return pick_lan_ip(host_addresses())
+    ranked = lan_ips(udp_probe, host_addresses)
+    return ranked[0] if ranked else None
 
 
 def phone_url(ip: str | None, port: int, scheme: str | None = None) -> str | None:

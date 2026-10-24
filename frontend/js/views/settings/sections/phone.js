@@ -40,6 +40,7 @@ function view(info) {
                 </ol>
             </div>
         </div>
+        ${info.others && info.others.length > 0 && html`<p class="muted small sys-path" data-testid="phone-others">Autres adresses de ce PC, si celle-ci ne marche pas : ${info.others.join(" · ")}</p>`}
         <p class="muted small">La page ne s'ouvre pas sur le téléphone ? Sur le PC, dans le pare-feu Windows, autorisez Python sur les réseaux privés, et réglez le Wi-Fi en réseau « privé » (Paramètres › Réseau et Internet).</p>
         ${guide}`;
 }

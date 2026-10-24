@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 @pytest.fixture
 def pc(monkeypatch):
-    monkeypatch.setattr(instance, "lan_ip", lambda: "192.168.1.10")
+    monkeypatch.setattr(instance, "lan_ips", lambda: ["192.168.1.10"])
     monkeypatch.setattr(security, "LISTEN_HOST", "0.0.0.0")  # noqa: S104
     with TestClient(main.app, client=("127.0.0.1", 5000), base_url="http://localhost:8123") as client:
         yield client
@@ -20,7 +20,14 @@ def pc(monkeypatch):
 
 def test_phone_address_uses_the_port_of_the_page(pc):
     info = pc.get("/api/system/phone").json()
-    assert info == {"url": "http://192.168.1.10:8123", "lan_active": True, "allow_lan": True, "qr": True, "local": True}
+    assert info == {
+        "url": "http://192.168.1.10:8123",
+        "others": [],
+        "lan_active": True,
+        "allow_lan": True,
+        "qr": True,
+        "local": True,
+    }
 
 
 def test_qr_code_of_the_address(pc):
@@ -32,7 +39,7 @@ def test_qr_code_of_the_address(pc):
 
 
 def test_no_address_without_network(pc, monkeypatch):
-    monkeypatch.setattr(instance, "lan_ip", lambda: None)
+    monkeypatch.setattr(instance, "lan_ips", lambda: [])
     info = pc.get("/api/system/phone").json()
     assert info["url"] is None and info["qr"] is False
     answer = pc.get("/api/system/phone-qr.svg")
@@ -98,3 +105,25 @@ def test_requirements_have_segno():
     assert "segno" in (ROOT / "requirements.in").read_text(encoding="utf-8")
     assert "segno==" in (ROOT / "requirements.txt").read_text(encoding="utf-8")
     assert config.PORT > 0
+
+
+# --- review: a VPN does not hide the address of the Wi-Fi -------------------------------
+
+
+def test_the_wifi_address_wins_over_a_vpn():
+    assert instance.lan_ip(lambda: "10.5.0.2", lambda: ["10.5.0.2", "192.168.1.10"]) == "192.168.1.10"
+    assert instance.lan_ips(lambda: "10.5.0.2", lambda: ["10.5.0.2", "192.168.1.10", "127.0.0.1"]) == [
+        "192.168.1.10",
+        "10.5.0.2",
+    ]
+    # Same kind of address: the one of the route (the probe) first
+    assert instance.lan_ips(lambda: "192.168.1.10", lambda: ["192.168.56.1", "192.168.1.10"])[0] == "192.168.1.10"
+
+
+def test_other_addresses_are_listed(monkeypatch):
+    monkeypatch.setattr(instance, "lan_ips", lambda: ["192.168.1.10", "10.5.0.2"])
+    monkeypatch.setattr(security, "LISTEN_HOST", "0.0.0.0")  # noqa: S104
+    with TestClient(main.app, client=("127.0.0.1", 5000), base_url="http://localhost:8000") as pc:
+        info = pc.get("/api/system/phone").json()
+    assert info["url"] == "http://192.168.1.10:8000"
+    assert info["others"] == ["http://10.5.0.2:8000"]

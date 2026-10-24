@@ -23,7 +23,7 @@ def page(request):
 @pytest.fixture(autouse=True)
 def network(monkeypatch):
     """A fixed address on the Wi-Fi, a fake GitHub (never reached by the tests)."""
-    monkeypatch.setattr(instance, "lan_ip", lambda: "192.168.1.10")
+    monkeypatch.setattr(instance, "lan_ips", lambda: ["192.168.1.10"])
 
     async def latest():
         return "9.0.0", "https://github.com/Dayti-0/Checker-de-prix/releases/tag/v9.0.0"
@@ -89,6 +89,19 @@ def test_phone_section(page):
     guide = phone.get_by_role("link", name=re.compile("^Aide : téléphone, HTTPS"))
     expect(guide).to_have_attribute("href", re.compile(r"docs/acces-telephone\.md$"))
     expect(guide).to_have_attribute("target", "_blank")
+
+
+def test_phone_section_lists_the_other_addresses(desktop, monkeypatch):
+    """A VPN on the PC: the address of the Wi-Fi first, the others below."""
+    monkeypatch.setattr(instance, "lan_ips", lambda: ["192.168.1.10", "10.5.0.2"])
+    page = desktop
+    page.goto(f"{page.base}/#/reglages")
+    port = page.base.rsplit(":", 1)[1]
+    phone = section(page, "phone")
+    expect(phone.get_by_test_id("phone-url")).to_have_text(f"http://192.168.1.10:{port}")
+    expect(phone.get_by_test_id("phone-others")).to_have_text(
+        f"Autres adresses de ce PC, si celle-ci ne marche pas : http://10.5.0.2:{port}"
+    )
 
 
 def test_data_section_backup_and_restore(desktop, tmp_path):

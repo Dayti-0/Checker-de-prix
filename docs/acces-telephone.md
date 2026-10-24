@@ -31,6 +31,7 @@ Réglages › Sécurité › décochez **Autoriser l'accès depuis le téléphon
 | « Code incorrect » | Retapez le code affiché **en ce moment** dans Réglages › Sécurité (il a peut-être été changé). |
 | « Trop d'essais » | Attendez une minute. |
 | « L'accès depuis le téléphone est désactivé » | Réglages › Sécurité sur le PC, cochez « Autoriser l'accès depuis le téléphone ». |
+| Un VPN (NordVPN, Proton VPN…) est actif sur le PC | PrixMalin affiche l'adresse du Wi-Fi (`192.168.…`) en premier et les autres adresses du PC dessous, dans Réglages › Sur le téléphone. Si la page ne s'ouvre pas, autorisez le « réseau local » dans les réglages du VPN, ou coupez-le. |
 | L'adresse a changé d'un jour à l'autre | La box donne parfois une autre adresse au PC : rescannez le QR code. Pour une adresse fixe, réservez-la dans les réglages de la box (« bail DHCP statique »). |
 
 ### Pare-feu Windows et réseau « privé »

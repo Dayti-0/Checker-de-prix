@@ -65,6 +65,7 @@ class UpdateSettings(BaseModel):
 
 class PhoneInfo(BaseModel):
     url: str | None  # http://192.168.1.10:8000, None without network
+    others: list[str] = []  # other addresses of this PC (VPN, second network card)
     lan_active: bool  # this run of PrixMalin listens on the network
     allow_lan: bool  # « Autoriser l'accès depuis le téléphone »
     qr: bool  # GET /api/system/phone-qr.svg gives the QR code
@@ -196,18 +197,27 @@ def request_port(request: Request) -> int:
     return request.url.port or config.PORT
 
 
-async def phone_url(request: Request) -> str | None:
+async def phone_urls(request: Request) -> list[str]:
+    """Addresses to open on the phone, best first (none when the network access is off)."""
     if not security.lan_active() or not await security.lan_allowed():
-        return None
+        return []
     scheme = "https" if request.url.scheme == "https" or config.scheme() == "https" else "http"
-    return instance.phone_url(await asyncio.to_thread(instance.lan_ip), request_port(request), scheme)
+    port = request_port(request)
+    return [instance.phone_url(ip, port, scheme) for ip in await asyncio.to_thread(instance.lan_ips)]
+
+
+async def phone_url(request: Request) -> str | None:
+    urls = await phone_urls(request)
+    return urls[0] if urls else None
 
 
 @router.get("/system/phone", response_model=PhoneInfo)
 async def api_phone(request: Request):
-    url = await phone_url(request)
+    urls = await phone_urls(request)
+    url = urls[0] if urls else None
     return PhoneInfo(
         url=url,
+        others=urls[1:],
         lan_active=security.lan_active(),
         allow_lan=await security.lan_allowed(),
         qr=bool(url) and instance.qr_available(),
