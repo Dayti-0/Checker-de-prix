@@ -54,6 +54,8 @@ pyee==13.0.1
     # via
     #   patchright
     #   playwright
+segno==1.6.6
+    # via -r requirements.in
 starlette==1.7.0
     # via fastapi
 typing-extensions==4.16.0

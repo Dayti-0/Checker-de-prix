@@ -396,7 +396,14 @@ def test_browser_status_says_where_the_page_is_shown(monkeypatch):
     monkeypatch.setattr(main.browser, "open_setup", open_setup)
     monkeypatch.setattr(main.browser, "setup_mode", False)
     monkeypatch.setattr(SCRAPERS["coursesu"], "site_opened_at", None)
-    with TestClient(main.app, client=("192.168.1.20", 50000)) as phone:
+    # P7 (B80): a phone needs the access cookie, an address of the PC and X-PrixMalin
+    from backend import security
+
+    cookie = f"{security.ACCESS_COOKIE}={security.access_token(security.access_secret())}"
+    phone_headers = {"Cookie": cookie, "X-PrixMalin": "1"}
+    with TestClient(
+        main.app, client=("192.168.1.20", 50000), base_url="http://192.168.1.10:8000", headers=phone_headers
+    ) as phone:
         status = phone.get("/api/browser").json()
         assert status["is_local"] is False
         opened = phone.post("/api/browser/setup", json={"store": "coursesu"}).json()

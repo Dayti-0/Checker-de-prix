@@ -264,6 +264,10 @@ def test_home_cards_and_settings_sections(desktop):
         "location",
         "stores",
         "advanced",
+        "security",  # P7
+        "data",  # P7
+        "phone",  # P7
+        "about",  # P7
     ]
     contract = page.evaluate(
         """async () => {
@@ -298,8 +302,8 @@ def test_features_are_started(desktop):
         "offlineBanner": False,
         "setupBanner": True,
         "bell": False,
-        "accessCode": False,
-        "updateBanner": False,
+        "accessCode": True,  # P7
+        "updateBanner": True,  # P7
     }
     for selector in (
         "#view",

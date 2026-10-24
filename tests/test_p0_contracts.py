@@ -303,7 +303,13 @@ def test_calls_to_a_retailer_are_spaced(tmp_path, monkeypatch):
 def test_browser_status_says_if_the_request_is_local():
     with TestClient(main.app, client=("127.0.0.1", 50000)) as local:
         assert local.get("/api/browser").json()["is_local"] is True
-    with TestClient(main.app, client=("192.168.1.20", 50000)) as phone:
+    # P7 (B80): a phone needs the access cookie and an address of the PC
+    from backend import security
+
+    cookie = f"{security.ACCESS_COOKIE}={security.access_token(security.access_secret())}"
+    with TestClient(
+        main.app, client=("192.168.1.20", 50000), base_url="http://192.168.1.10:8000", headers={"Cookie": cookie}
+    ) as phone:
         assert phone.get("/api/browser").json()["is_local"] is False
 
 
@@ -347,6 +353,7 @@ def test_database_reexports_the_repos():
 def test_entry_points_of_p7():
     from backend import instance, logging_setup, security
 
-    assert instance.ensure_single_instance() is None
-    assert logging_setup.configure() is None
+    # Filled by P7: one instance (port, lock), log file, access guard
+    assert callable(instance.ensure_single_instance)
+    assert callable(logging_setup.configure)
     assert callable(security.install)
