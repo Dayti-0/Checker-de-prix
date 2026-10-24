@@ -11,7 +11,7 @@ Comparez en un clic les prix d'un produit chez **Aldi, Lidl, Carrefour, Intermar
 Les lancements suivants sont rapides : rien n'est retéléchargé tant que PrixMalin n'a pas été mis à jour. Relancer `lancer.bat` alors que PrixMalin est déjà ouvert ouvre simplement sa page. Pour arrêter PrixMalin, fermez sa fenêtre noire.
 
 - **Raccourci** : `installer-raccourci.bat` crée (ou recrée) l'icône PrixMalin sur le Bureau et dans le menu Démarrer.
-- **Autre port** : si le port 8000 est pris, dans une invite de commandes du dossier : `set PRIXMALIN_PORT=8001` puis `lancer.bat`.
+- **Autre port** : si le port 8000 est pris par un autre programme, `lancer.bat` propose le port suivant (« O », ou rien pendant 20 s) et le retient. Pour en imposer un : dans une invite de commandes du dossier, `set PRIXMALIN_PORT=8010` puis `lancer.bat`.
 
 Sur Mac/Linux :
 
@@ -61,7 +61,7 @@ Aldi et Lidl ont des prix nationaux : rien à régler. Carrefour affiche ses pri
 | « Vérification requise » | Bouton **Ouvrir le site** : une fenêtre du navigateur PrixMalin s'ouvre, validez la vérification, puis cliquez sur **J'ai terminé** en haut de PrixMalin. |
 | « Magasin à choisir » | Choisissez votre magasin dans les réglages. |
 | « Aucun produit » alors que le site en affiche | Le site a peut-être changé : la page **État des enseignes** (Réglages › Navigateur › Dépannage) permet d'enregistrer un rapport de diagnostic. |
-| « Le port 8000 est déjà utilisé » | Un autre programme utilise le port : `set PRIXMALIN_PORT=8001` puis `lancer.bat`. |
+| « Le port 8000 est déjà utilisé » | Un autre programme utilise le port : acceptez le port suivant proposé par `lancer.bat`. |
 | « Python 3.11 ou plus est introuvable » | Réinstallez Python en cochant « Add python.exe to PATH ». |
 | Le téléphone n'ouvre pas la page | Voir [docs/acces-telephone.md](docs/acces-telephone.md). |
 
